@@ -15,7 +15,9 @@ cd "$RELATIVE_PATH"
 
 if ! [ -f libavif/ext/aom/build.libavif/libaom.a ]; then
   echo 'We are going to build libaom.a'
-  cd libavif/ext/aom/build.libavif
+  cd libavif/ext/aom
+  mkdir -p build.libavif
+  cd build.libavif
 
   cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTDATA=0 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 -DCONFIG_PIC=1 ..
   make
@@ -30,7 +32,9 @@ fi
 
 if ! [ -f libavif/build/libavif.a ]; then
   echo 'We are going to build libavif.a'
-  cd libavif/build
+  cd libavif
+  mkdir -p build
+  cd build
 
   CFLAGS="-fPIC" cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON ..
   make
