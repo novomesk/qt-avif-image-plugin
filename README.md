@@ -16,7 +16,7 @@ Download [qt_avif_image_plugin_2020-03-20.zip](qt_avif_image_plugin_2020-03-20.z
 
 `unzip qt_avif_image_plugin_2020-03-20.zip`
 
-**Recommended**: read README.txt
+**Recommended**: read [README.txt](README.txt)
 
 **SHA-256** of qt_avif_image_plugin_2020-03-20.zip: 62e138b0e3fa5b96762c772083a57c53814ddb91fe3848991685c898ab6c3614  
 **Antivirus scan**: [VirusTotal](https://www.virustotal.com/gui/file/62e138b0e3fa5b96762c772083a57c53814ddb91fe3848991685c898ab6c3614/detection)
