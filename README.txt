@@ -54,3 +54,22 @@ Add ;image/avif;image/avif-sequence to the MimeType= list.
 How to test:
 Associate image/avif (*.avif) with gwenview and it should be able to display test images:
 https://github.com/AOMediaCodec/av1-avif/tree/master/testFiles
+
+Things good to know:
+
+imagethumbnail.desktop belongs to kde-apps/kio-extras (in Gentoo Linux).
+When the kio-extras is updated, configuration in imagethumbnail.desktop is overwritten.
+If you want to see thumbnais in dolphin again, will need to add
+;image/avif;image/avif-sequence
+to the MimeType= list after kio-extras update again.
+
+Before you update the plug-in, save your work!!!
+If you overwrite the libqavif.so in running KDE environment, running Qt/KDE applications may crash.
+Crash may not occur immediately; it may be after few minutes.
+It is safer to delete the old libqavif.so first before installing the new one,
+or to perform update when user’s Qt applications are not running.
+
+If you are building libavif by yourself with libaom support, make sure that the libaom is recently fresh.
+You need at least libaom v1.0.0-errata1-avif .
+Do not use the old libaom v1.0.0 which is present in some distributions.
+
