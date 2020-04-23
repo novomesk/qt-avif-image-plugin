@@ -98,3 +98,7 @@ AVIF thumbnails in dolphin:
 ### qView
 
 ![AVIF image in qView](img/app_qview.png)
+
+### LXImage-Qt
+
+![AVIF image in LXImage-Qt](img/app_lximage-qt.png)
