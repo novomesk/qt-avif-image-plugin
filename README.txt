@@ -21,7 +21,7 @@ Plug-in supports Color spaces and loading/saving of ICC profiles when built with
 
 How to build the plug-in (two possibilities):
 
-1) Dynamic linking with libavif (ONLY for systems with >=libavif 0.6.0 installed!!!)
+1) Dynamic linking with libavif (ONLY for systems with >=libavif 0.7.0 installed!!!)
 Run:
 ./build_libqavif_dynamic.sh
 
