@@ -24,6 +24,12 @@ extern "C" {
 #define GET_MV_RAWPEL(x) (((x) + 3 + ((x) >= 0)) >> 3)
 #define GET_MV_SUBPEL(x) ((x)*8)
 
+#define MARK_MV_INVALID(mv)                \
+  do {                                     \
+    ((int_mv *)(mv))->as_int = INVALID_MV; \
+  } while (0);
+#define CHECK_MV_EQUAL(x, y) (((x).row == (y).row) && ((x).col == (y).col))
+
 // The motion vector in units of full pixel
 typedef struct fullpel_mv {
   int16_t row;
@@ -268,7 +274,8 @@ static INLINE int_mv gm_get_motion_vector(const WarpedMotionParams *gm,
     // All global motion vectors are stored with WARPEDMODEL_PREC_BITS (16)
     // bits of fractional precision. The offset for a translation is stored in
     // entries 0 and 1. For translations, all but the top three (two if
-    // cm->allow_high_precision_mv is false) fractional bits are always zero.
+    // cm->features.allow_high_precision_mv is false) fractional bits are always
+    // zero.
     //
     // After the right shifts, there are 3 fractional bits of precision. If
     // allow_hp is false, the bottom bit is always zero (so we don't need a

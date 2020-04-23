@@ -17,8 +17,8 @@
 
 #include "aom_ports/mem.h"
 
+#include "av1/common/av1_common_int.h"
 #include "av1/common/blockd.h"
-#include "av1/common/onyxc_int.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,8 +47,12 @@ extern "C" {
 #define MIN_GF_INTERVAL 4
 #define MAX_GF_INTERVAL 32
 #define FIXED_GF_INTERVAL 8  // Used in some testing modes only
+#define MAX_GF_LENGTH_LAP 16
 
 #define MAX_NUM_GF_INTERVALS 15
+
+#define MAX_ARF_LAYERS 6
+// #define STRICT_RC
 
 typedef struct {
   int resize_width;
@@ -119,6 +123,9 @@ typedef struct {
   int is_src_frame_alt_ref;
   int sframe_due;
 
+  int high_source_sad;
+  uint64_t avg_source_sad;
+
   int avg_frame_bandwidth;  // Average frame size target for clip
   int min_frame_bandwidth;  // Minimum allocation used for any frame
   int max_frame_bandwidth;  // Maximum burst rate allowed for a frame.
@@ -171,6 +178,7 @@ typedef struct {
   // Q index used for ALT frame
   int arf_q;
   int active_worst_quality;
+  int active_best_quality[MAX_ARF_LAYERS + 1];
   int base_layer_qp;
 
   // Total number of stats used only for kf_boost calculation.
@@ -179,6 +187,8 @@ typedef struct {
   int num_stats_used_for_gfu_boost;
   // Total number of stats required by gfu_boost calculation.
   int num_stats_required_for_gfu_boost;
+  int next_is_fwd_key;
+  int enable_scenecut_detection;
 } RATE_CONTROL;
 
 struct AV1_COMP;
@@ -309,6 +319,8 @@ int av1_calc_iframe_target_size_one_pass_cbr(const struct AV1_COMP *cpi);
 void av1_get_one_pass_rt_params(struct AV1_COMP *cpi,
                                 struct EncodeFrameParams *const frame_params,
                                 unsigned int frame_flags);
+
+int av1_encodedframe_overshoot(struct AV1_COMP *cpi, int *q);
 
 #ifdef __cplusplus
 }  // extern "C"

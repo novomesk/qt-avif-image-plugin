@@ -47,7 +47,6 @@
 #include "av1/common/resize.h"
 #include "av1/common/tile_common.h"
 
-#include "av1/encoder/av1_multi_thread.h"
 #include "av1/encoder/aq_complexity.h"
 #include "av1/encoder/aq_cyclicrefresh.h"
 #include "av1/encoder/aq_variance.h"
@@ -399,17 +398,18 @@ static INLINE void Scale2Ratio(AOM_SCALING mode, int *hr, int *hs) {
 // Mark all inactive blocks as active. Other segmentation features may be set
 // so memset cannot be used, instead only inactive blocks should be reset.
 static void suppress_active_map(AV1_COMP *cpi) {
-  unsigned char *const seg_map = cpi->segmentation_map;
+  unsigned char *const seg_map = cpi->enc_seg.map;
   int i;
   if (cpi->active_map.enabled || cpi->active_map.update)
-    for (i = 0; i < cpi->common.mi_rows * cpi->common.mi_cols; ++i)
+    for (i = 0;
+         i < cpi->common.mi_params.mi_rows * cpi->common.mi_params.mi_cols; ++i)
       if (seg_map[i] == AM_SEGMENT_ID_INACTIVE)
         seg_map[i] = AM_SEGMENT_ID_ACTIVE;
 }
 
 static void apply_active_map(AV1_COMP *cpi) {
   struct segmentation *const seg = &cpi->common.seg;
-  unsigned char *const seg_map = cpi->segmentation_map;
+  unsigned char *const seg_map = cpi->enc_seg.map;
   const unsigned char *const active_map = cpi->active_map.map;
   int i;
 
@@ -422,7 +422,9 @@ static void apply_active_map(AV1_COMP *cpi) {
 
   if (cpi->active_map.update) {
     if (cpi->active_map.enabled) {
-      for (i = 0; i < cpi->common.mi_rows * cpi->common.mi_cols; ++i)
+      for (i = 0;
+           i < cpi->common.mi_params.mi_rows * cpi->common.mi_params.mi_cols;
+           ++i)
         if (seg_map[i] == AM_SEGMENT_ID_ACTIVE) seg_map[i] = active_map[i];
       av1_enable_segmentation(seg);
       av1_enable_segfeature(seg, AM_SEGMENT_ID_INACTIVE, SEG_LVL_SKIP);
@@ -456,10 +458,11 @@ static void apply_active_map(AV1_COMP *cpi) {
 
 int av1_set_active_map(AV1_COMP *cpi, unsigned char *new_map_16x16, int rows,
                        int cols) {
-  if (rows == cpi->common.mb_rows && cols == cpi->common.mb_cols) {
+  const CommonModeInfoParams *const mi_params = &cpi->common.mi_params;
+  if (rows == mi_params->mb_rows && cols == mi_params->mb_cols) {
     unsigned char *const active_map_8x8 = cpi->active_map.map;
-    const int mi_rows = cpi->common.mi_rows;
-    const int mi_cols = cpi->common.mi_cols;
+    const int mi_rows = mi_params->mi_rows;
+    const int mi_cols = mi_params->mi_cols;
     const int row_scale = mi_size_high[BLOCK_16X16] == 2 ? 1 : 2;
     const int col_scale = mi_size_wide[BLOCK_16X16] == 2 ? 1 : 2;
     cpi->active_map.update = 1;
@@ -485,11 +488,12 @@ int av1_set_active_map(AV1_COMP *cpi, unsigned char *new_map_16x16, int rows,
 
 int av1_get_active_map(AV1_COMP *cpi, unsigned char *new_map_16x16, int rows,
                        int cols) {
-  if (rows == cpi->common.mb_rows && cols == cpi->common.mb_cols &&
+  const CommonModeInfoParams *const mi_params = &cpi->common.mi_params;
+  if (rows == mi_params->mb_rows && cols == mi_params->mb_cols &&
       new_map_16x16) {
-    unsigned char *const seg_map_8x8 = cpi->segmentation_map;
-    const int mi_rows = cpi->common.mi_rows;
-    const int mi_cols = cpi->common.mi_cols;
+    unsigned char *const seg_map_8x8 = cpi->enc_seg.map;
+    const int mi_rows = mi_params->mi_rows;
+    const int mi_cols = mi_params->mi_cols;
     const int row_scale = mi_size_high[BLOCK_16X16] == 2 ? 1 : 2;
     const int col_scale = mi_size_wide[BLOCK_16X16] == 2 ? 1 : 2;
 
@@ -581,13 +585,19 @@ static BLOCK_SIZE select_sb_size(const AV1_COMP *const cpi) {
 
   assert(cpi->oxcf.superblock_size == AOM_SUPERBLOCK_SIZE_DYNAMIC);
 
+  if (cpi->svc.number_spatial_layers > 1) {
+    // Use the configured size (top resolution) for spatial layers.
+    return AOMMIN(cpi->oxcf.width, cpi->oxcf.height) > 480 ? BLOCK_128X128
+                                                           : BLOCK_64X64;
+  }
+
   // TODO(any): Possibly could improve this with a heuristic.
   // When superres / resize is on, 'cm->width / height' can change between
   // calls, so we don't apply this heuristic there.
   // Things break if superblock size changes between the first pass and second
   // pass encoding, which is why this heuristic is not configured as a
   // speed-feature.
-  if (cpi->oxcf.superres_mode == SUPERRES_NONE &&
+  if (cpi->oxcf.superres_mode == AOM_SUPERRES_NONE &&
       cpi->oxcf.resize_mode == RESIZE_NONE && cpi->oxcf.speed >= 1) {
     return AOMMIN(cm->width, cm->height) > 480 ? BLOCK_128X128 : BLOCK_64X64;
   }
@@ -603,8 +613,8 @@ static void setup_frame(AV1_COMP *cpi) {
   // other inter-frames the encoder currently uses only two contexts;
   // context 1 for ALTREF frames and context 0 for the others.
 
-  if (frame_is_intra_only(cm) || cm->error_resilient_mode ||
-      cpi->ext_use_primary_ref_none) {
+  if (frame_is_intra_only(cm) || cm->features.error_resilient_mode ||
+      cpi->ext_flags.use_primary_ref_none) {
     av1_setup_past_independence(cm);
   }
 
@@ -629,7 +639,7 @@ static void setup_frame(AV1_COMP *cpi) {
   cpi->vaq_refresh = 0;
 }
 
-static void enc_set_mb_mi(AV1_COMMON *cm, int width, int height) {
+static void set_mb_mi(CommonModeInfoParams *mi_params, int width, int height) {
   // Ensure that the decoded width and height are both multiples of
   // 8 luma pixels (note: this may only be a multiple of 4 chroma pixels if
   // subsampling is used).
@@ -638,71 +648,60 @@ static void enc_set_mb_mi(AV1_COMMON *cm, int width, int height) {
   const int aligned_width = ALIGN_POWER_OF_TWO(width, 3);
   const int aligned_height = ALIGN_POWER_OF_TWO(height, 3);
 
-  cm->mi_cols = aligned_width >> MI_SIZE_LOG2;
-  cm->mi_rows = aligned_height >> MI_SIZE_LOG2;
-  cm->mi_stride = calc_mi_size(cm->mi_cols);
+  mi_params->mi_cols = aligned_width >> MI_SIZE_LOG2;
+  mi_params->mi_rows = aligned_height >> MI_SIZE_LOG2;
+  mi_params->mi_stride = calc_mi_size(mi_params->mi_cols);
 
-  cm->mb_cols = (cm->mi_cols + 2) >> 2;
-  cm->mb_rows = (cm->mi_rows + 2) >> 2;
-  cm->MBs = cm->mb_rows * cm->mb_cols;
+  mi_params->mb_cols = (mi_params->mi_cols + 2) >> 2;
+  mi_params->mb_rows = (mi_params->mi_rows + 2) >> 2;
+  mi_params->MBs = mi_params->mb_rows * mi_params->mb_cols;
 
-  const int is_4k_or_larger = AOMMIN(width, height) >= 2160;
+  const int mi_alloc_size_1d = mi_size_wide[mi_params->mi_alloc_bsize];
+  mi_params->mi_alloc_stride =
+      (mi_params->mi_stride + mi_alloc_size_1d - 1) / mi_alloc_size_1d;
 
-  cm->mi_alloc_bsize = is_4k_or_larger ? BLOCK_8X8 : BLOCK_4X4;
-  const int mi_alloc_size_1d = mi_size_wide[cm->mi_alloc_bsize];
-  cm->mi_alloc_rows = (cm->mi_rows + mi_alloc_size_1d - 1) / mi_alloc_size_1d;
-  cm->mi_alloc_cols = (cm->mi_cols + mi_alloc_size_1d - 1) / mi_alloc_size_1d;
-  cm->mi_alloc_stride =
-      (cm->mi_stride + mi_alloc_size_1d - 1) / mi_alloc_size_1d;
-
-  assert(mi_size_wide[cm->mi_alloc_bsize] == mi_size_high[cm->mi_alloc_bsize]);
+  assert(mi_size_wide[mi_params->mi_alloc_bsize] ==
+         mi_size_high[mi_params->mi_alloc_bsize]);
 
 #if CONFIG_LPF_MASK
-  av1_alloc_loop_filter_mask(cm);
+  av1_alloc_loop_filter_mask(mi_params);
 #endif
 }
 
-static void enc_setup_mi(AV1_COMMON *cm) {
-  const int mi_grid_size = cm->mi_stride * calc_mi_size(cm->mi_rows);
-  memset(cm->mi, 0, cm->mi_alloc_size * sizeof(*cm->mi));
-  memset(cm->mi_grid_base, 0, mi_grid_size * sizeof(*cm->mi_grid_base));
-  memset(cm->tx_type_map, 0, mi_grid_size * sizeof(*cm->tx_type_map));
+static void enc_set_mb_mi(CommonModeInfoParams *mi_params, int width,
+                          int height) {
+  const int is_4k_or_larger = AOMMIN(width, height) >= 2160;
+  mi_params->mi_alloc_bsize = is_4k_or_larger ? BLOCK_8X8 : BLOCK_4X4;
+
+  set_mb_mi(mi_params, width, height);
 }
 
-static int enc_alloc_mi(AV1_COMMON *cm) {
-  const int mi_grid_size = cm->mi_stride * calc_mi_size(cm->mi_rows);
-  const int alloc_size_1d = mi_size_wide[cm->mi_alloc_bsize];
-  const int alloc_mi_size =
-      cm->mi_alloc_stride * (calc_mi_size(cm->mi_rows) / alloc_size_1d);
+static void stat_stage_set_mb_mi(CommonModeInfoParams *mi_params, int width,
+                                 int height) {
+  mi_params->mi_alloc_bsize = BLOCK_16X16;
 
-  if (cm->mi_alloc_size < alloc_mi_size || cm->mi_grid_size < mi_grid_size) {
-    cm->free_mi(cm);
-
-    cm->mi = aom_calloc(alloc_mi_size, sizeof(*cm->mi));
-    if (!cm->mi) return 1;
-    cm->mi_alloc_size = alloc_mi_size;
-
-    cm->mi_grid_base =
-        (MB_MODE_INFO **)aom_calloc(mi_grid_size, sizeof(MB_MODE_INFO *));
-    if (!cm->mi_grid_base) return 1;
-    cm->mi_grid_size = mi_grid_size;
-
-    cm->tx_type_map = aom_calloc(calc_mi_size(cm->mi_rows) * cm->mi_stride,
-                                 sizeof(*cm->tx_type_map));
-    if (!cm->tx_type_map) return 1;
-  }
-
-  return 0;
+  set_mb_mi(mi_params, width, height);
 }
 
-static void enc_free_mi(AV1_COMMON *cm) {
-  aom_free(cm->mi);
-  cm->mi = NULL;
-  aom_free(cm->mi_grid_base);
-  cm->mi_grid_base = NULL;
-  cm->mi_alloc_size = 0;
-  aom_free(cm->tx_type_map);
-  cm->tx_type_map = NULL;
+static void enc_setup_mi(CommonModeInfoParams *mi_params) {
+  const int mi_grid_size =
+      mi_params->mi_stride * calc_mi_size(mi_params->mi_rows);
+  memset(mi_params->mi_alloc, 0,
+         mi_params->mi_alloc_size * sizeof(*mi_params->mi_alloc));
+  memset(mi_params->mi_grid_base, 0,
+         mi_grid_size * sizeof(*mi_params->mi_grid_base));
+  memset(mi_params->tx_type_map, 0,
+         mi_grid_size * sizeof(*mi_params->tx_type_map));
+}
+
+static void enc_free_mi(CommonModeInfoParams *mi_params) {
+  aom_free(mi_params->mi_alloc);
+  mi_params->mi_alloc = NULL;
+  aom_free(mi_params->mi_grid_base);
+  mi_params->mi_grid_base = NULL;
+  mi_params->mi_alloc_size = 0;
+  aom_free(mi_params->tx_type_map);
+  mi_params->tx_type_map = NULL;
 }
 
 void av1_initialize_enc(void) {
@@ -715,24 +714,35 @@ void av1_initialize_enc(void) {
   av1_init_wedge_masks();
 }
 
-static void dealloc_context_buffers_ext(AV1_COMP *cpi) {
-  if (cpi->mbmi_ext_frame_base) {
-    aom_free(cpi->mbmi_ext_frame_base);
-    cpi->mbmi_ext_frame_base = NULL;
+static void dealloc_context_buffers_ext(MBMIExtFrameBufferInfo *mbmi_ext_info) {
+  if (mbmi_ext_info->frame_base) {
+    aom_free(mbmi_ext_info->frame_base);
+    mbmi_ext_info->frame_base = NULL;
+    mbmi_ext_info->alloc_size = 0;
   }
 }
 
-static void alloc_context_buffers_ext(AV1_COMP *cpi) {
-  AV1_COMMON *cm = &cpi->common;
-  const int new_ext_mi_size = cm->mi_alloc_rows * cm->mi_alloc_cols;
+static void alloc_context_buffers_ext(AV1_COMMON *cm,
+                                      MBMIExtFrameBufferInfo *mbmi_ext_info) {
+  const CommonModeInfoParams *const mi_params = &cm->mi_params;
 
-  if (new_ext_mi_size > cpi->mi_ext_alloc_size) {
-    dealloc_context_buffers_ext(cpi);
+  const int mi_alloc_size_1d = mi_size_wide[mi_params->mi_alloc_bsize];
+  const int mi_alloc_rows =
+      (mi_params->mi_rows + mi_alloc_size_1d - 1) / mi_alloc_size_1d;
+  const int mi_alloc_cols =
+      (mi_params->mi_cols + mi_alloc_size_1d - 1) / mi_alloc_size_1d;
+  const int new_ext_mi_size = mi_alloc_rows * mi_alloc_cols;
+
+  if (new_ext_mi_size > mbmi_ext_info->alloc_size) {
+    dealloc_context_buffers_ext(mbmi_ext_info);
     CHECK_MEM_ERROR(
-        cm, cpi->mbmi_ext_frame_base,
-        aom_calloc(new_ext_mi_size, sizeof(*cpi->mbmi_ext_frame_base)));
-    cpi->mi_ext_alloc_size = new_ext_mi_size;
+        cm, mbmi_ext_info->frame_base,
+        aom_calloc(new_ext_mi_size, sizeof(*mbmi_ext_info->frame_base)));
+    mbmi_ext_info->alloc_size = new_ext_mi_size;
   }
+  // The stride needs to be updated regardless of whether new allocation
+  // happened or not.
+  mbmi_ext_info->stride = mi_alloc_cols;
 }
 
 static void reset_film_grain_chroma_params(aom_film_grain_t *pars) {
@@ -793,16 +803,16 @@ static void update_film_grain_parameters(struct AV1_COMP *cpi,
 
 static void dealloc_compressor_data(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
-  const int num_planes = av1_num_planes(cm);
+  TokenInfo *token_info = &cpi->token_info;
 
-  dealloc_context_buffers_ext(cpi);
+  dealloc_context_buffers_ext(&cpi->mbmi_ext_info);
 
   aom_free(cpi->tile_data);
   cpi->tile_data = NULL;
 
   // Delete sementation map
-  aom_free(cpi->segmentation_map);
-  cpi->segmentation_map = NULL;
+  aom_free(cpi->enc_seg.map);
+  cpi->enc_seg.map = NULL;
 
   av1_cyclic_refresh_free(cpi->cyclic_refresh);
   cpi->cyclic_refresh = NULL;
@@ -820,8 +830,8 @@ static void dealloc_compressor_data(AV1_COMP *cpi) {
   cpi->tpl_sb_rdmult_scaling_factors = NULL;
 
 #if CONFIG_TUNE_VMAF
-  aom_free(cpi->vmaf_rdmult_scaling_factors);
-  cpi->vmaf_rdmult_scaling_factors = NULL;
+  aom_free(cpi->vmaf_info.rdmult_scaling_factors);
+  cpi->vmaf_info.rdmult_scaling_factors = NULL;
 #endif
 
   aom_free(cpi->td.mb.above_pred_buf);
@@ -838,8 +848,8 @@ static void dealloc_compressor_data(AV1_COMP *cpi) {
 
   for (int i = 0; i < 2; i++)
     for (int j = 0; j < 2; j++) {
-      aom_free(cpi->td.mb.hash_value_buffer[i][j]);
-      cpi->td.mb.hash_value_buffer[i][j] = NULL;
+      aom_free(cpi->td.mb.intrabc_hash_info.hash_value_buffer[i][j]);
+      cpi->td.mb.intrabc_hash_info.hash_value_buffer[i][j] = NULL;
     }
   aom_free(cpi->td.mb.mask_buf);
   cpi->td.mb.mask_buf = NULL;
@@ -849,6 +859,11 @@ static void dealloc_compressor_data(AV1_COMP *cpi) {
 
   aom_free(cpi->td.mb.mbmi_ext);
   cpi->td.mb.mbmi_ext = NULL;
+
+  if (cpi->td.vt64x64) {
+    aom_free(cpi->td.vt64x64);
+    cpi->td.vt64x64 = NULL;
+  }
 
   av1_free_ref_frame_buffers(cm->buffer_pool);
   av1_free_txb_buf(cpi);
@@ -862,13 +877,10 @@ static void dealloc_compressor_data(AV1_COMP *cpi) {
   aom_free_frame_buffer(&cpi->alt_ref_buffer);
   av1_lookahead_destroy(cpi->lookahead);
 
-  aom_free(cpi->tile_tok[0][0]);
-  cpi->tile_tok[0][0] = 0;
+  free_token_info(token_info);
 
-  aom_free(cpi->tplist[0][0]);
-  cpi->tplist[0][0] = NULL;
-
-  av1_free_pc_tree(&cpi->td, num_planes);
+  av1_free_shared_coeff_buffer(&cpi->td.shared_coeff_buf);
+  av1_free_sms_tree(&cpi->td);
 
   aom_free(cpi->td.mb.palette_buffer);
   av1_release_compound_type_rd_buffers(&cpi->td.mb.comp_rd_buffer);
@@ -889,7 +901,7 @@ static void dealloc_compressor_data(AV1_COMP *cpi) {
   }
 
   for (int i = 0; i < MAX_NUM_OPERATING_POINTS; ++i) {
-    aom_free(cpi->level_info[i]);
+    aom_free(cpi->level_params.level_info[i]);
   }
 
   if (cpi->use_svc) av1_free_svc_cyclic_refresh(cpi);
@@ -906,23 +918,21 @@ static void configure_static_seg_features(AV1_COMP *cpi) {
   // Disable and clear down for KF
   if (cm->current_frame.frame_type == KEY_FRAME) {
     // Clear down the global segmentation map
-    memset(cpi->segmentation_map, 0, cm->mi_rows * cm->mi_cols);
+    memset(cpi->enc_seg.map, 0, cm->mi_params.mi_rows * cm->mi_params.mi_cols);
     seg->update_map = 0;
     seg->update_data = 0;
-    cpi->static_mb_pct = 0;
 
     // Disable segmentation
     av1_disable_segmentation(seg);
 
     // Clear down the segment features.
     av1_clearall_segfeatures(seg);
-  } else if (cpi->refresh_alt_ref_frame) {
+  } else if (cpi->refresh_frame.alt_ref_frame) {
     // If this is an alt ref frame
     // Clear down the global segmentation map
-    memset(cpi->segmentation_map, 0, cm->mi_rows * cm->mi_cols);
+    memset(cpi->enc_seg.map, 0, cm->mi_params.mi_rows * cm->mi_params.mi_cols);
     seg->update_map = 0;
     seg->update_data = 0;
-    cpi->static_mb_pct = 0;
 
     // Disable segmentation and individual segment features by default
     av1_disable_segmentation(seg);
@@ -975,7 +985,7 @@ static void configure_static_seg_features(AV1_COMP *cpi) {
         av1_enable_segfeature(seg, 1, SEG_LVL_ALT_LF_V);
 
         // Segment coding disabled for compred testing
-        if (high_q || (cpi->static_mb_pct == 100)) {
+        if (high_q) {
           av1_set_segdata(seg, 1, SEG_LVL_REF_FRAME, ALTREF_FRAME);
           av1_enable_segfeature(seg, 1, SEG_LVL_REF_FRAME);
           av1_enable_segfeature(seg, 1, SEG_LVL_SKIP);
@@ -986,7 +996,8 @@ static void configure_static_seg_features(AV1_COMP *cpi) {
 
         av1_disable_segmentation(seg);
 
-        memset(cpi->segmentation_map, 0, cm->mi_rows * cm->mi_cols);
+        memset(cpi->enc_seg.map, 0,
+               cm->mi_params.mi_rows * cm->mi_params.mi_cols);
 
         seg->update_map = 0;
         seg->update_data = 0;
@@ -1027,17 +1038,17 @@ static void configure_static_seg_features(AV1_COMP *cpi) {
 
 static void update_reference_segmentation_map(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
-  MB_MODE_INFO **mi_4x4_ptr = cm->mi_grid_base;
+  const CommonModeInfoParams *const mi_params = &cm->mi_params;
+  MB_MODE_INFO **mi_4x4_ptr = mi_params->mi_grid_base;
   uint8_t *cache_ptr = cm->cur_frame->seg_map;
-  int row, col;
 
-  for (row = 0; row < cm->mi_rows; row++) {
+  for (int row = 0; row < mi_params->mi_rows; row++) {
     MB_MODE_INFO **mi_4x4 = mi_4x4_ptr;
     uint8_t *cache = cache_ptr;
-    for (col = 0; col < cm->mi_cols; col++, mi_4x4++, cache++)
+    for (int col = 0; col < mi_params->mi_cols; col++, mi_4x4++, cache++)
       cache[0] = mi_4x4[0]->segment_id;
-    mi_4x4_ptr += cm->mi_stride;
-    cache_ptr += cm->mi_cols;
+    mi_4x4_ptr += mi_params->mi_stride;
+    cache_ptr += mi_params->mi_cols;
   }
 }
 
@@ -1051,7 +1062,7 @@ static void alloc_altref_frame_buffer(AV1_COMP *cpi) {
           &cpi->alt_ref_buffer, oxcf->width, oxcf->height,
           seq_params->subsampling_x, seq_params->subsampling_y,
           seq_params->use_highbitdepth, cpi->oxcf.border_in_pixels,
-          cm->byte_alignment, NULL, NULL, NULL))
+          cm->features.byte_alignment, NULL, NULL, NULL))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate altref buffer");
 }
@@ -1059,10 +1070,11 @@ static void alloc_altref_frame_buffer(AV1_COMP *cpi) {
 static void alloc_util_frame_buffers(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
   const SequenceHeader *const seq_params = &cm->seq_params;
+  const int byte_alignment = cm->features.byte_alignment;
   if (aom_realloc_frame_buffer(
           &cpi->last_frame_uf, cm->width, cm->height, seq_params->subsampling_x,
           seq_params->subsampling_y, seq_params->use_highbitdepth,
-          cpi->oxcf.border_in_pixels, cm->byte_alignment, NULL, NULL, NULL))
+          cpi->oxcf.border_in_pixels, byte_alignment, NULL, NULL, NULL))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate last frame buffer");
 
@@ -1070,14 +1082,14 @@ static void alloc_util_frame_buffers(AV1_COMP *cpi) {
           &cpi->trial_frame_rst, cm->superres_upscaled_width,
           cm->superres_upscaled_height, seq_params->subsampling_x,
           seq_params->subsampling_y, seq_params->use_highbitdepth,
-          AOM_RESTORATION_FRAME_BORDER, cm->byte_alignment, NULL, NULL, NULL))
+          AOM_RESTORATION_FRAME_BORDER, byte_alignment, NULL, NULL, NULL))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate trial restored frame buffer");
 
   if (aom_realloc_frame_buffer(
           &cpi->scaled_source, cm->width, cm->height, seq_params->subsampling_x,
           seq_params->subsampling_y, seq_params->use_highbitdepth,
-          cpi->oxcf.border_in_pixels, cm->byte_alignment, NULL, NULL, NULL))
+          cpi->oxcf.border_in_pixels, byte_alignment, NULL, NULL, NULL))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate scaled source buffer");
 
@@ -1085,43 +1097,34 @@ static void alloc_util_frame_buffers(AV1_COMP *cpi) {
           &cpi->scaled_last_source, cm->width, cm->height,
           seq_params->subsampling_x, seq_params->subsampling_y,
           seq_params->use_highbitdepth, cpi->oxcf.border_in_pixels,
-          cm->byte_alignment, NULL, NULL, NULL))
+          byte_alignment, NULL, NULL, NULL))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate scaled last source buffer");
 }
 
 static void alloc_compressor_data(AV1_COMP *cpi) {
   AV1_COMMON *cm = &cpi->common;
-  const int num_planes = av1_num_planes(cm);
+  TokenInfo *token_info = &cpi->token_info;
 
   if (av1_alloc_context_buffers(cm, cm->width, cm->height)) {
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate context buffers");
   }
 
-  int mi_rows_aligned_to_sb =
-      ALIGN_POWER_OF_TWO(cm->mi_rows, cm->seq_params.mib_size_log2);
-  int sb_rows = mi_rows_aligned_to_sb >> cm->seq_params.mib_size_log2;
+  if (!is_stat_generation_stage(cpi)) {
+    av1_alloc_txb_buf(cpi);
 
-  av1_alloc_txb_buf(cpi);
-
-  alloc_context_buffers_ext(cpi);
-
-  aom_free(cpi->tile_tok[0][0]);
-
-  {
-    unsigned int tokens =
-        get_token_alloc(cm->mb_rows, cm->mb_cols, MAX_SB_SIZE_LOG2, num_planes);
-    CHECK_MEM_ERROR(cm, cpi->tile_tok[0][0],
-                    aom_calloc(tokens, sizeof(*cpi->tile_tok[0][0])));
+    alloc_context_buffers_ext(cm, &cpi->mbmi_ext_info);
   }
-  aom_free(cpi->tplist[0][0]);
 
-  CHECK_MEM_ERROR(cm, cpi->tplist[0][0],
-                  aom_calloc(sb_rows * MAX_TILE_ROWS * MAX_TILE_COLS,
-                             sizeof(*cpi->tplist[0][0])));
+  free_token_info(token_info);
 
-  av1_setup_pc_tree(&cpi->common, &cpi->td);
+  if (!is_stat_generation_stage(cpi)) {
+    alloc_token_info(cm, token_info);
+  }
+
+  av1_setup_shared_coeff_buffer(&cpi->common, &cpi->td.shared_coeff_buf);
+  av1_setup_sms_tree(cpi, &cpi->td);
 }
 
 void av1_new_framerate(AV1_COMP *cpi, double framerate) {
@@ -1147,49 +1150,55 @@ double av1_get_compression_ratio(const AV1_COMMON *const cm,
 
 static void set_tile_info(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
+  const CommonModeInfoParams *const mi_params = &cm->mi_params;
+  const SequenceHeader *const seq_params = &cm->seq_params;
+  CommonTileParams *const tiles = &cm->tiles;
   int i, start_sb;
 
   av1_get_tile_limits(cm);
 
   // configure tile columns
   if (cpi->oxcf.tile_width_count == 0 || cpi->oxcf.tile_height_count == 0) {
-    cm->uniform_tile_spacing_flag = 1;
-    cm->log2_tile_cols = AOMMAX(cpi->oxcf.tile_columns, cm->min_log2_tile_cols);
-    cm->log2_tile_cols = AOMMIN(cm->log2_tile_cols, cm->max_log2_tile_cols);
+    tiles->uniform_spacing = 1;
+    tiles->log2_cols = AOMMAX(cpi->oxcf.tile_columns, tiles->min_log2_cols);
+    tiles->log2_cols = AOMMIN(tiles->log2_cols, tiles->max_log2_cols);
   } else {
-    int mi_cols = ALIGN_POWER_OF_TWO(cm->mi_cols, cm->seq_params.mib_size_log2);
-    int sb_cols = mi_cols >> cm->seq_params.mib_size_log2;
+    int mi_cols =
+        ALIGN_POWER_OF_TWO(mi_params->mi_cols, seq_params->mib_size_log2);
+    int sb_cols = mi_cols >> seq_params->mib_size_log2;
     int size_sb, j = 0;
-    cm->uniform_tile_spacing_flag = 0;
+    tiles->uniform_spacing = 0;
     for (i = 0, start_sb = 0; start_sb < sb_cols && i < MAX_TILE_COLS; i++) {
-      cm->tile_col_start_sb[i] = start_sb;
+      tiles->col_start_sb[i] = start_sb;
       size_sb = cpi->oxcf.tile_widths[j++];
       if (j >= cpi->oxcf.tile_width_count) j = 0;
-      start_sb += AOMMIN(size_sb, cm->max_tile_width_sb);
+      start_sb += AOMMIN(size_sb, tiles->max_width_sb);
     }
-    cm->tile_cols = i;
-    cm->tile_col_start_sb[i] = sb_cols;
+    tiles->cols = i;
+    tiles->col_start_sb[i] = sb_cols;
   }
-  av1_calculate_tile_cols(cm);
+  av1_calculate_tile_cols(seq_params, mi_params->mi_rows, mi_params->mi_cols,
+                          tiles);
 
   // configure tile rows
-  if (cm->uniform_tile_spacing_flag) {
-    cm->log2_tile_rows = AOMMAX(cpi->oxcf.tile_rows, cm->min_log2_tile_rows);
-    cm->log2_tile_rows = AOMMIN(cm->log2_tile_rows, cm->max_log2_tile_rows);
+  if (tiles->uniform_spacing) {
+    tiles->log2_rows = AOMMAX(cpi->oxcf.tile_rows, tiles->min_log2_rows);
+    tiles->log2_rows = AOMMIN(tiles->log2_rows, tiles->max_log2_rows);
   } else {
-    int mi_rows = ALIGN_POWER_OF_TWO(cm->mi_rows, cm->seq_params.mib_size_log2);
-    int sb_rows = mi_rows >> cm->seq_params.mib_size_log2;
+    int mi_rows =
+        ALIGN_POWER_OF_TWO(mi_params->mi_rows, seq_params->mib_size_log2);
+    int sb_rows = mi_rows >> seq_params->mib_size_log2;
     int size_sb, j = 0;
     for (i = 0, start_sb = 0; start_sb < sb_rows && i < MAX_TILE_ROWS; i++) {
-      cm->tile_row_start_sb[i] = start_sb;
+      tiles->row_start_sb[i] = start_sb;
       size_sb = cpi->oxcf.tile_heights[j++];
       if (j >= cpi->oxcf.tile_height_count) j = 0;
-      start_sb += AOMMIN(size_sb, cm->max_tile_height_sb);
+      start_sb += AOMMIN(size_sb, tiles->max_height_sb);
     }
-    cm->tile_rows = i;
-    cm->tile_row_start_sb[i] = sb_rows;
+    tiles->rows = i;
+    tiles->row_start_sb[i] = sb_rows;
   }
-  av1_calculate_tile_rows(cm);
+  av1_calculate_tile_rows(seq_params, mi_params->mi_rows, tiles);
 }
 
 static void update_frame_size(AV1_COMP *cpi) {
@@ -1201,23 +1210,22 @@ static void update_frame_size(AV1_COMP *cpi) {
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate context buffers");
   }
-  av1_init_context_buffers(cm);
+  av1_init_mi_buffers(&cm->mi_params);
 
-  av1_init_macroblockd(cm, xd, NULL);
+  av1_init_macroblockd(cm, xd);
 
-  const int ext_mi_size = cm->mi_alloc_rows * cm->mi_alloc_cols;
-  alloc_context_buffers_ext(cpi);
-  memset(cpi->mbmi_ext_frame_base, 0,
-         ext_mi_size * sizeof(*cpi->mbmi_ext_frame_base));
+  if (!is_stat_generation_stage(cpi))
+    alloc_context_buffers_ext(cm, &cpi->mbmi_ext_info);
   set_tile_info(cpi);
 }
 
-static void init_buffer_indices(AV1_COMP *cpi) {
+static void init_buffer_indices(ForceIntegerMVInfo *const force_intpel_info,
+                                int *const remapped_ref_idx) {
   int fb_idx;
   for (fb_idx = 0; fb_idx < REF_FRAMES; ++fb_idx)
-    cpi->common.remapped_ref_idx[fb_idx] = fb_idx;
-  cpi->rate_index = 0;
-  cpi->rate_size = 0;
+    remapped_ref_idx[fb_idx] = fb_idx;
+  force_intpel_info->rate_index = 0;
+  force_intpel_info->rate_size = 0;
 }
 
 static INLINE int does_level_match(int width, int height, double fps,
@@ -1278,20 +1286,21 @@ static void set_bitstream_level_tier(SequenceHeader *seq, AV1_COMMON *cm,
     level = SEQ_LEVEL_6_2;
   }
 
+  SequenceHeader *const seq_params = &cm->seq_params;
   for (int i = 0; i < MAX_NUM_OPERATING_POINTS; ++i) {
     seq->seq_level_idx[i] = level;
     // Set the maximum parameters for bitrate and buffer size for this profile,
     // level, and tier
-    cm->op_params[i].bitrate = av1_max_level_bitrate(
+    seq_params->op_params[i].bitrate = av1_max_level_bitrate(
         cm->seq_params.profile, seq->seq_level_idx[i], seq->tier[i]);
     // Level with seq_level_idx = 31 returns a high "dummy" bitrate to pass the
     // check
-    if (cm->op_params[i].bitrate == 0)
+    if (seq_params->op_params[i].bitrate == 0)
       aom_internal_error(
           &cm->error, AOM_CODEC_UNSUP_BITSTREAM,
           "AV1 does not support this combination of profile, level, and tier.");
     // Buffer size in bits/s is bitrate in bits/s * 1 s
-    cm->op_params[i].buffer_size = cm->op_params[i].bitrate;
+    seq_params->op_params[i].buffer_size = seq_params->op_params[i].bitrate;
   }
 }
 
@@ -1372,78 +1381,80 @@ static void init_seq_coding_tools(SequenceHeader *seq, AV1_COMMON *cm,
 
 static void init_config(struct AV1_COMP *cpi, AV1EncoderConfig *oxcf) {
   AV1_COMMON *const cm = &cpi->common;
+  SequenceHeader *const seq_params = &cm->seq_params;
+  ResizePendingParams *resize_pending_params = &cpi->resize_pending_params;
 
   cpi->oxcf = *oxcf;
   cpi->framerate = oxcf->init_framerate;
 
-  cm->seq_params.profile = oxcf->profile;
-  cm->seq_params.bit_depth = oxcf->bit_depth;
-  cm->seq_params.use_highbitdepth = oxcf->use_highbitdepth;
-  cm->seq_params.color_primaries = oxcf->color_primaries;
-  cm->seq_params.transfer_characteristics = oxcf->transfer_characteristics;
-  cm->seq_params.matrix_coefficients = oxcf->matrix_coefficients;
-  cm->seq_params.monochrome = oxcf->monochrome;
-  cm->seq_params.chroma_sample_position = oxcf->chroma_sample_position;
-  cm->seq_params.color_range = oxcf->color_range;
-  cm->timing_info_present = oxcf->timing_info_present;
-  cm->timing_info.num_units_in_display_tick =
+  seq_params->profile = oxcf->profile;
+  seq_params->bit_depth = oxcf->bit_depth;
+  seq_params->use_highbitdepth = oxcf->use_highbitdepth;
+  seq_params->color_primaries = oxcf->color_primaries;
+  seq_params->transfer_characteristics = oxcf->transfer_characteristics;
+  seq_params->matrix_coefficients = oxcf->matrix_coefficients;
+  seq_params->monochrome = oxcf->monochrome;
+  seq_params->chroma_sample_position = oxcf->chroma_sample_position;
+  seq_params->color_range = oxcf->color_range;
+  seq_params->timing_info_present = oxcf->timing_info_present;
+  seq_params->timing_info.num_units_in_display_tick =
       oxcf->timing_info.num_units_in_display_tick;
-  cm->timing_info.time_scale = oxcf->timing_info.time_scale;
-  cm->timing_info.equal_picture_interval =
+  seq_params->timing_info.time_scale = oxcf->timing_info.time_scale;
+  seq_params->timing_info.equal_picture_interval =
       oxcf->timing_info.equal_picture_interval;
-  cm->timing_info.num_ticks_per_picture =
+  seq_params->timing_info.num_ticks_per_picture =
       oxcf->timing_info.num_ticks_per_picture;
 
-  cm->seq_params.display_model_info_present_flag =
+  seq_params->display_model_info_present_flag =
       oxcf->display_model_info_present_flag;
-  cm->seq_params.decoder_model_info_present_flag =
+  seq_params->decoder_model_info_present_flag =
       oxcf->decoder_model_info_present_flag;
   if (oxcf->decoder_model_info_present_flag) {
     // set the decoder model parameters in schedule mode
-    cm->buffer_model.num_units_in_decoding_tick =
+    seq_params->decoder_model_info.num_units_in_decoding_tick =
         oxcf->buffer_model.num_units_in_decoding_tick;
     cm->buffer_removal_time_present = 1;
-    av1_set_aom_dec_model_info(&cm->buffer_model);
-    av1_set_dec_model_op_parameters(&cm->op_params[0]);
-  } else if (cm->timing_info_present &&
-             cm->timing_info.equal_picture_interval &&
-             !cm->seq_params.decoder_model_info_present_flag) {
+    av1_set_aom_dec_model_info(&seq_params->decoder_model_info);
+    av1_set_dec_model_op_parameters(&seq_params->op_params[0]);
+  } else if (seq_params->timing_info_present &&
+             seq_params->timing_info.equal_picture_interval &&
+             !seq_params->decoder_model_info_present_flag) {
     // set the decoder model parameters in resource availability mode
-    av1_set_resource_availability_parameters(&cm->op_params[0]);
+    av1_set_resource_availability_parameters(&seq_params->op_params[0]);
   } else {
-    cm->op_params[0].initial_display_delay =
+    seq_params->op_params[0].initial_display_delay =
         10;  // Default value (not signaled)
   }
 
-  if (cm->seq_params.monochrome) {
-    cm->seq_params.subsampling_x = 1;
-    cm->seq_params.subsampling_y = 1;
-  } else if (cm->seq_params.color_primaries == AOM_CICP_CP_BT_709 &&
-             cm->seq_params.transfer_characteristics == AOM_CICP_TC_SRGB &&
-             cm->seq_params.matrix_coefficients == AOM_CICP_MC_IDENTITY) {
-    cm->seq_params.subsampling_x = 0;
-    cm->seq_params.subsampling_y = 0;
+  if (seq_params->monochrome) {
+    seq_params->subsampling_x = 1;
+    seq_params->subsampling_y = 1;
+  } else if (seq_params->color_primaries == AOM_CICP_CP_BT_709 &&
+             seq_params->transfer_characteristics == AOM_CICP_TC_SRGB &&
+             seq_params->matrix_coefficients == AOM_CICP_MC_IDENTITY) {
+    seq_params->subsampling_x = 0;
+    seq_params->subsampling_y = 0;
   } else {
-    if (cm->seq_params.profile == 0) {
-      cm->seq_params.subsampling_x = 1;
-      cm->seq_params.subsampling_y = 1;
-    } else if (cm->seq_params.profile == 1) {
-      cm->seq_params.subsampling_x = 0;
-      cm->seq_params.subsampling_y = 0;
+    if (seq_params->profile == 0) {
+      seq_params->subsampling_x = 1;
+      seq_params->subsampling_y = 1;
+    } else if (seq_params->profile == 1) {
+      seq_params->subsampling_x = 0;
+      seq_params->subsampling_y = 0;
     } else {
-      if (cm->seq_params.bit_depth == AOM_BITS_12) {
-        cm->seq_params.subsampling_x = oxcf->chroma_subsampling_x;
-        cm->seq_params.subsampling_y = oxcf->chroma_subsampling_y;
+      if (seq_params->bit_depth == AOM_BITS_12) {
+        seq_params->subsampling_x = oxcf->chroma_subsampling_x;
+        seq_params->subsampling_y = oxcf->chroma_subsampling_y;
       } else {
-        cm->seq_params.subsampling_x = 1;
-        cm->seq_params.subsampling_y = 0;
+        seq_params->subsampling_x = 1;
+        seq_params->subsampling_y = 0;
       }
     }
   }
 
   cm->width = oxcf->width;
   cm->height = oxcf->height;
-  set_sb_size(&cm->seq_params,
+  set_sb_size(seq_params,
               select_sb_size(cpi));  // set sb size before allocations
   alloc_compressor_data(cpi);
 
@@ -1456,6 +1467,8 @@ static void init_config(struct AV1_COMP *cpi, AV1EncoderConfig *oxcf) {
   cpi->use_svc = 0;
   cpi->svc.external_ref_frame_config = 0;
   cpi->svc.non_reference_frame = 0;
+  cpi->svc.number_spatial_layers = 1;
+  cpi->svc.number_temporal_layers = 1;
   cm->number_spatial_layers = 1;
   cm->number_temporal_layers = 1;
   cm->spatial_layer_id = 0;
@@ -1464,14 +1477,13 @@ static void init_config(struct AV1_COMP *cpi, AV1EncoderConfig *oxcf) {
   // change includes all joint functionality
   av1_change_config(cpi, oxcf);
 
-  cpi->static_mb_pct = 0;
   cpi->ref_frame_flags = 0;
 
   // Reset resize pending flags
-  cpi->resize_pending_width = 0;
-  cpi->resize_pending_height = 0;
+  resize_pending_params->width = 0;
+  resize_pending_params->height = 0;
 
-  init_buffer_indices(cpi);
+  init_buffer_indices(&cpi->force_intpel_info, cm->remapped_ref_idx);
 }
 
 static void set_rc_buffer_sizes(RATE_CONTROL *rc,
@@ -2650,29 +2662,31 @@ static void highbd_set_var_fns(AV1_COMP *const cpi) {
 
 static void realloc_segmentation_maps(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
+  CommonModeInfoParams *const mi_params = &cm->mi_params;
 
   // Create the encoder segmentation map and set all entries to 0
-  aom_free(cpi->segmentation_map);
-  CHECK_MEM_ERROR(cm, cpi->segmentation_map,
-                  aom_calloc(cm->mi_rows * cm->mi_cols, 1));
+  aom_free(cpi->enc_seg.map);
+  CHECK_MEM_ERROR(cm, cpi->enc_seg.map,
+                  aom_calloc(mi_params->mi_rows * mi_params->mi_cols, 1));
 
   // Create a map used for cyclic background refresh.
   if (cpi->cyclic_refresh) av1_cyclic_refresh_free(cpi->cyclic_refresh);
-  CHECK_MEM_ERROR(cm, cpi->cyclic_refresh,
-                  av1_cyclic_refresh_alloc(cm->mi_rows, cm->mi_cols));
+  CHECK_MEM_ERROR(
+      cm, cpi->cyclic_refresh,
+      av1_cyclic_refresh_alloc(mi_params->mi_rows, mi_params->mi_cols));
 
   // Create a map used to mark inactive areas.
   aom_free(cpi->active_map.map);
   CHECK_MEM_ERROR(cm, cpi->active_map.map,
-                  aom_calloc(cm->mi_rows * cm->mi_cols, 1));
+                  aom_calloc(mi_params->mi_rows * mi_params->mi_cols, 1));
 }
 
-static void set_tpl_stats_block_size(AV1_COMP *cpi) {
-  AV1_COMMON *const cm = &cpi->common;
-  const int is_720p_or_larger = AOMMIN(cm->width, cm->height) >= 720;
+static AOM_INLINE void set_tpl_stats_block_size(int width, int height,
+                                                uint8_t *block_mis_log2) {
+  const int is_720p_or_larger = AOMMIN(width, height) >= 720;
 
   // 0: 4x4, 1: 8x8, 2: 16x16
-  cpi->tpl_stats_block_mis_log2 = is_720p_or_larger ? 2 : 1;
+  *block_mis_log2 = is_720p_or_larger ? 2 : 1;
 }
 
 void av1_alloc_compound_type_rd_buffers(AV1_COMMON *const cm,
@@ -2718,7 +2732,7 @@ static void config_target_level(AV1_COMP *const cpi, AV1_LEVEL target_level,
   oxcf->target_bandwidth = AOMMIN(oxcf->target_bandwidth, max_bitrate);
   // Also need to update cpi->twopass.bits_left.
   TWO_PASS *const twopass = &cpi->twopass;
-  FIRSTPASS_STATS *stats = twopass->total_stats;
+  FIRSTPASS_STATS *stats = twopass->stats_buf_ctx->total_stats;
   if (stats != NULL)
     cpi->twopass.bits_left =
         (int64_t)(stats->duration * cpi->oxcf.target_bandwidth / 10000000.0);
@@ -2751,9 +2765,11 @@ static void config_target_level(AV1_COMP *const cpi, AV1_LEVEL target_level,
 void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
   AV1_COMMON *const cm = &cpi->common;
   SequenceHeader *const seq_params = &cm->seq_params;
-  const int num_planes = av1_num_planes(cm);
   RATE_CONTROL *const rc = &cpi->rc;
   MACROBLOCK *const x = &cpi->td.mb;
+  AV1LevelParams *const level_params = &cpi->level_params;
+  InitialDimensions *const initial_dimensions = &cpi->initial_dimensions;
+  RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
 
   if (seq_params->profile != oxcf->profile) seq_params->profile = oxcf->profile;
   seq_params->bit_depth = oxcf->bit_depth;
@@ -2767,13 +2783,13 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
   assert(IMPLIES(seq_params->profile <= PROFILE_1,
                  seq_params->bit_depth <= AOM_BITS_10));
 
-  cm->timing_info_present = oxcf->timing_info_present;
-  cm->timing_info.num_units_in_display_tick =
+  seq_params->timing_info_present = oxcf->timing_info_present;
+  seq_params->timing_info.num_units_in_display_tick =
       oxcf->timing_info.num_units_in_display_tick;
-  cm->timing_info.time_scale = oxcf->timing_info.time_scale;
-  cm->timing_info.equal_picture_interval =
+  seq_params->timing_info.time_scale = oxcf->timing_info.time_scale;
+  seq_params->timing_info.equal_picture_interval =
       oxcf->timing_info.equal_picture_interval;
-  cm->timing_info.num_ticks_per_picture =
+  seq_params->timing_info.num_ticks_per_picture =
       oxcf->timing_info.num_ticks_per_picture;
 
   seq_params->display_model_info_present_flag =
@@ -2782,45 +2798,47 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
       oxcf->decoder_model_info_present_flag;
   if (oxcf->decoder_model_info_present_flag) {
     // set the decoder model parameters in schedule mode
-    cm->buffer_model.num_units_in_decoding_tick =
+    seq_params->decoder_model_info.num_units_in_decoding_tick =
         oxcf->buffer_model.num_units_in_decoding_tick;
     cm->buffer_removal_time_present = 1;
-    av1_set_aom_dec_model_info(&cm->buffer_model);
-    av1_set_dec_model_op_parameters(&cm->op_params[0]);
-  } else if (cm->timing_info_present &&
-             cm->timing_info.equal_picture_interval &&
+    av1_set_aom_dec_model_info(&seq_params->decoder_model_info);
+    av1_set_dec_model_op_parameters(&seq_params->op_params[0]);
+  } else if (seq_params->timing_info_present &&
+             seq_params->timing_info.equal_picture_interval &&
              !seq_params->decoder_model_info_present_flag) {
     // set the decoder model parameters in resource availability mode
-    av1_set_resource_availability_parameters(&cm->op_params[0]);
+    av1_set_resource_availability_parameters(&seq_params->op_params[0]);
   } else {
-    cm->op_params[0].initial_display_delay =
+    seq_params->op_params[0].initial_display_delay =
         10;  // Default value (not signaled)
   }
 
   update_film_grain_parameters(cpi, oxcf);
 
   cpi->oxcf = *oxcf;
+  cpi->superres_mode = oxcf->superres_mode;  // default
   x->e_mbd.bd = (int)seq_params->bit_depth;
   x->e_mbd.global_motion = cm->global_motion;
 
-  memcpy(cpi->target_seq_level_idx, cpi->oxcf.target_seq_level_idx,
-         sizeof(cpi->target_seq_level_idx));
-  cpi->keep_level_stats = 0;
+  memcpy(level_params->target_seq_level_idx, cpi->oxcf.target_seq_level_idx,
+         sizeof(level_params->target_seq_level_idx));
+  level_params->keep_level_stats = 0;
   for (int i = 0; i < MAX_NUM_OPERATING_POINTS; ++i) {
-    if (cpi->target_seq_level_idx[i] <= SEQ_LEVELS) {
-      cpi->keep_level_stats |= 1u << i;
-      if (!cpi->level_info[i]) {
-        CHECK_MEM_ERROR(cm, cpi->level_info[i],
-                        aom_calloc(1, sizeof(*cpi->level_info[i])));
+    if (level_params->target_seq_level_idx[i] <= SEQ_LEVELS) {
+      level_params->keep_level_stats |= 1u << i;
+      if (!level_params->level_info[i]) {
+        CHECK_MEM_ERROR(cm, level_params->level_info[i],
+                        aom_calloc(1, sizeof(*level_params->level_info[i])));
       }
     }
   }
 
   // TODO(huisu@): level targeting currently only works for the 0th operating
   // point, so scalable coding is not supported yet.
-  if (cpi->target_seq_level_idx[0] < SEQ_LEVELS) {
+  if (level_params->target_seq_level_idx[0] < SEQ_LEVELS) {
     // Adjust encoder config in order to meet target level.
-    config_target_level(cpi, cpi->target_seq_level_idx[0], seq_params->tier[0]);
+    config_target_level(cpi, level_params->target_seq_level_idx[0],
+                        seq_params->tier[0]);
   }
 
   if ((has_no_stats_stage(cpi)) && (oxcf->rc_mode == AOM_Q)) {
@@ -2829,15 +2847,14 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
     rc->baseline_gf_interval = (MIN_GF_INTERVAL + MAX_GF_INTERVAL) / 2;
   }
 
-  cpi->refresh_last_frame = 1;
-  cpi->refresh_golden_frame = 0;
-  cpi->refresh_bwd_ref_frame = 0;
+  refresh_frame_flags->golden_frame = false;
+  refresh_frame_flags->bwd_ref_frame = false;
 
-  cm->refresh_frame_context = (oxcf->frame_parallel_decoding_mode)
-                                  ? REFRESH_FRAME_CONTEXT_DISABLED
-                                  : REFRESH_FRAME_CONTEXT_BACKWARD;
+  cm->features.refresh_frame_context = (oxcf->frame_parallel_decoding_mode)
+                                           ? REFRESH_FRAME_CONTEXT_DISABLED
+                                           : REFRESH_FRAME_CONTEXT_BACKWARD;
   if (oxcf->large_scale_tile)
-    cm->refresh_frame_context = REFRESH_FRAME_CONTEXT_DISABLED;
+    cm->features.refresh_frame_context = REFRESH_FRAME_CONTEXT_DISABLED;
 
   if (x->palette_buffer == NULL) {
     CHECK_MEM_ERROR(cm, x->palette_buffer,
@@ -2881,8 +2898,9 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
   rc->worst_quality = cpi->oxcf.worst_allowed_q;
   rc->best_quality = cpi->oxcf.best_allowed_q;
 
-  cm->interp_filter = oxcf->large_scale_tile ? EIGHTTAP_REGULAR : SWITCHABLE;
-  cm->switchable_motion_mode = 1;
+  cm->features.interp_filter =
+      oxcf->large_scale_tile ? EIGHTTAP_REGULAR : SWITCHABLE;
+  cm->features.switchable_motion_mode = 1;
 
   if (cpi->oxcf.render_width > 0 && cpi->oxcf.render_height > 0) {
     cm->render_width = cpi->oxcf.render_width;
@@ -2902,26 +2920,27 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
       seq_params->tier[i] = (oxcf->tier_mask >> i) & 1;
   }
 
-  if (cpi->initial_width || sb_size != seq_params->sb_size) {
-    if (cm->width > cpi->initial_width || cm->height > cpi->initial_height ||
+  if (initial_dimensions->width || sb_size != seq_params->sb_size) {
+    if (cm->width > initial_dimensions->width ||
+        cm->height > initial_dimensions->height ||
         seq_params->sb_size != sb_size) {
       av1_free_context_buffers(cm);
-      av1_free_pc_tree(&cpi->td, num_planes);
+      av1_free_shared_coeff_buffer(&cpi->td.shared_coeff_buf);
+      av1_free_sms_tree(&cpi->td);
       alloc_compressor_data(cpi);
       realloc_segmentation_maps(cpi);
-      cpi->initial_width = cpi->initial_height = 0;
+      initial_dimensions->width = initial_dimensions->height = 0;
     }
   }
   update_frame_size(cpi);
 
-  cpi->alt_ref_source = NULL;
   rc->is_src_frame_alt_ref = 0;
 
   set_tile_info(cpi);
 
   if (!cpi->svc.external_ref_frame_config)
-    cpi->ext_refresh_frame_flags_pending = 0;
-  cpi->ext_refresh_frame_context_pending = 0;
+    cpi->ext_flags.refresh_frame.update_pending = 0;
+  cpi->ext_flags.refresh_frame_context_pending = 0;
 
 #if CONFIG_AV1_HIGHBITDEPTH
   highbd_set_var_fns(cpi);
@@ -2939,6 +2958,62 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
 
   if (cpi->use_svc)
     av1_update_layer_context_change_config(cpi, oxcf->target_bandwidth);
+}
+
+static INLINE void setup_tpl_buffers(AV1_COMMON *const cm,
+                                     TplParams *const tpl_data) {
+  CommonModeInfoParams *const mi_params = &cm->mi_params;
+  set_tpl_stats_block_size(cm->width, cm->height,
+                           &tpl_data->tpl_stats_block_mis_log2);
+  const uint8_t block_mis_log2 = tpl_data->tpl_stats_block_mis_log2;
+
+  for (int frame = 0; frame < MAX_LENGTH_TPL_FRAME_STATS; ++frame) {
+    const int mi_cols =
+        ALIGN_POWER_OF_TWO(mi_params->mi_cols, MAX_MIB_SIZE_LOG2);
+    const int mi_rows =
+        ALIGN_POWER_OF_TWO(mi_params->mi_rows, MAX_MIB_SIZE_LOG2);
+
+    tpl_data->tpl_stats_buffer[frame].is_valid = 0;
+    tpl_data->tpl_stats_buffer[frame].width = mi_cols >> block_mis_log2;
+    tpl_data->tpl_stats_buffer[frame].height = mi_rows >> block_mis_log2;
+    tpl_data->tpl_stats_buffer[frame].stride =
+        tpl_data->tpl_stats_buffer[frame].width;
+    tpl_data->tpl_stats_buffer[frame].mi_rows = mi_params->mi_rows;
+    tpl_data->tpl_stats_buffer[frame].mi_cols = mi_params->mi_cols;
+  }
+
+  for (int frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
+    CHECK_MEM_ERROR(
+        cm, tpl_data->tpl_stats_pool[frame],
+        aom_calloc(tpl_data->tpl_stats_buffer[frame].width *
+                       tpl_data->tpl_stats_buffer[frame].height,
+                   sizeof(*tpl_data->tpl_stats_buffer[frame].tpl_stats_ptr)));
+    if (aom_alloc_frame_buffer(
+            &tpl_data->tpl_rec_pool[frame], cm->width, cm->height,
+            cm->seq_params.subsampling_x, cm->seq_params.subsampling_y,
+            cm->seq_params.use_highbitdepth, AOM_ENC_NO_SCALE_BORDER,
+            cm->features.byte_alignment))
+      aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
+                         "Failed to allocate frame buffer");
+  }
+
+  tpl_data->tpl_frame = &tpl_data->tpl_stats_buffer[REF_FRAMES + 1];
+}
+
+static INLINE void init_frame_info(FRAME_INFO *frame_info,
+                                   const AV1_COMMON *const cm) {
+  const CommonModeInfoParams *const mi_params = &cm->mi_params;
+  const SequenceHeader *const seq_params = &cm->seq_params;
+  frame_info->frame_width = cm->width;
+  frame_info->frame_height = cm->height;
+  frame_info->mi_cols = mi_params->mi_cols;
+  frame_info->mi_rows = mi_params->mi_rows;
+  frame_info->mb_cols = mi_params->mb_cols;
+  frame_info->mb_rows = mi_params->mb_rows;
+  frame_info->num_mbs = mi_params->MBs;
+  frame_info->bit_depth = seq_params->bit_depth;
+  frame_info->subsampling_x = seq_params->subsampling_x;
+  frame_info->subsampling_y = seq_params->subsampling_y;
 }
 
 AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
@@ -2963,12 +3038,17 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
   }
 
   cm->error.setjmp = 1;
-  cm->alloc_mi = enc_alloc_mi;
-  cm->free_mi = enc_free_mi;
-  cm->setup_mi = enc_setup_mi;
-  cm->set_mb_mi = enc_set_mb_mi;
+  cpi->lap_enabled = num_lap_buffers > 0;
+  cpi->compressor_stage = stage;
 
-  cm->mi_alloc_bsize = BLOCK_4X4;
+  CommonModeInfoParams *const mi_params = &cm->mi_params;
+  mi_params->free_mi = enc_free_mi;
+  mi_params->setup_mi = enc_setup_mi;
+  mi_params->set_mb_mi = (oxcf->pass == 1 || cpi->compressor_stage == LAP_STAGE)
+                             ? stat_stage_set_mb_mi
+                             : enc_set_mb_mi;
+
+  mi_params->mi_alloc_bsize = BLOCK_4X4;
 
   CHECK_MEM_ERROR(cm, cm->fc,
                   (FRAME_CONTEXT *)aom_memalign(32, sizeof(*cm->fc)));
@@ -2978,21 +3058,19 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
   memset(cm->fc, 0, sizeof(*cm->fc));
   memset(cm->default_frame_context, 0, sizeof(*cm->default_frame_context));
 
-  cpi->resize_state = 0;
-  cpi->resize_avg_qp = 0;
-  cpi->resize_buffer_underflow = 0;
-
   cpi->common.buffer_pool = pool;
 
   init_config(cpi, oxcf);
-  cpi->lap_enabled = num_lap_buffers > 0;
-  cpi->compressor_stage = stage;
   if (cpi->compressor_stage == LAP_STAGE) {
     cpi->oxcf.lag_in_frames = lap_lag_in_frames;
   }
 
   av1_rc_init(&cpi->oxcf, oxcf->pass, &cpi->rc);
 
+  cpi->rc.enable_scenecut_detection = 1;
+  if (cpi->lap_enabled &&
+      (num_lap_buffers < (MAX_GF_LENGTH_LAP + SCENE_CUT_KEY_TEST_INTERVAL + 1)))
+    cpi->rc.enable_scenecut_detection = 0;
   init_frame_info(&cpi->frame_info, cm);
 
   cm->current_frame.frame_number = 0;
@@ -3003,7 +3081,7 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
   cpi->last_show_frame_buf = NULL;
   realloc_segmentation_maps(cpi);
 
-  cpi->refresh_alt_ref_frame = 0;
+  cpi->refresh_frame.alt_ref_frame = false;
 
   cpi->b_calculate_psnr = CONFIG_INTERNAL_STATS;
 #if CONFIG_INTERNAL_STATS
@@ -3036,9 +3114,10 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
   }
 
   if (cpi->b_calculate_consistency) {
-    CHECK_MEM_ERROR(cm, cpi->ssim_vars,
-                    aom_malloc(sizeof(*cpi->ssim_vars) * 4 *
-                               cpi->common.mi_rows * cpi->common.mi_cols));
+    CHECK_MEM_ERROR(
+        cm, cpi->ssim_vars,
+        aom_malloc(sizeof(*cpi->ssim_vars) * 4 * cpi->common.mi_params.mi_rows *
+                   cpi->common.mi_params.mi_cols));
     cpi->worst_consistency = 100.0;
   }
 #endif
@@ -3046,7 +3125,7 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
   av1_zero(aggregate_fc);
 #endif  // CONFIG_ENTROPY_STATS
 
-  cpi->first_time_stamp_ever = INT64_MAX;
+  cpi->time_stamps.first_ever = INT64_MAX;
 
 #ifdef OUTPUT_YUV_SKINMAP
   yuv_skinmap_file = fopen("skinmap.yuv", "ab");
@@ -3064,9 +3143,7 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
   cpi->twopass.stats_in = cpi->twopass.stats_buf_ctx->stats_in_start;
 
 #if !CONFIG_REALTIME_ONLY
-  if (is_stat_generation_stage(cpi)) {
-    av1_init_first_pass(cpi);
-  } else if (is_stat_consumption_stage(cpi)) {
+  if (is_stat_consumption_stage(cpi)) {
     const size_t packet_sz = sizeof(FIRSTPASS_STATS);
     const int packets = (int)(oxcf->two_pass_stats_in.sz / packet_sz);
 
@@ -3107,11 +3184,12 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
   for (int x = 0; x < 2; x++)
     for (int y = 0; y < 2; y++)
       CHECK_MEM_ERROR(
-          cm, cpi->td.mb.hash_value_buffer[x][y],
-          (uint32_t *)aom_malloc(AOM_BUFFER_SIZE_FOR_BLOCK_HASH *
-                                 sizeof(*cpi->td.mb.hash_value_buffer[0][0])));
+          cm, cpi->td.mb.intrabc_hash_info.hash_value_buffer[x][y],
+          (uint32_t *)aom_malloc(
+              AOM_BUFFER_SIZE_FOR_BLOCK_HASH *
+              sizeof(*cpi->td.mb.intrabc_hash_info.hash_value_buffer[0][0])));
 
-  cpi->td.mb.g_crc_initialized = 0;
+  cpi->td.mb.intrabc_hash_info.g_crc_initialized = 0;
 
   CHECK_MEM_ERROR(cm, cpi->td.mb.mask_buf,
                   (int32_t *)aom_memalign(
@@ -3127,8 +3205,8 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
     const int bsize = BLOCK_16X16;
     const int w = mi_size_wide[bsize];
     const int h = mi_size_high[bsize];
-    const int num_cols = (cm->mi_cols + w - 1) / w;
-    const int num_rows = (cm->mi_rows + h - 1) / h;
+    const int num_cols = (mi_params->mi_cols + w - 1) / w;
+    const int num_rows = (mi_params->mi_rows + h - 1) / h;
     CHECK_MEM_ERROR(cm, cpi->tpl_rdmult_scaling_factors,
                     aom_calloc(num_rows * num_cols,
                                sizeof(*cpi->tpl_rdmult_scaling_factors)));
@@ -3141,8 +3219,8 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
     const int bsize = BLOCK_16X16;
     const int w = mi_size_wide[bsize];
     const int h = mi_size_high[bsize];
-    const int num_cols = (cm->mi_cols + w - 1) / w;
-    const int num_rows = (cm->mi_rows + h - 1) / h;
+    const int num_cols = (mi_params->mi_cols + w - 1) / w;
+    const int num_rows = (mi_params->mi_rows + h - 1) / h;
     CHECK_MEM_ERROR(cm, cpi->ssim_rdmult_scaling_factors,
                     aom_calloc(num_rows * num_cols,
                                sizeof(*cpi->ssim_rdmult_scaling_factors)));
@@ -3153,46 +3231,18 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
     const int bsize = BLOCK_64X64;
     const int w = mi_size_wide[bsize];
     const int h = mi_size_high[bsize];
-    const int num_cols = (cm->mi_cols + w - 1) / w;
-    const int num_rows = (cm->mi_rows + h - 1) / h;
-    CHECK_MEM_ERROR(cm, cpi->vmaf_rdmult_scaling_factors,
+    const int num_cols = (mi_params->mi_cols + w - 1) / w;
+    const int num_rows = (mi_params->mi_rows + h - 1) / h;
+    CHECK_MEM_ERROR(cm, cpi->vmaf_info.rdmult_scaling_factors,
                     aom_calloc(num_rows * num_cols,
-                               sizeof(*cpi->vmaf_rdmult_scaling_factors)));
+                               sizeof(*cpi->vmaf_info.rdmult_scaling_factors)));
+    cpi->vmaf_info.last_frame_unsharp_amount = 0.0;
   }
 #endif
 
-  set_tpl_stats_block_size(cpi);
-
-  for (int frame = 0; frame < MAX_LENGTH_TPL_FRAME_STATS; ++frame) {
-    const int mi_cols = ALIGN_POWER_OF_TWO(cm->mi_cols, MAX_MIB_SIZE_LOG2);
-    const int mi_rows = ALIGN_POWER_OF_TWO(cm->mi_rows, MAX_MIB_SIZE_LOG2);
-
-    cpi->tpl_stats_buffer[frame].is_valid = 0;
-    cpi->tpl_stats_buffer[frame].width =
-        mi_cols >> cpi->tpl_stats_block_mis_log2;
-    cpi->tpl_stats_buffer[frame].height =
-        mi_rows >> cpi->tpl_stats_block_mis_log2;
-    cpi->tpl_stats_buffer[frame].stride = cpi->tpl_stats_buffer[frame].width;
-    cpi->tpl_stats_buffer[frame].mi_rows = cm->mi_rows;
-    cpi->tpl_stats_buffer[frame].mi_cols = cm->mi_cols;
+  if (!is_stat_generation_stage(cpi)) {
+    setup_tpl_buffers(cm, &cpi->tpl_data);
   }
-
-  for (int frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
-    CHECK_MEM_ERROR(
-        cm, cpi->tpl_stats_pool[frame],
-        aom_calloc(cpi->tpl_stats_buffer[frame].width *
-                       cpi->tpl_stats_buffer[frame].height,
-                   sizeof(*cpi->tpl_stats_buffer[frame].tpl_stats_ptr)));
-    if (aom_alloc_frame_buffer(&cpi->tpl_rec_pool[frame], cm->width, cm->height,
-                               cm->seq_params.subsampling_x,
-                               cm->seq_params.subsampling_y,
-                               cm->seq_params.use_highbitdepth,
-                               AOM_ENC_NO_SCALE_BORDER, cm->byte_alignment))
-      aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
-                         "Failed to allocate frame buffer");
-  }
-
-  cpi->tpl_frame = &cpi->tpl_stats_buffer[REF_FRAMES + 1];
 
 #if CONFIG_COLLECT_PARTITION_STATS == 2
   av1_zero(cpi->partition_stats);
@@ -3407,8 +3457,9 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
    * called later when needed. This will avoid unnecessary calls of
    * av1_init_quantizer() for every frame.
    */
-  av1_init_quantizer(cpi);
-  av1_qm_init(cm);
+  av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
+                     cm->seq_params.bit_depth);
+  av1_qm_init(&cm->quant_params, av1_num_planes(cm));
 
   av1_loop_filter_init(cm);
   cm->superres_scale_denominator = SCALE_NUMERATOR;
@@ -3430,13 +3481,16 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
 
 void av1_remove_compressor(AV1_COMP *cpi) {
   AV1_COMMON *cm;
-  unsigned int i;
+  TplParams *const tpl_data = &cpi->tpl_data;
+  MultiThreadInfo *const mt_info = &cpi->mt_info;
+#if CONFIG_MULTITHREAD
+  pthread_mutex_t *const enc_row_mt_mutex_ = mt_info->enc_row_mt.mutex_;
+#endif
   int t;
 
   if (!cpi) return;
 
   cm = &cpi->common;
-  const int num_planes = av1_num_planes(cm);
 
   if (cm->current_frame.frame_number > 0) {
 #if CONFIG_ENTROPY_STATS
@@ -3455,7 +3509,7 @@ void av1_remove_compressor(AV1_COMP *cpi) {
       char results[512] = { 0 };
       FILE *f = fopen("opsnr.stt", "a");
       double time_encoded =
-          (cpi->last_end_time_stamp_seen - cpi->first_time_stamp_ever) /
+          (cpi->time_stamps.prev_end_seen - cpi->time_stamps.first_ever) /
           10000000.000;
       double total_encode_time =
           (cpi->time_receive_data + cpi->time_compress_data) / 1000.000;
@@ -3534,13 +3588,13 @@ void av1_remove_compressor(AV1_COMP *cpi) {
   }
 
   for (int frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
-    aom_free(cpi->tpl_stats_pool[frame]);
-    aom_free_frame_buffer(&cpi->tpl_rec_pool[frame]);
+    aom_free(tpl_data->tpl_stats_pool[frame]);
+    aom_free_frame_buffer(&tpl_data->tpl_rec_pool[frame]);
   }
 
-  for (t = cpi->num_workers - 1; t >= 0; --t) {
-    AVxWorker *const worker = &cpi->workers[t];
-    EncWorkerData *const thread_data = &cpi->tile_thr_data[t];
+  for (t = mt_info->num_workers - 1; t >= 0; --t) {
+    AVxWorker *const worker = &mt_info->workers[t];
+    EncWorkerData *const thread_data = &mt_info->tile_thr_data[t];
 
     // Deallocate allocated threads.
     aom_get_worker_interface()->end(worker);
@@ -3557,6 +3611,7 @@ void av1_remove_compressor(AV1_COMP *cpi) {
       aom_free(thread_data->td->above_pred_buf);
       aom_free(thread_data->td->left_pred_buf);
       aom_free(thread_data->td->wsrc_buf);
+      aom_free(thread_data->td->vt64x64);
 
       aom_free(thread_data->td->inter_modes_info);
       for (int x = 0; x < 2; x++) {
@@ -3567,24 +3622,25 @@ void av1_remove_compressor(AV1_COMP *cpi) {
       }
       aom_free(thread_data->td->mask_buf);
       aom_free(thread_data->td->counts);
-      av1_free_pc_tree(thread_data->td, num_planes);
       aom_free(thread_data->td->mbmi_ext);
+      av1_free_shared_coeff_buffer(&thread_data->td->shared_coeff_buf);
+      av1_free_sms_tree(thread_data->td);
       aom_free(thread_data->td);
     }
   }
 #if CONFIG_MULTITHREAD
-  if (cpi->row_mt_mutex_ != NULL) {
-    pthread_mutex_destroy(cpi->row_mt_mutex_);
-    aom_free(cpi->row_mt_mutex_);
+  if (enc_row_mt_mutex_ != NULL) {
+    pthread_mutex_destroy(enc_row_mt_mutex_);
+    aom_free(enc_row_mt_mutex_);
   }
 #endif
   av1_row_mt_mem_dealloc(cpi);
-  aom_free(cpi->tile_thr_data);
-  aom_free(cpi->workers);
+  aom_free(mt_info->tile_thr_data);
+  aom_free(mt_info->workers);
 
-  if (cpi->num_workers > 1) {
-    av1_loop_filter_dealloc(&cpi->lf_row_sync);
-    av1_loop_restoration_dealloc(&cpi->lr_row_sync, cpi->num_workers);
+  if (mt_info->num_workers > 1) {
+    av1_loop_filter_dealloc(&mt_info->lf_row_sync);
+    av1_loop_restoration_dealloc(&mt_info->lr_row_sync, mt_info->num_workers);
   }
 
   dealloc_compressor_data(cpi);
@@ -3595,16 +3651,10 @@ void av1_remove_compressor(AV1_COMP *cpi) {
 #endif  // CONFIG_INTERNAL_STATS
 
   av1_remove_common(cm);
-  for (i = 0; i < FRAME_BUFFERS; ++i) {
-    av1_hash_table_destroy(&cm->buffer_pool->frame_bufs[i].hash_table);
-  }
 #if CONFIG_HTB_TRELLIS
   if (cpi->sf.use_hash_based_trellis) hbt_destroy();
 #endif  // CONFIG_HTB_TRELLIS
   av1_free_ref_frame_buffers(cm->buffer_pool);
-
-  aom_free(cpi->twopass.total_stats);
-  aom_free(cpi->twopass.total_left_stats);
 
   aom_free(cpi);
 
@@ -3638,10 +3688,10 @@ static void generate_psnr_packet(AV1_COMP *cpi) {
   aom_codec_pkt_list_add(cpi->output_pkt_list, &pkt);
 }
 
-int av1_use_as_reference(AV1_COMP *cpi, int ref_frame_flags) {
+int av1_use_as_reference(int *ext_ref_frame_flags, int ref_frame_flags) {
   if (ref_frame_flags > ((1 << INTER_REFS_PER_FRAME) - 1)) return -1;
 
-  cpi->ext_ref_frame_flags = ref_frame_flags;
+  *ext_ref_frame_flags = ref_frame_flags;
   return 0;
 }
 
@@ -3669,9 +3719,10 @@ int av1_set_reference_enc(AV1_COMP *cpi, int idx, YV12_BUFFER_CONFIG *sd) {
   }
 }
 
-int av1_update_entropy(AV1_COMP *cpi, int update) {
-  cpi->ext_refresh_frame_context = update;
-  cpi->ext_refresh_frame_context_pending = 1;
+int av1_update_entropy(bool *ext_refresh_frame_context,
+                       bool *ext_refresh_frame_context_pending, bool update) {
+  *ext_refresh_frame_context = update;
+  *ext_refresh_frame_context_pending = 1;
   return 0;
 }
 
@@ -3766,18 +3817,18 @@ void aom_write_one_yuv_frame(AV1_COMMON *cm, YV12_BUFFER_CONFIG *s) {
 #endif  // OUTPUT_YUV_REC
 
 #define GM_RECODE_LOOP_NUM4X4_FACTOR 192
-static int recode_loop_test_global_motion(AV1_COMP *cpi) {
+static int recode_loop_test_global_motion(
+    WarpedMotionParams *const global_motion,
+    const int *const global_motion_used, int *const gm_params_cost) {
   int i;
   int recode = 0;
-  RD_COUNTS *const rdc = &cpi->td.rd_counts;
-  AV1_COMMON *const cm = &cpi->common;
   for (i = LAST_FRAME; i <= ALTREF_FRAME; ++i) {
-    if (cm->global_motion[i].wmtype != IDENTITY &&
-        rdc->global_motion_used[i] * GM_RECODE_LOOP_NUM4X4_FACTOR <
-            cpi->gmparams_cost[i]) {
-      cm->global_motion[i] = default_warp_params;
-      assert(cm->global_motion[i].wmtype == IDENTITY);
-      cpi->gmparams_cost[i] = 0;
+    if (global_motion[i].wmtype != IDENTITY &&
+        global_motion_used[i] * GM_RECODE_LOOP_NUM4X4_FACTOR <
+            gm_params_cost[i]) {
+      global_motion[i] = default_warp_params;
+      assert(global_motion[i].wmtype == IDENTITY);
+      gm_params_cost[i] = 0;
       recode = 1;
       // TODO(sarahparker): The earlier condition for recoding here was:
       // "recode |= (rdc->global_motion_used[i] > 0);". Can we bring something
@@ -3842,8 +3893,8 @@ static void scale_references(AV1_COMP *cpi) {
             ref->border < AOM_BORDER_IN_PIXELS) {
           RefCntBuffer *ref_fb = get_ref_frame_buf(cm, ref_frame);
           if (aom_yv12_realloc_with_new_border(
-                  &ref_fb->buf, AOM_BORDER_IN_PIXELS, cm->byte_alignment,
-                  num_planes) != 0) {
+                  &ref_fb->buf, AOM_BORDER_IN_PIXELS,
+                  cm->features.byte_alignment, num_planes) != 0) {
             aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                                "Failed to allocate frame buffer");
           }
@@ -3866,7 +3917,7 @@ static void scale_references(AV1_COMP *cpi) {
                   &new_fb->buf, cm->width, cm->height,
                   cm->seq_params.subsampling_x, cm->seq_params.subsampling_y,
                   cm->seq_params.use_highbitdepth, AOM_BORDER_IN_PIXELS,
-                  cm->byte_alignment, NULL, NULL, NULL)) {
+                  cm->features.byte_alignment, NULL, NULL, NULL)) {
             if (force_scaling) {
               // Release the reference acquired in the get_free_fb() call above.
               --new_fb->ref_count;
@@ -3905,41 +3956,43 @@ static void release_scaled_references(AV1_COMP *cpi) {
 
 static void set_mv_search_params(AV1_COMP *cpi) {
   const AV1_COMMON *const cm = &cpi->common;
+  MotionVectorSearchParams *const mv_search_params = &cpi->mv_search_params;
   const int max_mv_def = AOMMAX(cm->width, cm->height);
 
   // Default based on max resolution.
-  cpi->mv_step_param = av1_init_search_range(max_mv_def);
+  mv_search_params->mv_step_param = av1_init_search_range(max_mv_def);
 
   if (cpi->sf.mv_sf.auto_mv_step_size) {
     if (frame_is_intra_only(cm)) {
       // Initialize max_mv_magnitude for use in the first INTER frame
       // after a key/intra-only frame.
-      cpi->max_mv_magnitude = max_mv_def;
+      mv_search_params->max_mv_magnitude = max_mv_def;
     } else {
       // Use cpi->max_mv_magnitude == -1 to exclude first pass case.
-      if (cm->show_frame && cpi->max_mv_magnitude != -1) {
+      if (cm->show_frame && mv_search_params->max_mv_magnitude != -1) {
         // Allow mv_steps to correspond to twice the max mv magnitude found
         // in the previous frame, capped by the default max_mv_magnitude based
         // on resolution.
-        cpi->mv_step_param = av1_init_search_range(
-            AOMMIN(max_mv_def, 2 * cpi->max_mv_magnitude));
+        mv_search_params->mv_step_param = av1_init_search_range(
+            AOMMIN(max_mv_def, 2 * mv_search_params->max_mv_magnitude));
       }
-      cpi->max_mv_magnitude = -1;
+      mv_search_params->max_mv_magnitude = -1;
     }
   }
 }
 
-static void set_screen_content_options(AV1_COMP *cpi) {
-  AV1_COMMON *cm = &cpi->common;
+void av1_set_screen_content_options(const AV1_COMP *cpi,
+                                    FeatureFlags *features) {
+  const AV1_COMMON *const cm = &cpi->common;
 
   if (cm->seq_params.force_screen_content_tools != 2) {
-    cm->allow_screen_content_tools = cm->allow_intrabc =
+    features->allow_screen_content_tools = features->allow_intrabc =
         cm->seq_params.force_screen_content_tools;
     return;
   }
 
   if (cpi->oxcf.content == AOM_CONTENT_SCREEN) {
-    cm->allow_screen_content_tools = cm->allow_intrabc = 1;
+    features->allow_screen_content_tools = features->allow_intrabc = 1;
     return;
   }
 
@@ -3986,37 +4039,31 @@ static void set_screen_content_options(AV1_COMP *cpi) {
   }
 
   // The threshold values are selected experimentally.
-  cm->allow_screen_content_tools =
+  features->allow_screen_content_tools =
       counts_1 * blk_h * blk_w * 10 > width * height;
   // IntraBC would force loop filters off, so we use more strict rules that also
   // requires that the block has high variance.
-  cm->allow_intrabc = cm->allow_screen_content_tools &&
-                      counts_2 * blk_h * blk_w * 12 > width * height;
+  features->allow_intrabc = features->allow_screen_content_tools &&
+                            counts_2 * blk_h * blk_w * 12 > width * height;
 }
 
 static void set_size_independent_vars(AV1_COMP *cpi) {
   int i;
-  AV1_COMMON *cm = &cpi->common;
+  AV1_COMMON *const cm = &cpi->common;
   for (i = LAST_FRAME; i <= ALTREF_FRAME; ++i) {
     cm->global_motion[i] = default_warp_params;
   }
-  cpi->global_motion_search_done = 0;
-
-  if (frame_is_intra_only(cm)) set_screen_content_options(cpi);
-  cpi->is_screen_content_type = (cm->allow_screen_content_tools != 0);
+  cpi->gm_info.search_done = 0;
 
   av1_set_speed_features_framesize_independent(cpi, cpi->speed);
   av1_set_rd_speed_thresholds(cpi);
-  cm->interp_filter = SWITCHABLE;
-  cm->switchable_motion_mode = 1;
+  cm->features.interp_filter = SWITCHABLE;
+  cm->features.switchable_motion_mode = 1;
 }
 
 #if !CONFIG_REALTIME_ONLY
-#define MAX_GFUBOOST_FACTOR 10.0
-#define MIN_GFUBOOST_FACTOR 4.0
-static double get_gfu_boost_projection_factor(double min_factor,
-                                              double max_factor,
-                                              int frame_count) {
+double av1_get_gfu_boost_projection_factor(double min_factor, double max_factor,
+                                           int frame_count) {
   double factor = sqrt((double)frame_count);
   factor = AOMMIN(factor, max_factor);
   factor = AOMMAX(factor, min_factor);
@@ -4026,13 +4073,13 @@ static double get_gfu_boost_projection_factor(double min_factor,
 
 static int get_gfu_boost_from_r0_lap(double min_factor, double max_factor,
                                      double r0, int frames_to_key) {
-  double factor =
-      get_gfu_boost_projection_factor(min_factor, max_factor, frames_to_key);
+  double factor = av1_get_gfu_boost_projection_factor(min_factor, max_factor,
+                                                      frames_to_key);
   const int boost = (int)rint(factor / r0);
   return boost;
 }
 
-static double get_kf_boost_projection_factor(int frame_count) {
+double av1_get_kf_boost_projection_factor(int frame_count) {
   double factor = sqrt((double)frame_count);
   factor = AOMMIN(factor, 10.0);
   factor = AOMMAX(factor, 4.0);
@@ -4041,53 +4088,9 @@ static double get_kf_boost_projection_factor(int frame_count) {
 }
 
 static int get_kf_boost_from_r0(double r0, int frames_to_key) {
-  double factor = get_kf_boost_projection_factor(frames_to_key);
+  double factor = av1_get_kf_boost_projection_factor(frames_to_key);
   const int boost = (int)rint(factor / r0);
   return boost;
-}
-
-static int get_projected_prior_gfu_boost(AV1_COMP *cpi) {
-  int num_stats_used_for_gfu_boost = cpi->rc.num_stats_used_for_gfu_boost;
-  int frames_to_project = cpi->rc.num_stats_required_for_gfu_boost;
-
-  /*
-   * If frames_to_project is equal to num_stats_used_for_gfu_boost,
-   * it means that gfu_boost was calculated over frames_to_project to
-   * begin with(ie; all stats required were available), hence return
-   * the original boost.
-   */
-  if (num_stats_used_for_gfu_boost >= frames_to_project)
-    return cpi->rc.gfu_boost;
-
-  double min_boost_factor = sqrt(cpi->rc.baseline_gf_interval);
-  // Get the current tpl factor (number of frames = frames_to_project).
-  double tpl_factor = get_gfu_boost_projection_factor(
-      min_boost_factor, MAX_GFUBOOST_FACTOR, frames_to_project);
-  // Get the tpl factor when number of frames = num_stats_used_for_prior_boost.
-  double tpl_factor_num_stats = get_gfu_boost_projection_factor(
-      min_boost_factor, MAX_GFUBOOST_FACTOR, num_stats_used_for_gfu_boost);
-  int projected_gfu_boost =
-      (int)rint((tpl_factor * cpi->rc.gfu_boost) / tpl_factor_num_stats);
-  return projected_gfu_boost;
-}
-
-static int get_projected_prior_boost(AV1_COMP *cpi) {
-  /*
-   * If num_stats_used_for_kf_boost >= frames_to_key, then
-   * all stats needed for prior boost calculation are available.
-   * Hence projecting the prior boost is not needed in this cases.
-   */
-  if (cpi->rc.num_stats_used_for_kf_boost >= cpi->rc.frames_to_key)
-    return cpi->rc.kf_boost;
-
-  // Get the current tpl factor (number of frames = frames_to_key).
-  double tpl_factor = get_kf_boost_projection_factor(cpi->rc.frames_to_key);
-  // Get the tpl factor when number of frames = num_stats_used_for_kf_boost.
-  double tpl_factor_num_stats =
-      get_kf_boost_projection_factor(cpi->rc.num_stats_used_for_kf_boost);
-  int projected_kf_boost =
-      (int)rint((tpl_factor * cpi->rc.kf_boost) / tpl_factor_num_stats);
-  return projected_kf_boost;
 }
 #endif
 
@@ -4114,34 +4117,31 @@ static void process_tpl_stats_frame(AV1_COMP *cpi) {
   assert(IMPLIES(gf_group->size > 0, gf_group->index < gf_group->size));
 
   const int tpl_idx = gf_group->index;
-  TplDepFrame *tpl_frame = &cpi->tpl_frame[tpl_idx];
+  TplParams *const tpl_data = &cpi->tpl_data;
+  TplDepFrame *tpl_frame = &tpl_data->tpl_frame[tpl_idx];
   TplDepStats *tpl_stats = tpl_frame->tpl_stats_ptr;
 
   if (tpl_frame->is_valid) {
     int tpl_stride = tpl_frame->stride;
     int64_t intra_cost_base = 0;
     int64_t mc_dep_cost_base = 0;
-#if !USE_TPL_CLASSIC_MODEL
     int64_t mc_saved_base = 0;
     int64_t mc_count_base = 0;
-#endif  // !USE_TPL_CLASSIC_MODEL
-    const int step = 1 << cpi->tpl_stats_block_mis_log2;
+    const int step = 1 << tpl_data->tpl_stats_block_mis_log2;
     const int mi_cols_sr = av1_pixels_to_mi(cm->superres_upscaled_width);
 
-    for (int row = 0; row < cm->mi_rows; row += step) {
+    for (int row = 0; row < cm->mi_params.mi_rows; row += step) {
       for (int col = 0; col < mi_cols_sr; col += step) {
-        TplDepStats *this_stats =
-            &tpl_stats[av1_tpl_ptr_pos(cpi, row, col, tpl_stride)];
+        TplDepStats *this_stats = &tpl_stats[av1_tpl_ptr_pos(
+            row, col, tpl_stride, tpl_data->tpl_stats_block_mis_log2)];
         int64_t mc_dep_delta =
             RDCOST(tpl_frame->base_rdmult, this_stats->mc_dep_rate,
                    this_stats->mc_dep_dist);
         intra_cost_base += (this_stats->recrf_dist << RDDIV_BITS);
         mc_dep_cost_base +=
             (this_stats->recrf_dist << RDDIV_BITS) + mc_dep_delta;
-#if !USE_TPL_CLASSIC_MODEL
         mc_count_base += this_stats->mc_count;
         mc_saved_base += this_stats->mc_saved;
-#endif  // !USE_TPL_CLASSIC_MODEL
       }
     }
 
@@ -4157,11 +4157,10 @@ static void process_tpl_stats_frame(AV1_COMP *cpi) {
           const int gfu_boost = get_gfu_boost_from_r0_lap(
               min_boost_factor, MAX_GFUBOOST_FACTOR, cpi->rd.arf_r0,
               cpi->rc.num_stats_required_for_gfu_boost);
-          const int prior_boost = get_projected_prior_gfu_boost(cpi);
-          // printf("old boost %d new boost %d\n", prior_boost,
+          // printf("old boost %d new boost %d\n", cpi->rc.gfu_boost,
           //        gfu_boost);
           cpi->rc.gfu_boost = combine_prior_with_tpl_boost(
-              min_boost_factor, MAX_BOOST_COMBINE_FACTOR, prior_boost,
+              min_boost_factor, MAX_BOOST_COMBINE_FACTOR, cpi->rc.gfu_boost,
               gfu_boost, cpi->rc.num_stats_used_for_gfu_boost);
         } else {
           const int gfu_boost = (int)(200.0 / cpi->rd.r0);
@@ -4177,10 +4176,9 @@ static void process_tpl_stats_frame(AV1_COMP *cpi) {
           const int kf_boost =
               get_kf_boost_from_r0(cpi->rd.r0, cpi->rc.frames_to_key);
           if (cpi->lap_enabled) {
-            const int projected_prior_boost = get_projected_prior_boost(cpi);
             cpi->rc.kf_boost = combine_prior_with_tpl_boost(
                 MIN_BOOST_COMBINE_FACTOR, MAX_BOOST_COMBINE_FACTOR,
-                projected_prior_boost, kf_boost,
+                cpi->rc.kf_boost, kf_boost,
                 cpi->rc.num_stats_used_for_kf_boost);
           } else {
             cpi->rc.kf_boost = combine_prior_with_tpl_boost(
@@ -4189,12 +4187,10 @@ static void process_tpl_stats_frame(AV1_COMP *cpi) {
           }
         }
       }
-#if !USE_TPL_CLASSIC_MODEL
-      cpi->rd.mc_count_base =
-          (double)mc_count_base / (cm->mi_rows * cm->mi_cols);
-      cpi->rd.mc_saved_base =
-          (double)mc_saved_base / (cm->mi_rows * cm->mi_cols);
-#endif  // !USE_TPL_CLASSIC_MODEL
+      cpi->rd.mc_count_base = (double)mc_count_base /
+                              (cm->mi_params.mi_rows * cm->mi_params.mi_cols);
+      cpi->rd.mc_saved_base = (double)mc_saved_base /
+                              (cm->mi_params.mi_rows * cm->mi_params.mi_cols);
       aom_clear_system_state();
     }
   }
@@ -4230,30 +4226,40 @@ static void set_size_dependent_vars(AV1_COMP *cpi, int *q, int *bottom_index,
 
 static void init_motion_estimation(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
+  MotionVectorSearchParams *const mv_search_params = &cpi->mv_search_params;
   const int y_stride = cpi->scaled_source.y_stride;
   const int y_stride_src =
       ((cpi->oxcf.width != cm->width || cpi->oxcf.height != cm->height) ||
        av1_superres_scaled(cm))
           ? y_stride
           : cpi->lookahead->buf->img.y_stride;
-  // Update if ss_cfg is uninitialized or the current frame has a new stride
-  const int should_update = !cpi->ss_cfg[SS_CFG_SRC].stride ||
-                            !cpi->ss_cfg[SS_CFG_LOOKAHEAD].stride ||
-                            (y_stride != cpi->ss_cfg[SS_CFG_SRC].stride);
+  int fpf_y_stride = cm->cur_frame != NULL ? cm->cur_frame->buf.y_stride
+                                           : cpi->scaled_source.y_stride;
+
+  // Update if search_site_cfg is uninitialized or the current frame has a new
+  // stride
+  const int should_update =
+      !mv_search_params->search_site_cfg[SS_CFG_SRC].stride ||
+      !mv_search_params->search_site_cfg[SS_CFG_LOOKAHEAD].stride ||
+      (y_stride != mv_search_params->search_site_cfg[SS_CFG_SRC].stride);
 
   if (!should_update) {
     return;
   }
 
   if (cpi->sf.mv_sf.search_method == DIAMOND) {
-    av1_init_dsmotion_compensation(&cpi->ss_cfg[SS_CFG_SRC], y_stride);
-    av1_init_dsmotion_compensation(&cpi->ss_cfg[SS_CFG_LOOKAHEAD],
-                                   y_stride_src);
+    av1_init_dsmotion_compensation(
+        &mv_search_params->search_site_cfg[SS_CFG_SRC], y_stride);
+    av1_init_dsmotion_compensation(
+        &mv_search_params->search_site_cfg[SS_CFG_LOOKAHEAD], y_stride_src);
   } else {
-    av1_init3smotion_compensation(&cpi->ss_cfg[SS_CFG_SRC], y_stride);
-    av1_init3smotion_compensation(&cpi->ss_cfg[SS_CFG_LOOKAHEAD], y_stride_src);
+    av1_init3smotion_compensation(
+        &mv_search_params->search_site_cfg[SS_CFG_SRC], y_stride);
+    av1_init3smotion_compensation(
+        &mv_search_params->search_site_cfg[SS_CFG_LOOKAHEAD], y_stride_src);
   }
-  av1_init_motion_fpf(&cpi->ss_cfg[SS_CFG_FPF], y_stride);
+  av1_init_motion_fpf(&mv_search_params->search_site_cfg[SS_CFG_FPF],
+                      fpf_y_stride);
 }
 
 #define COUPLED_CHROMA_FROM_LUMA_RESTORATION 0
@@ -4288,19 +4294,16 @@ static void init_ref_frame_bufs(AV1_COMP *cpi) {
   for (i = 0; i < FRAME_BUFFERS; ++i) {
     pool->frame_bufs[i].ref_count = 0;
   }
-  if (cm->seq_params.force_screen_content_tools) {
-    for (i = 0; i < FRAME_BUFFERS; ++i) {
-      av1_hash_table_init(&pool->frame_bufs[i].hash_table, &cpi->td.mb);
-    }
-  }
 }
 
 void av1_check_initial_width(AV1_COMP *cpi, int use_highbitdepth,
                              int subsampling_x, int subsampling_y) {
   AV1_COMMON *const cm = &cpi->common;
   SequenceHeader *const seq_params = &cm->seq_params;
+  InitialDimensions *const initial_dimensions = &cpi->initial_dimensions;
 
-  if (!cpi->initial_width || seq_params->use_highbitdepth != use_highbitdepth ||
+  if (!initial_dimensions->width ||
+      seq_params->use_highbitdepth != use_highbitdepth ||
       seq_params->subsampling_x != subsampling_x ||
       seq_params->subsampling_y != subsampling_y) {
     seq_params->subsampling_x = subsampling_x;
@@ -4310,22 +4313,24 @@ void av1_check_initial_width(AV1_COMP *cpi, int use_highbitdepth,
     av1_set_speed_features_framesize_independent(cpi, cpi->oxcf.speed);
     av1_set_speed_features_framesize_dependent(cpi, cpi->oxcf.speed);
 
-    alloc_altref_frame_buffer(cpi);
+    if (!is_stat_generation_stage(cpi)) {
+      alloc_altref_frame_buffer(cpi);
+      alloc_util_frame_buffers(cpi);
+    }
     init_ref_frame_bufs(cpi);
-    alloc_util_frame_buffers(cpi);
 
     init_motion_estimation(cpi);  // TODO(agrange) This can be removed.
 
-    cpi->initial_width = cm->width;
-    cpi->initial_height = cm->height;
-    cpi->initial_mbs = cm->MBs;
+    initial_dimensions->width = cm->width;
+    initial_dimensions->height = cm->height;
+    cpi->initial_mbs = cm->mi_params.MBs;
   }
 }
 
 // Returns 1 if the assigned width or height was <= 0.
 int av1_set_size_literal(AV1_COMP *cpi, int width, int height) {
   AV1_COMMON *cm = &cpi->common;
-  const int num_planes = av1_num_planes(cm);
+  InitialDimensions *const initial_dimensions = &cpi->initial_dimensions;
   av1_check_initial_width(cpi, cm->seq_params.use_highbitdepth,
                           cm->seq_params.subsampling_x,
                           cm->seq_params.subsampling_y);
@@ -4335,13 +4340,15 @@ int av1_set_size_literal(AV1_COMP *cpi, int width, int height) {
   cm->width = width;
   cm->height = height;
 
-  if (cpi->initial_width && cpi->initial_height &&
-      (cm->width > cpi->initial_width || cm->height > cpi->initial_height)) {
+  if (initial_dimensions->width && initial_dimensions->height &&
+      (cm->width > initial_dimensions->width ||
+       cm->height > initial_dimensions->height)) {
     av1_free_context_buffers(cm);
-    av1_free_pc_tree(&cpi->td, num_planes);
+    av1_free_shared_coeff_buffer(&cpi->td.shared_coeff_buf);
+    av1_free_sms_tree(&cpi->td);
     alloc_compressor_data(cpi);
     realloc_segmentation_maps(cpi);
-    cpi->initial_width = cpi->initial_height = 0;
+    initial_dimensions->width = initial_dimensions->height = 0;
   }
   update_frame_size(cpi);
 
@@ -4359,7 +4366,8 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
     // There has been a change in the encoded frame size
     av1_set_size_literal(cpi, width, height);
     // Recalculate 'all_lossless' in case super-resolution was (un)selected.
-    cm->all_lossless = cm->coded_lossless && !av1_superres_scaled(cm);
+    cm->features.all_lossless =
+        cm->features.coded_lossless && !av1_superres_scaled(cm);
   }
   set_mv_search_params(cpi);
 
@@ -4370,11 +4378,14 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
   alloc_frame_mvs(cm, cm->cur_frame);
 
   // Allocate above context buffers
-  if (cm->num_allocated_above_context_planes < av1_num_planes(cm) ||
-      cm->num_allocated_above_context_mi_col < cm->mi_cols ||
-      cm->num_allocated_above_contexts < cm->tile_rows) {
-    av1_free_above_context_buffers(cm, cm->num_allocated_above_contexts);
-    if (av1_alloc_above_context_buffers(cm, cm->tile_rows))
+  CommonContexts *const above_contexts = &cm->above_contexts;
+  if (above_contexts->num_planes < av1_num_planes(cm) ||
+      above_contexts->num_mi_cols < cm->mi_params.mi_cols ||
+      above_contexts->num_tile_rows < cm->tiles.rows) {
+    av1_free_above_context_buffers(above_contexts);
+    if (av1_alloc_above_context_buffers(above_contexts, cm->tiles.rows,
+                                        cm->mi_params.mi_cols,
+                                        av1_num_planes(cm)))
       aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                          "Failed to allocate context buffers");
   }
@@ -4383,7 +4394,8 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
   if (aom_realloc_frame_buffer(
           &cm->cur_frame->buf, cm->width, cm->height, seq_params->subsampling_x,
           seq_params->subsampling_y, seq_params->use_highbitdepth,
-          cpi->oxcf.border_in_pixels, cm->byte_alignment, NULL, NULL, NULL))
+          cpi->oxcf.border_in_pixels, cm->features.byte_alignment, NULL, NULL,
+          NULL))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate frame buffer");
 
@@ -4396,7 +4408,7 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
     cm->rst_info[i].frame_restoration_type = RESTORE_NONE;
 
   av1_alloc_restoration_buffers(cm);
-  alloc_util_frame_buffers(cpi);
+  if (!is_stat_generation_stage(cpi)) alloc_util_frame_buffers(cpi);
   init_motion_estimation(cpi);
 
   for (ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
@@ -4442,7 +4454,7 @@ static uint8_t calculate_next_resize_scale(const AV1_COMP *cpi) {
 static int superres_in_recode_allowed(const AV1_COMP *const cpi) {
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   // Empirically found to not be beneficial for AOM_Q mode and images coding.
-  return oxcf->superres_mode == SUPERRES_AUTO &&
+  return oxcf->superres_mode == AOM_SUPERRES_AUTO &&
          (oxcf->rc_mode == AOM_VBR || oxcf->rc_mode == AOM_CQ) &&
          cpi->rc.frames_to_key > 1;
 }
@@ -4518,6 +4530,7 @@ static uint8_t get_superres_denom_for_qindex(const AV1_COMP *cpi, int qindex,
   */
 #if CONFIG_SUPERRES_IN_RECODE
   if (superres_in_recode_allowed(cpi)) {
+    assert(cpi->superres_mode != AOM_SUPERRES_NONE);
     // Force superres to be tried in the recode loop, as full-res is also going
     // to be tried anyway.
     denom = AOMMAX(denom, SCALE_NUMERATOR + 1);
@@ -4526,7 +4539,7 @@ static uint8_t get_superres_denom_for_qindex(const AV1_COMP *cpi, int qindex,
   return denom;
 }
 
-// If true, SUPERRES_AUTO mode will exhaustively search over all superres
+// If true, AOM_SUPERRES_AUTO mode will exhaustively search over all superres
 // denominators for all frames (except overlay and internal overlay frames).
 #define SUPERRES_RECODE_ALL_RATIOS 0
 
@@ -4539,23 +4552,29 @@ static uint8_t calculate_next_superres_scale(AV1_COMP *cpi) {
 
   // Make sure that superres mode of the frame is consistent with the
   // sequence-level flag.
-  assert(IMPLIES(oxcf->superres_mode != SUPERRES_NONE,
+  assert(IMPLIES(oxcf->superres_mode != AOM_SUPERRES_NONE,
                  cpi->common.seq_params.enable_superres));
   assert(IMPLIES(!cpi->common.seq_params.enable_superres,
-                 oxcf->superres_mode == SUPERRES_NONE));
+                 oxcf->superres_mode == AOM_SUPERRES_NONE));
+  // Make sure that superres mode for current encoding is consistent with user
+  // provided superres mode.
+  assert(IMPLIES(oxcf->superres_mode != AOM_SUPERRES_AUTO,
+                 cpi->superres_mode == oxcf->superres_mode));
 
-  switch (oxcf->superres_mode) {
-    case SUPERRES_NONE: new_denom = SCALE_NUMERATOR; break;
-    case SUPERRES_FIXED:
+  // Note: we must look at the current superres_mode to be tried in 'cpi' here,
+  // not the user given mode in 'oxcf'.
+  switch (cpi->superres_mode) {
+    case AOM_SUPERRES_NONE: new_denom = SCALE_NUMERATOR; break;
+    case AOM_SUPERRES_FIXED:
       if (cpi->common.current_frame.frame_type == KEY_FRAME)
         new_denom = oxcf->superres_kf_scale_denominator;
       else
         new_denom = oxcf->superres_scale_denominator;
       break;
-    case SUPERRES_RANDOM: new_denom = lcg_rand16(&seed) % 9 + 8; break;
-    case SUPERRES_QTHRESH: {
+    case AOM_SUPERRES_RANDOM: new_denom = lcg_rand16(&seed) % 9 + 8; break;
+    case AOM_SUPERRES_QTHRESH: {
       // Do not use superres when screen content tools are used.
-      if (cpi->common.allow_screen_content_tools) break;
+      if (cpi->common.features.allow_screen_content_tools) break;
       if (oxcf->rc_mode == AOM_VBR || oxcf->rc_mode == AOM_CQ)
         av1_set_target_rate(cpi, cpi->oxcf.width, cpi->oxcf.height);
 
@@ -4575,9 +4594,9 @@ static uint8_t calculate_next_superres_scale(AV1_COMP *cpi) {
       }
       break;
     }
-    case SUPERRES_AUTO: {
+    case AOM_SUPERRES_AUTO: {
       // Do not use superres when screen content tools are used.
-      if (cpi->common.allow_screen_content_tools) break;
+      if (cpi->common.features.allow_screen_content_tools) break;
       if (oxcf->rc_mode == AOM_VBR || oxcf->rc_mode == AOM_CQ)
         av1_set_target_rate(cpi, cpi->oxcf.width, cpi->oxcf.height);
 
@@ -4618,7 +4637,7 @@ static int dimensions_are_ok(int owidth, int oheight, size_params_type *rsz) {
 }
 
 static int validate_size_scales(RESIZE_MODE resize_mode,
-                                SUPERRES_MODE superres_mode, int owidth,
+                                aom_superres_mode superres_mode, int owidth,
                                 int oheight, size_params_type *rsz) {
   if (dimensions_are_ok(owidth, oheight, rsz)) {  // Nothing to do.
     return 1;
@@ -4629,14 +4648,15 @@ static int validate_size_scales(RESIZE_MODE resize_mode,
       AOMMAX(DIVIDE_AND_ROUND(owidth * SCALE_NUMERATOR, rsz->resize_width),
              DIVIDE_AND_ROUND(oheight * SCALE_NUMERATOR, rsz->resize_height));
 
-  if (resize_mode != RESIZE_RANDOM && superres_mode == SUPERRES_RANDOM) {
+  if (resize_mode != RESIZE_RANDOM && superres_mode == AOM_SUPERRES_RANDOM) {
     // Alter superres scale as needed to enforce conformity.
     rsz->superres_denom =
         (2 * SCALE_NUMERATOR * SCALE_NUMERATOR) / resize_denom;
     if (!dimensions_are_ok(owidth, oheight, rsz)) {
       if (rsz->superres_denom > SCALE_NUMERATOR) --rsz->superres_denom;
     }
-  } else if (resize_mode == RESIZE_RANDOM && superres_mode != SUPERRES_RANDOM) {
+  } else if (resize_mode == RESIZE_RANDOM &&
+             superres_mode != AOM_SUPERRES_RANDOM) {
     // Alter resize scale as needed to enforce conformity.
     resize_denom =
         (2 * SCALE_NUMERATOR * SCALE_NUMERATOR) / rsz->superres_denom;
@@ -4653,7 +4673,8 @@ static int validate_size_scales(RESIZE_MODE resize_mode,
                                   resize_denom);
       }
     }
-  } else if (resize_mode == RESIZE_RANDOM && superres_mode == SUPERRES_RANDOM) {
+  } else if (resize_mode == RESIZE_RANDOM &&
+             superres_mode == AOM_SUPERRES_RANDOM) {
     // Alter both resize and superres scales as needed to enforce conformity.
     do {
       if (resize_denom > rsz->superres_denom)
@@ -4677,6 +4698,7 @@ static int validate_size_scales(RESIZE_MODE resize_mode,
 // Calculates resize and superres params for next frame
 static size_params_type calculate_next_size_params(AV1_COMP *cpi) {
   const AV1EncoderConfig *oxcf = &cpi->oxcf;
+  ResizePendingParams *resize_pending_params = &cpi->resize_pending_params;
   size_params_type rsz = { oxcf->width, oxcf->height, SCALE_NUMERATOR };
   int resize_denom = SCALE_NUMERATOR;
   if (has_no_stats_stage(cpi) && cpi->use_svc &&
@@ -4686,19 +4708,19 @@ static size_params_type calculate_next_size_params(AV1_COMP *cpi) {
     return rsz;
   }
   if (is_stat_generation_stage(cpi)) return rsz;
-  if (cpi->resize_pending_width && cpi->resize_pending_height) {
-    rsz.resize_width = cpi->resize_pending_width;
-    rsz.resize_height = cpi->resize_pending_height;
-    cpi->resize_pending_width = cpi->resize_pending_height = 0;
+  if (resize_pending_params->width && resize_pending_params->height) {
+    rsz.resize_width = resize_pending_params->width;
+    rsz.resize_height = resize_pending_params->height;
+    resize_pending_params->width = resize_pending_params->height = 0;
   } else {
     resize_denom = calculate_next_resize_scale(cpi);
-    rsz.resize_width = cpi->oxcf.width;
-    rsz.resize_height = cpi->oxcf.height;
+    rsz.resize_width = oxcf->width;
+    rsz.resize_height = oxcf->height;
     av1_calculate_scaled_size(&rsz.resize_width, &rsz.resize_height,
                               resize_denom);
   }
   rsz.superres_denom = calculate_next_superres_scale(cpi);
-  if (!validate_size_scales(oxcf->resize_mode, oxcf->superres_mode, oxcf->width,
+  if (!validate_size_scales(oxcf->resize_mode, cpi->superres_mode, oxcf->width,
                             oxcf->height, &rsz))
     assert(0 && "Invalid scale parameters");
   return rsz;
@@ -4736,7 +4758,7 @@ static void superres_post_encode(AV1_COMP *cpi) {
 
   assert(cpi->oxcf.enable_superres);
   assert(!is_lossless_requested(&cpi->oxcf));
-  assert(!cm->all_lossless);
+  assert(!cm->features.all_lossless);
 
   av1_superres_upscale(cm, NULL);
 
@@ -4755,7 +4777,8 @@ static void superres_post_encode(AV1_COMP *cpi) {
             &cpi->scaled_source, cm->superres_upscaled_width,
             cm->superres_upscaled_height, cm->seq_params.subsampling_x,
             cm->seq_params.subsampling_y, cm->seq_params.use_highbitdepth,
-            AOM_BORDER_IN_PIXELS, cm->byte_alignment, NULL, NULL, NULL))
+            AOM_BORDER_IN_PIXELS, cm->features.byte_alignment, NULL, NULL,
+            NULL))
       aom_internal_error(
           &cm->error, AOM_CODEC_MEM_ERROR,
           "Failed to reallocate scaled source buffer for superres");
@@ -4770,6 +4793,8 @@ static void superres_post_encode(AV1_COMP *cpi) {
 static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
                                    MACROBLOCKD *xd, int use_restoration,
                                    int use_cdef) {
+  MultiThreadInfo *const mt_info = &cpi->mt_info;
+  const int num_workers = mt_info->num_workers;
   if (use_restoration)
     av1_loop_restoration_save_boundary_lines(&cm->cur_frame->buf, cm, 0);
 
@@ -4804,10 +4829,10 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
     if (cm->rst_info[0].frame_restoration_type != RESTORE_NONE ||
         cm->rst_info[1].frame_restoration_type != RESTORE_NONE ||
         cm->rst_info[2].frame_restoration_type != RESTORE_NONE) {
-      if (cpi->num_workers > 1)
-        av1_loop_restoration_filter_frame_mt(&cm->cur_frame->buf, cm, 0,
-                                             cpi->workers, cpi->num_workers,
-                                             &cpi->lr_row_sync, &cpi->lr_ctxt);
+      if (num_workers > 1)
+        av1_loop_restoration_filter_frame_mt(
+            &cm->cur_frame->buf, cm, 0, mt_info->workers, num_workers,
+            &mt_info->lr_row_sync, &cpi->lr_ctxt);
       else
         av1_loop_restoration_filter_frame(&cm->cur_frame->buf, cm, 0,
                                           &cpi->lr_ctxt);
@@ -4823,17 +4848,21 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
 }
 
 static void loopfilter_frame(AV1_COMP *cpi, AV1_COMMON *cm) {
+  MultiThreadInfo *const mt_info = &cpi->mt_info;
+  const int num_workers = mt_info->num_workers;
   const int num_planes = av1_num_planes(cm);
   MACROBLOCKD *xd = &cpi->td.mb.e_mbd;
 
   assert(IMPLIES(is_lossless_requested(&cpi->oxcf),
-                 cm->coded_lossless && cm->all_lossless));
+                 cm->features.coded_lossless && cm->features.all_lossless));
 
-  const int use_loopfilter = !cm->coded_lossless && !cm->large_scale_tile;
-  const int use_cdef = cm->seq_params.enable_cdef && !cm->coded_lossless &&
-                       !cm->large_scale_tile;
+  const int use_loopfilter =
+      !cm->features.coded_lossless && !cm->tiles.large_scale;
+  const int use_cdef = cm->seq_params.enable_cdef &&
+                       !cm->features.coded_lossless && !cm->tiles.large_scale;
   const int use_restoration = cm->seq_params.enable_restoration &&
-                              !cm->all_lossless && !cm->large_scale_tile;
+                              !cm->features.all_lossless &&
+                              !cm->tiles.large_scale;
 
   struct loopfilter *lf = &cm->lf;
 
@@ -4849,13 +4878,13 @@ static void loopfilter_frame(AV1_COMP *cpi, AV1_COMMON *cm) {
   }
 
   if (lf->filter_level[0] || lf->filter_level[1]) {
-    if (cpi->num_workers > 1)
+    if (num_workers > 1)
       av1_loop_filter_frame_mt(&cm->cur_frame->buf, cm, xd, 0, num_planes, 0,
 #if CONFIG_LPF_MASK
                                0,
 #endif
-                               cpi->workers, cpi->num_workers,
-                               &cpi->lf_row_sync);
+                               mt_info->workers, num_workers,
+                               &mt_info->lf_row_sync);
     else
       av1_loop_filter_frame(&cm->cur_frame->buf, cm, xd,
 #if CONFIG_LPF_MASK
@@ -4928,14 +4957,14 @@ static void finalize_encoded_frame(AV1_COMP *const cpi) {
   }
 
   // Initialise all tiles' contexts from the global frame context
-  for (int tile_col = 0; tile_col < cm->tile_cols; tile_col++) {
-    for (int tile_row = 0; tile_row < cm->tile_rows; tile_row++) {
-      const int tile_idx = tile_row * cm->tile_cols + tile_col;
+  for (int tile_col = 0; tile_col < cm->tiles.cols; tile_col++) {
+    for (int tile_row = 0; tile_row < cm->tiles.rows; tile_row++) {
+      const int tile_idx = tile_row * cm->tiles.cols + tile_col;
       cpi->tile_data[tile_idx].tctx = *cm->fc;
     }
   }
 
-  fix_interp_filter(&cm->interp_filter, cpi->td.counts);
+  fix_interp_filter(&cm->features.interp_filter, cpi->td.counts);
 }
 
 static int get_regulated_q_overshoot(AV1_COMP *const cpi, int q_low, int q_high,
@@ -4990,6 +5019,7 @@ static void recode_loop_update_q(
     int *const low_cr_seen, const int loop_at_this_size) {
   AV1_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
+  *loop = 0;
 
   const int min_cr = cpi->oxcf.min_cr;
   if (min_cr > 0) {
@@ -5167,7 +5197,7 @@ static uint16_t setup_interp_filter_search_mask(AV1_COMP *cpi) {
   int ref_total[REF_FRAMES] = { 0 };
   uint16_t mask = ALLOW_ALL_INTERP_FILT_MASK;
 
-  if (cpi->common.last_frame_type == KEY_FRAME || cpi->refresh_alt_ref_frame)
+  if (cpi->last_frame_type == KEY_FRAME || cpi->refresh_frame.alt_ref_frame)
     return mask;
 
   for (MV_REFERENCE_FRAME ref = LAST_FRAME; ref <= ALTREF_FRAME; ++ref) {
@@ -5213,6 +5243,7 @@ static void screen_content_tools_determination(
     const int is_screen_content_type_orig_decision, const int pass,
     int *projected_size_pass, PSNR_STATS *psnr) {
   AV1_COMMON *const cm = &cpi->common;
+  FeatureFlags *const features = &cm->features;
   projected_size_pass[pass] = cpi->rc.projected_frame_size;
 #if CONFIG_AV1_HIGHBITDEPTH
   const uint32_t in_bit_depth = cpi->oxcf.input_bit_depth;
@@ -5228,62 +5259,60 @@ static void screen_content_tools_determination(
   const int is_sc_encoding_much_better = psnr_diff > STRICT_PSNR_DIFF_THRESH;
   if (is_sc_encoding_much_better) {
     // Use screen content tools, if we get coding gain.
-    cm->allow_screen_content_tools = 1;
-    cm->allow_intrabc = cpi->intrabc_used;
+    features->allow_screen_content_tools = 1;
+    features->allow_intrabc = cpi->intrabc_used;
     cpi->is_screen_content_type = 1;
   } else {
     // Use original screen content decision.
-    cm->allow_screen_content_tools = allow_screen_content_tools_orig_decision;
-    cm->allow_intrabc = allow_intrabc_orig_decision;
+    features->allow_screen_content_tools =
+        allow_screen_content_tools_orig_decision;
+    features->allow_intrabc = allow_intrabc_orig_decision;
     cpi->is_screen_content_type = is_screen_content_type_orig_decision;
   }
 }
 
-// Set or save some encoding parameters. In the two encoding pass,
-// we want to make the encoding process fast. A fixed block partition size,
-// and a large q is used.
-static void set_or_save_encoding_params_for_screen_content(AV1_COMP *cpi,
-                                                           const int pass) {
+// Set some encoding parameters to make the encoding process fast.
+// A fixed block partition size, and a large q is used.
+static void set_encoding_params_for_screen_content(AV1_COMP *cpi,
+                                                   const int pass) {
   AV1_COMMON *const cm = &cpi->common;
   if (pass == 0) {
     // In the first pass, encode without screen content tools.
     // Use a high q, and a fixed block size for fast encoding.
-    cm->allow_screen_content_tools = 0;
-    cm->allow_intrabc = 0;
+    cm->features.allow_screen_content_tools = 0;
+    cm->features.allow_intrabc = 0;
     cpi->is_screen_content_type = 0;
     cpi->sf.part_sf.partition_search_type = FIXED_PARTITION;
     cpi->sf.part_sf.always_this_block_size = BLOCK_32X32;
-  } else {
-    // In the second pass, encode with screen content tools.
-    // Use a high q, and a fixed block size for fast encoding.
-    cm->allow_screen_content_tools = 1;
-    // TODO(chengchen): turn intrabc on could lead to data race issue.
-    // cm->allow_intrabc = 1;
-    cpi->is_screen_content_type = 1;
-    cpi->sf.part_sf.partition_search_type = FIXED_PARTITION;
-    cpi->sf.part_sf.always_this_block_size = BLOCK_32X32;
-    av1_hash_table_create(&cm->cur_frame->hash_table);
+    return;
   }
+  assert(pass == 1);
+  // In the second pass, encode with screen content tools.
+  // Use a high q, and a fixed block size for fast encoding.
+  cm->features.allow_screen_content_tools = 1;
+  // TODO(chengchen): turn intrabc on could lead to data race issue.
+  // cm->allow_intrabc = 1;
+  cpi->is_screen_content_type = 1;
+  cpi->sf.part_sf.partition_search_type = FIXED_PARTITION;
+  cpi->sf.part_sf.always_this_block_size = BLOCK_32X32;
 }
 
 // Determines whether to use screen content tools for the key frame group.
-// This function modifies "cm->allow_screen_content_tools",
-// "cm->allow_intrabc" and "cpi->is_screen_content_type".
+// This function modifies "cm->features.allow_screen_content_tools",
+// "cm->features.allow_intrabc" and "cpi->is_screen_content_type".
 static void determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig) {
-  if (!is_stat_consumption_stage_twopass(cpi)) return;
-
   AV1_COMMON *const cm = &cpi->common;
   // Variables to help determine if we should allow screen content tools.
   int projected_size_pass[3] = { 0 };
   PSNR_STATS psnr[3];
   const int is_key_frame = cm->current_frame.frame_type == KEY_FRAME;
   const int allow_screen_content_tools_orig_decision =
-      cm->allow_screen_content_tools;
-  const int allow_intrabc_orig_decision = cm->allow_intrabc;
+      cm->features.allow_screen_content_tools;
+  const int allow_intrabc_orig_decision = cm->features.allow_intrabc;
   const int is_screen_content_type_orig_decision = cpi->is_screen_content_type;
   // Turn off the encoding trial for forward key frame and superres.
   if (cpi->sf.rt_sf.use_nonrd_pick_mode || cpi->oxcf.fwd_kf_enabled ||
-      cpi->oxcf.superres_mode != SUPERRES_NONE || cpi->oxcf.mode == REALTIME ||
+      cpi->superres_mode != AOM_SUPERRES_NONE || cpi->oxcf.mode == REALTIME ||
       is_screen_content_type_orig_decision || !is_key_frame) {
     return;
   }
@@ -5299,50 +5328,52 @@ static void determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig) {
       cpi->sf.part_sf.always_this_block_size;
 
   // Setup necessary params for encoding, including frame source, etc.
-  {
-    aom_clear_system_state();
+  aom_clear_system_state();
 
-    cpi->source =
-        av1_scale_if_required(cm, cpi->unscaled_source, &cpi->scaled_source);
-    if (cpi->unscaled_last_source != NULL) {
-      cpi->last_source = av1_scale_if_required(cm, cpi->unscaled_last_source,
-                                               &cpi->scaled_last_source);
-    }
-
-    setup_frame(cpi);
-
-    if (cm->seg.enabled) {
-      if (!cm->seg.update_data && cm->prev_frame) {
-        segfeatures_copy(&cm->seg, &cm->prev_frame->seg);
-        cm->seg.enabled = cm->prev_frame->seg.enabled;
-      } else {
-        av1_calculate_segdata(&cm->seg);
-      }
-    } else {
-      memset(&cm->seg, 0, sizeof(cm->seg));
-    }
-    segfeatures_copy(&cm->cur_frame->seg, &cm->seg);
-    cm->cur_frame->seg.enabled = cm->seg.enabled;
+  cpi->source =
+      av1_scale_if_required(cm, cpi->unscaled_source, &cpi->scaled_source);
+  if (cpi->unscaled_last_source != NULL) {
+    cpi->last_source = av1_scale_if_required(cm, cpi->unscaled_last_source,
+                                             &cpi->scaled_last_source);
   }
 
-  // The two encodes is to help determine whether to use screen content tools,
-  // with a high q and fixed partition.
-  // Then reset the partition speed feature.
+  setup_frame(cpi);
+
+  if (cm->seg.enabled) {
+    if (!cm->seg.update_data && cm->prev_frame) {
+      segfeatures_copy(&cm->seg, &cm->prev_frame->seg);
+      cm->seg.enabled = cm->prev_frame->seg.enabled;
+    } else {
+      av1_calculate_segdata(&cm->seg);
+    }
+  } else {
+    memset(&cm->seg, 0, sizeof(cm->seg));
+  }
+  segfeatures_copy(&cm->cur_frame->seg, &cm->seg);
+  cm->cur_frame->seg.enabled = cm->seg.enabled;
+
+  // The two encoding passes aim to help determine whether to use screen
+  // content tools, with a high q and fixed partition.
   for (int pass = 0; pass < 2; ++pass) {
-    set_or_save_encoding_params_for_screen_content(cpi, pass);
+    set_encoding_params_for_screen_content(cpi, pass);
 #if CONFIG_TUNE_VMAF
     if (cpi->oxcf.tuning == AOM_TUNE_VMAF_WITH_PREPROCESSING ||
         cpi->oxcf.tuning == AOM_TUNE_VMAF_WITHOUT_PREPROCESSING ||
         cpi->oxcf.tuning == AOM_TUNE_VMAF_MAX_GAIN) {
       av1_set_quantizer(
-          cm, av1_get_vmaf_base_qindex(cpi, q_for_screen_content_quick_run));
+          cm, cpi->oxcf.qm_minlevel, cpi->oxcf.qm_maxlevel,
+          av1_get_vmaf_base_qindex(cpi, q_for_screen_content_quick_run));
     } else {
 #endif
-      av1_set_quantizer(cm, q_for_screen_content_quick_run);
+      av1_set_quantizer(cm, cpi->oxcf.qm_minlevel, cpi->oxcf.qm_maxlevel,
+                        q_for_screen_content_quick_run);
 #if CONFIG_TUNE_VMAF
     }
 #endif
-    if (cpi->oxcf.deltaq_mode != NO_DELTA_Q) av1_init_quantizer(cpi);
+    av1_set_speed_features_qindex_dependent(cpi, cpi->oxcf.speed);
+    if (cpi->oxcf.deltaq_mode != NO_DELTA_Q)
+      av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
+                         cm->seq_params.bit_depth);
 
     av1_set_variance_partition_thresholds(cpi, q_for_screen_content_quick_run,
                                           0);
@@ -5364,6 +5395,7 @@ static void determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig) {
 static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
   AV1_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
+  GlobalMotionInfo *const gm_info = &cpi->gm_info;
   const int allow_recode = (cpi->sf.hl_sf.recode_loop != DISALLOW_RECODE);
   // Must allow recode if minimum compression ratio is set.
   assert(IMPLIES(cpi->oxcf.min_cr > 0, allow_recode));
@@ -5371,16 +5403,19 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
   set_size_independent_vars(cpi);
   if (is_stat_consumption_stage_twopass(cpi) &&
       cpi->sf.interp_sf.adaptive_interp_filter_search)
-    cpi->interp_filter_search_mask = setup_interp_filter_search_mask(cpi);
+    cpi->interp_search_flags.interp_filter_search_mask =
+        setup_interp_filter_search_mask(cpi);
   cpi->source->buf_8bit_valid = 0;
 
   av1_setup_frame_size(cpi);
 
 #if CONFIG_SUPERRES_IN_RECODE
   if (superres_in_recode_allowed(cpi) &&
+      cpi->superres_mode != AOM_SUPERRES_NONE &&
       cm->superres_scale_denominator == SCALE_NUMERATOR) {
-    // Superres won't be picked, so no need to try, as we will go through
-    // another recode loop for full-resolution after this anyway.
+    // Superres mode is currently enabled, but the denominator selected will
+    // disable superres. So no need to continue, as we will go through another
+    // recode loop for full-resolution after this anyway.
     return -1;
   }
 #endif  // CONFIG_SUPERRES_IN_RECODE
@@ -5390,40 +5425,43 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
   set_size_dependent_vars(cpi, &q, &bottom_index, &top_index);
   q_low = bottom_index;
   q_high = top_index;
-
-  if (cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats &&
-      cm->current_frame.frame_type == KEY_FRAME) {
-    av1_copy(cpi->tx_type_probs, default_tx_type_probs);
-
-    const int thr[2][2] = { { 15, 10 }, { 17, 10 } };
-    for (int f = 0; f < FRAME_UPDATE_TYPES; f++) {
-      int kf_arf_update = (f == KF_UPDATE || f == ARF_UPDATE);
-      cpi->tx_type_probs_thresh[f] =
-          thr[cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats - 1]
-             [kf_arf_update];
+  if (cpi->sf.part_sf.partition_search_type == VAR_BASED_PARTITION) {
+    const int num_64x64_blocks =
+        (cm->seq_params.sb_size == BLOCK_64X64) ? 1 : 4;
+    if (cpi->td.vt64x64) {
+      if (num_64x64_blocks != cpi->td.num_64x64_blocks) {
+        aom_free(cpi->td.vt64x64);
+        cpi->td.vt64x64 = NULL;
+      }
+    }
+    if (!cpi->td.vt64x64) {
+      CHECK_MEM_ERROR(cm, cpi->td.vt64x64,
+                      aom_malloc(sizeof(*cpi->td.vt64x64) * num_64x64_blocks));
+      cpi->td.num_64x64_blocks = num_64x64_blocks;
     }
   }
 
-  if (!cpi->sf.inter_sf.disable_obmc &&
-      cpi->sf.inter_sf.prune_obmc_prob_thresh > 0 &&
-      cm->current_frame.frame_type == KEY_FRAME) {
-    av1_copy(cpi->obmc_probs, default_obmc_probs);
-  }
-  if (cpi->sf.inter_sf.prune_warped_prob_thresh > 0 &&
-      cm->current_frame.frame_type == KEY_FRAME) {
-    av1_copy(cpi->warped_probs, default_warped_probs);
-  }
+  if (cm->current_frame.frame_type == KEY_FRAME) {
+    FrameProbInfo *const frame_probs = &cpi->frame_probs;
 
-  if (cpi->sf.interp_sf.adaptive_interp_filter_search == 2 &&
-      cm->current_frame.frame_type == KEY_FRAME) {
-    av1_copy(cpi->switchable_interp_probs, default_switchable_interp_probs);
+    if (cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats) {
+      av1_copy(frame_probs->tx_type_probs, default_tx_type_probs);
+    }
 
-    const int thr[7] = { 0, 8, 8, 8, 8, 0, 8 };
-    for (int f = 0; f < FRAME_UPDATE_TYPES; f++) {
-      cpi->switchable_interp_thresh[f] = thr[f];
+    if (!cpi->sf.inter_sf.disable_obmc &&
+        cpi->sf.inter_sf.prune_obmc_prob_thresh > 0) {
+      av1_copy(frame_probs->obmc_probs, default_obmc_probs);
+    }
+
+    if (cpi->sf.inter_sf.prune_warped_prob_thresh > 0) {
+      av1_copy(frame_probs->warped_probs, default_warped_probs);
+    }
+
+    if (cpi->sf.interp_sf.adaptive_interp_filter_search == 2) {
+      av1_copy(frame_probs->switchable_interp_probs,
+               default_switchable_interp_probs);
     }
   }
-
 #if !CONFIG_REALTIME_ONLY
   // Determine whether to use screen content tools using two fast encoding.
   determine_sc_tools_with_encoding(cpi, q);
@@ -5448,10 +5486,10 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
 
     // if frame was scaled calculate global_motion_search again if already
     // done
-    if (loop_count > 0 && cpi->source && cpi->global_motion_search_done) {
+    if (loop_count > 0 && cpi->source && gm_info->search_done) {
       if (cpi->source->y_crop_width != cm->width ||
           cpi->source->y_crop_height != cm->height) {
-        cpi->global_motion_search_done = 0;
+        gm_info->search_done = 0;
       }
     }
     cpi->source =
@@ -5471,15 +5509,19 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
     if (cpi->oxcf.tuning == AOM_TUNE_VMAF_WITH_PREPROCESSING ||
         cpi->oxcf.tuning == AOM_TUNE_VMAF_WITHOUT_PREPROCESSING ||
         cpi->oxcf.tuning == AOM_TUNE_VMAF_MAX_GAIN) {
-      av1_set_quantizer(cm, av1_get_vmaf_base_qindex(cpi, q));
+      av1_set_quantizer(cm, cpi->oxcf.qm_minlevel, cpi->oxcf.qm_maxlevel,
+                        av1_get_vmaf_base_qindex(cpi, q));
     } else {
 #endif
-      av1_set_quantizer(cm, q);
+      av1_set_quantizer(cm, cpi->oxcf.qm_minlevel, cpi->oxcf.qm_maxlevel, q);
 #if CONFIG_TUNE_VMAF
     }
 #endif
+    av1_set_speed_features_qindex_dependent(cpi, cpi->oxcf.speed);
 
-    if (cpi->oxcf.deltaq_mode != NO_DELTA_Q) av1_init_quantizer(cpi);
+    if (cpi->oxcf.deltaq_mode != NO_DELTA_Q)
+      av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
+                         cm->seq_params.bit_depth);
 
     av1_set_variance_partition_thresholds(cpi, q, 0);
 
@@ -5494,6 +5536,21 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
       // probs before every iteration.
       av1_default_coef_probs(cm);
       av1_setup_frame_contexts(cm);
+    }
+
+    // Check if this high_source_sad (scene/slide change) frame should be
+    // encoded at high/max QP, and if so, set the q and adjust some rate
+    // control parameters.
+    if (cpi->sf.rt_sf.overshoot_detection_cbr == FAST_DETECTION_MAXQ &&
+        cpi->rc.high_source_sad) {
+      if (av1_encodedframe_overshoot(cpi, &q)) {
+        av1_set_quantizer(cm, cpi->oxcf.qm_minlevel, cpi->oxcf.qm_maxlevel, q);
+        av1_set_speed_features_qindex_dependent(cpi, cpi->oxcf.speed);
+        if (cpi->oxcf.deltaq_mode != NO_DELTA_Q)
+          av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
+                             cm->seq_params.bit_depth);
+        av1_set_variance_partition_thresholds(cpi, q, 0);
+      }
     }
 
     if (cpi->oxcf.aq_mode == VARIANCE_AQ) {
@@ -5529,10 +5586,11 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
 
       // If the precision has changed during different iteration of the loop,
       // then we need to reset the global motion vectors
-      if (loop_count > 0 && cm->allow_high_precision_mv != last_loop_allow_hp) {
-        cpi->global_motion_search_done = 0;
+      if (loop_count > 0 &&
+          cm->features.allow_high_precision_mv != last_loop_allow_hp) {
+        gm_info->search_done = 0;
       }
-      last_loop_allow_hp = cm->allow_high_precision_mv;
+      last_loop_allow_hp = cm->features.allow_high_precision_mv;
     }
 
     // transform / motion compensation build reconstruction frame
@@ -5588,7 +5646,9 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
     }
 
     if (allow_recode && !cpi->sf.gm_sf.gm_disable_recode &&
-        recode_loop_test_global_motion(cpi)) {
+        recode_loop_test_global_motion(cm->global_motion,
+                                       cpi->td.rd_counts.global_motion_used,
+                                       gm_info->params_cost)) {
       loop = 1;
     }
 
@@ -5674,7 +5734,7 @@ static int encode_with_recode_loop_and_filter(AV1_COMP *cpi, size_t *size,
   // off.
 
   // Pick the loop filter level for the frame.
-  if (!cm->allow_intrabc) {
+  if (!cm->features.allow_intrabc) {
     loopfilter_frame(cpi, cm);
   } else {
     cm->lf.filter_level[0] = 0;
@@ -5735,7 +5795,7 @@ static void save_cur_buf(AV1_COMP *cpi) {
                              ybf->y_crop_height, ybf->subsampling_x,
                              ybf->subsampling_y,
                              ybf->flags & YV12_FLAG_HIGHBITDEPTH, ybf->border,
-                             cm->byte_alignment) != AOM_CODEC_OK) {
+                             cm->features.byte_alignment) != AOM_CODEC_OK) {
     aom_internal_error(
         &cm->error, AOM_CODEC_MEM_ERROR,
         "Failed to allocate copy buffer for saving coding context");
@@ -5785,11 +5845,14 @@ static void restore_all_coding_context(AV1_COMP *cpi) {
   if (!frame_is_intra_only(&cpi->common)) release_scaled_references(cpi);
 }
 
+static void release_copy_buffer(CODING_CONTEXT *cc) {
+  aom_free_frame_buffer(&cc->copy_buffer);
+}
+
 static int encode_with_and_without_superres(AV1_COMP *cpi, size_t *size,
                                             uint8_t *dest,
                                             int *largest_tile_id) {
   const AV1_COMMON *const cm = &cpi->common;
-  AV1EncoderConfig *const oxcf = &cpi->oxcf;
   assert(cm->seq_params.enable_superres);
   assert(superres_in_recode_allowed(cpi));
   aom_codec_err_t err = AOM_CODEC_OK;
@@ -5797,6 +5860,7 @@ static int encode_with_and_without_superres(AV1_COMP *cpi, size_t *size,
 
   // Encode with superres.
 #if SUPERRES_RECODE_ALL_RATIOS
+  AV1EncoderConfig *const oxcf = &cpi->oxcf;
   int64_t superres_sses[SCALE_NUMERATOR];
   int64_t superres_rates[SCALE_NUMERATOR];
   int superres_largest_tile_ids[SCALE_NUMERATOR];
@@ -5840,15 +5904,16 @@ static int encode_with_and_without_superres(AV1_COMP *cpi, size_t *size,
   int64_t sse2 = INT64_MAX;
   int64_t rate2 = INT64_MAX;
   int largest_tile_id2;
-  oxcf->superres_mode = SUPERRES_NONE;  // To force full-res.
+  cpi->superres_mode = AOM_SUPERRES_NONE;  // To force full-res.
   err = encode_with_recode_loop_and_filter(cpi, size, dest, &sse2, &rate2,
                                            &largest_tile_id2);
-  oxcf->superres_mode = SUPERRES_AUTO;  // Reset.
+  cpi->superres_mode = cpi->oxcf.superres_mode;  // Reset.
+  assert(cpi->oxcf.superres_mode == AOM_SUPERRES_AUTO);
   if (err != AOM_CODEC_OK) return err;
 
   // Note: Both use common rdmult based on base qindex of fullres.
   const int64_t rdmult =
-      av1_compute_rd_mult_based_on_qindex(cpi, cm->base_qindex);
+      av1_compute_rd_mult_based_on_qindex(cpi, cm->quant_params.base_qindex);
 
 #if SUPERRES_RECODE_ALL_RATIOS
   // Find the best rdcost among all superres denoms.
@@ -5905,6 +5970,8 @@ static int encode_with_and_without_superres(AV1_COMP *cpi, size_t *size,
   } else {
     *largest_tile_id = largest_tile_id2;
   }
+
+  release_copy_buffer(&cpi->coding_context);
 
   return err;
 }
@@ -5975,8 +6042,8 @@ static void dump_filtered_recon_frames(AV1_COMP *cpi) {
       current_frame->frame_number, cpi->gf_group.index,
       cpi->gf_group.update_type[cpi->gf_group.index], current_frame->order_hint,
       cm->show_frame, cm->show_existing_frame, cpi->rc.source_alt_ref_active,
-      cpi->refresh_alt_ref_frame, recon_buf->y_stride, recon_buf->uv_stride,
-      cm->width, cm->height);
+      cpi->refresh_frame.alt_ref_frame, recon_buf->y_stride,
+      recon_buf->uv_stride, cm->width, cm->height);
 #if 0
   int ref_frame;
   printf("get_ref_frame_map_idx: [");
@@ -6005,9 +6072,9 @@ static void dump_filtered_recon_frames(AV1_COMP *cpi) {
 }
 #endif  // DUMP_RECON_FRAMES
 
-static int is_integer_mv(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *cur_picture,
+static int is_integer_mv(const YV12_BUFFER_CONFIG *cur_picture,
                          const YV12_BUFFER_CONFIG *last_picture,
-                         hash_table *last_hash_table) {
+                         ForceIntegerMVInfo *const force_intpel_info) {
   aom_clear_system_state();
   // check use hash ME
   int k;
@@ -6019,7 +6086,6 @@ static int is_integer_mv(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *cur_picture,
   int T = 0;  // total block
   int C = 0;  // match with collocated block
   int S = 0;  // smooth region but not match with collocated block
-  int M = 0;  // match with other block
 
   const int pic_width = cur_picture->y_width;
   const int pic_height = cur_picture->y_height;
@@ -6073,34 +6139,21 @@ static int is_integer_mv(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *cur_picture,
         S++;
         continue;
       }
-      if (av1_use_hash_me(cpi)) {
-        uint32_t hash_value_1;
-        uint32_t hash_value_2;
-        av1_get_block_hash_value(
-            cur_picture->y_buffer + y_pos * stride_cur + x_pos, stride_cur,
-            block_size, &hash_value_1, &hash_value_2,
-            (cur_picture->flags & YV12_FLAG_HIGHBITDEPTH), &cpi->td.mb);
-        // Hashing does not work for highbitdepth currently.
-        // TODO(Roger): Make it work for highbitdepth.
-        if (av1_has_exact_match(last_hash_table, hash_value_1, hash_value_2)) {
-          M++;
-        }
-      }
     }
   }
 
   assert(T > 0);
-  double csm_rate = ((double)(C + S + M)) / ((double)(T));
-  double m_rate = ((double)(M)) / ((double)(T));
+  double cs_rate = ((double)(C + S)) / ((double)(T));
 
-  cpi->csm_rate_array[cpi->rate_index] = csm_rate;
-  cpi->m_rate_array[cpi->rate_index] = m_rate;
+  force_intpel_info->cs_rate_array[force_intpel_info->rate_index] = cs_rate;
 
-  cpi->rate_index = (cpi->rate_index + 1) % max_history_size;
-  cpi->rate_size++;
-  cpi->rate_size = AOMMIN(cpi->rate_size, max_history_size);
+  force_intpel_info->rate_index =
+      (force_intpel_info->rate_index + 1) % max_history_size;
+  force_intpel_info->rate_size++;
+  force_intpel_info->rate_size =
+      AOMMIN(force_intpel_info->rate_size, max_history_size);
 
-  if (csm_rate < threshold_current) {
+  if (cs_rate < threshold_current) {
     return 0;
   }
 
@@ -6108,29 +6161,22 @@ static int is_integer_mv(AV1_COMP *cpi, const YV12_BUFFER_CONFIG *cur_picture,
     return 1;
   }
 
-  double csm_average = 0.0;
-  double m_average = 0.0;
+  double cs_average = 0.0;
 
-  for (k = 0; k < cpi->rate_size; k++) {
-    csm_average += cpi->csm_rate_array[k];
-    m_average += cpi->m_rate_array[k];
+  for (k = 0; k < force_intpel_info->rate_size; k++) {
+    cs_average += force_intpel_info->cs_rate_array[k];
   }
-  csm_average /= cpi->rate_size;
-  m_average /= cpi->rate_size;
+  cs_average /= force_intpel_info->rate_size;
 
-  if (csm_average < threshold_average) {
+  if (cs_average < threshold_average) {
     return 0;
   }
 
-  if (M > (T - C - S) / 3) {
+  if ((T - C - S) < 0) {
     return 1;
   }
 
-  if (csm_rate > 0.99 && m_rate > 0.01) {
-    return 1;
-  }
-
-  if (csm_average + m_average > 1.01) {
+  if (cs_average > 1.01) {
     return 1;
   }
 
@@ -6150,7 +6196,7 @@ static void refresh_reference_frames(AV1_COMP *cpi) {
 }
 
 static void set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
-  AV1_COMMON *cm = &cpi->common;
+  const CommonModeInfoParams *const mi_params = &cpi->common.mi_params;
   ThreadData *td = &cpi->td;
   MACROBLOCK *x = &td->mb;
   MACROBLOCKD *xd = &x->e_mbd;
@@ -6160,24 +6206,23 @@ static void set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
 
   const int num_mi_w = mi_size_wide[block_size];
   const int num_mi_h = mi_size_high[block_size];
-  const int num_cols = (cm->mi_cols + num_mi_w - 1) / num_mi_w;
-  const int num_rows = (cm->mi_rows + num_mi_h - 1) / num_mi_h;
+  const int num_cols = (mi_params->mi_cols + num_mi_w - 1) / num_mi_w;
+  const int num_rows = (mi_params->mi_rows + num_mi_h - 1) / num_mi_h;
   double log_sum = 0.0;
-  int row, col;
   const int use_hbd = cpi->source->flags & YV12_FLAG_HIGHBITDEPTH;
 
   // Loop through each 16x16 block.
-  for (row = 0; row < num_rows; ++row) {
-    for (col = 0; col < num_cols; ++col) {
-      int mi_row, mi_col;
+  for (int row = 0; row < num_rows; ++row) {
+    for (int col = 0; col < num_cols; ++col) {
       double var = 0.0, num_of_var = 0.0;
       const int index = row * num_cols + col;
 
       // Loop through each 8x8 block.
-      for (mi_row = row * num_mi_h;
-           mi_row < cm->mi_rows && mi_row < (row + 1) * num_mi_h; mi_row += 2) {
-        for (mi_col = col * num_mi_w;
-             mi_col < cm->mi_cols && mi_col < (col + 1) * num_mi_w;
+      for (int mi_row = row * num_mi_h;
+           mi_row < mi_params->mi_rows && mi_row < (row + 1) * num_mi_h;
+           mi_row += 2) {
+        for (int mi_col = col * num_mi_w;
+             mi_col < mi_params->mi_cols && mi_col < (col + 1) * num_mi_w;
              mi_col += 2) {
           struct buf_2d buf;
           const int row_offset_y = mi_row << 2;
@@ -6207,29 +6252,13 @@ static void set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
   }
   log_sum = exp(log_sum / (double)(num_rows * num_cols));
 
-  for (row = 0; row < num_rows; ++row) {
-    for (col = 0; col < num_cols; ++col) {
+  for (int row = 0; row < num_rows; ++row) {
+    for (int col = 0; col < num_cols; ++col) {
       const int index = row * num_cols + col;
       cpi->ssim_rdmult_scaling_factors[index] /= log_sum;
     }
   }
-
-  (void)xd;
 }
-
-#if CONFIG_DEBUG
-static int hash_me_has_at_most_two_refs(RefCntBuffer *frame_bufs) {
-  int total_count = 0;
-  for (int frame_idx = 0; frame_idx < FRAME_BUFFERS; ++frame_idx) {
-    if (frame_bufs[frame_idx].hash_table.has_content > 1) {
-      return 0;
-    }
-    total_count += frame_bufs[frame_idx].hash_table.has_content;
-  }
-
-  return total_count <= 2;
-}
-#endif
 
 extern void av1_print_frame_contexts(const FRAME_CONTEXT *fc,
                                      const char *filename);
@@ -6241,27 +6270,33 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   CurrentFrame *const current_frame = &cm->current_frame;
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   struct segmentation *const seg = &cm->seg;
+  FeatureFlags *const features = &cm->features;
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, encode_frame_to_data_rate_time);
 #endif
 
+  if (frame_is_intra_only(cm)) {
+    av1_set_screen_content_options(cpi, features);
+    cpi->is_screen_content_type = features->allow_screen_content_tools;
+  }
+
   // frame type has been decided outside of this function call
   cm->cur_frame->frame_type = current_frame->frame_type;
 
-  cm->large_scale_tile = cpi->oxcf.large_scale_tile;
-  cm->single_tile_decoding = cpi->oxcf.single_tile_decoding;
+  cm->tiles.large_scale = cpi->oxcf.large_scale_tile;
+  cm->tiles.single_tile_decoding = cpi->oxcf.single_tile_decoding;
 
-  cm->allow_ref_frame_mvs &= frame_might_allow_ref_frame_mvs(cm);
-  // cm->allow_ref_frame_mvs needs to be written into the frame header while
-  // cm->large_scale_tile is 1, therefore, "cm->large_scale_tile=1" case is
-  // separated from frame_might_allow_ref_frame_mvs().
-  cm->allow_ref_frame_mvs &= !cm->large_scale_tile;
+  features->allow_ref_frame_mvs &= frame_might_allow_ref_frame_mvs(cm);
+  // features->allow_ref_frame_mvs needs to be written into the frame header
+  // while cm->tiles.large_scale is 1, therefore, "cm->tiles.large_scale=1" case
+  // is separated from frame_might_allow_ref_frame_mvs().
+  features->allow_ref_frame_mvs &= !cm->tiles.large_scale;
 
-  cm->allow_warped_motion =
+  features->allow_warped_motion =
       cpi->oxcf.allow_warped_motion && frame_might_allow_warped_motion(cm);
 
-  cm->last_frame_type = current_frame->frame_type;
+  cpi->last_frame_type = current_frame->frame_type;
 
   if (encode_show_existing_frame(cm)) {
     finalize_encoded_frame(cpi);
@@ -6305,32 +6340,22 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
 
   // Work out whether to force_integer_mv this frame
   if (!is_stat_generation_stage(cpi) &&
-      cpi->common.allow_screen_content_tools && !frame_is_intra_only(cm)) {
+      cpi->common.features.allow_screen_content_tools &&
+      !frame_is_intra_only(cm)) {
     if (cpi->common.seq_params.force_integer_mv == 2) {
       // Adaptive mode: see what previous frame encoded did
       if (cpi->unscaled_last_source != NULL) {
-        cm->cur_frame_force_integer_mv =
-            is_integer_mv(cpi, cpi->source, cpi->unscaled_last_source,
-                          cpi->previous_hash_table);
+        features->cur_frame_force_integer_mv = is_integer_mv(
+            cpi->source, cpi->unscaled_last_source, &cpi->force_intpel_info);
       } else {
-        cpi->common.cur_frame_force_integer_mv = 0;
+        cpi->common.features.cur_frame_force_integer_mv = 0;
       }
     } else {
-      cpi->common.cur_frame_force_integer_mv =
+      cpi->common.features.cur_frame_force_integer_mv =
           cpi->common.seq_params.force_integer_mv;
     }
   } else {
-    cpi->common.cur_frame_force_integer_mv = 0;
-  }
-
-#if CONFIG_DEBUG
-  assert(hash_me_has_at_most_two_refs(cm->buffer_pool->frame_bufs) &&
-         "Hash-me is leaking memory!");
-#endif
-
-  if (!is_stat_generation_stage(cpi) && cpi->need_to_clear_prev_hash_table) {
-    av1_hash_table_clear_all(cpi->previous_hash_table);
-    cpi->need_to_clear_prev_hash_table = 0;
+    cpi->common.features.cur_frame_force_integer_mv = 0;
   }
 
   // Set default state for segment based loop filter update flags.
@@ -6351,11 +6376,11 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
     cpi->rc.source_alt_ref_active = 0;
   }
   if (cpi->oxcf.mtu == 0) {
-    cm->num_tg = cpi->oxcf.num_tile_groups;
+    cpi->num_tg = cpi->oxcf.num_tile_groups;
   } else {
     // Use a default value for the purposes of weighting costs in probability
     // updates
-    cm->num_tg = DEFAULT_MAX_NUM_TG;
+    cpi->num_tg = DEFAULT_MAX_NUM_TG;
   }
 
   // For 1 pass CBR, check if we are dropping this frame.
@@ -6416,10 +6441,10 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
 
   switch (cpi->oxcf.cdf_update_mode) {
     case 0:  // No CDF update for any frames(4~6% compression loss).
-      cm->disable_cdf_update = 1;
+      features->disable_cdf_update = 1;
       break;
     case 1:  // Enable CDF update for all frames.
-      cm->disable_cdf_update = 0;
+      features->disable_cdf_update = 0;
       break;
     case 2:
       // Strategically determine at which frames to do CDF update.
@@ -6427,11 +6452,11 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
       // compression loss).
       // TODO(huisu@google.com): design schemes for various trade-offs between
       // compression quality and decoding speed.
-      cm->disable_cdf_update =
+      features->disable_cdf_update =
           (frame_is_intra_only(cm) || !cm->show_frame) ? 0 : 1;
       break;
   }
-  cm->timing_info_present &= !seq_params->reduced_still_picture_hdr;
+  seq_params->timing_info_present &= !seq_params->reduced_still_picture_hdr;
 
   int largest_tile_id = 0;
 #if CONFIG_SUPERRES_IN_RECODE
@@ -6471,7 +6496,7 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
       update_reference_segmentation_map(cpi);
     } else if (cm->last_frame_seg_map) {
       memcpy(cm->cur_frame->seg_map, cm->last_frame_seg_map,
-             cm->mi_cols * cm->mi_rows * sizeof(uint8_t));
+             cm->mi_params.mi_cols * cm->mi_params.mi_rows * sizeof(uint8_t));
     }
   }
 
@@ -6489,17 +6514,17 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   av1_accumulate_frame_counts(&aggregate_fc, &cpi->counts);
 #endif  // CONFIG_ENTROPY_STATS
 
-  if (cm->refresh_frame_context == REFRESH_FRAME_CONTEXT_BACKWARD) {
+  if (features->refresh_frame_context == REFRESH_FRAME_CONTEXT_BACKWARD) {
     *cm->fc = cpi->tile_data[largest_tile_id].tctx;
     av1_reset_cdf_symbol_counters(cm->fc);
   }
-  if (!cm->large_scale_tile) {
+  if (!cm->tiles.large_scale) {
     cm->cur_frame->frame_context = *cm->fc;
   }
 
   if (cpi->oxcf.ext_tile_debug) {
     // (yunqing) This test ensures the correctness of large scale tile coding.
-    if (cm->large_scale_tile && is_stat_consumption_stage(cpi)) {
+    if (cm->tiles.large_scale && is_stat_consumption_stage(cpi)) {
       char fn[20] = "./fc";
       fn[4] = current_frame->frame_number / 100 + '0';
       fn[5] = (current_frame->frame_number % 100) / 10 + '0';
@@ -6526,17 +6551,9 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   }
 #endif
 
-  cm->last_frame_type = current_frame->frame_type;
+  cpi->last_frame_type = current_frame->frame_type;
 
   av1_rc_postencode_update(cpi, *size);
-
-  // Store encoded frame's hash table for in_integer_mv() next time.
-  // Beware! If we don't update previous_hash_table here we will leak the
-  // items stored in cur_frame's hash_table!
-  if (!is_stat_generation_stage(cpi) && av1_use_hash_me(cpi)) {
-    cpi->previous_hash_table = &cm->cur_frame->hash_table;
-    cpi->need_to_clear_prev_hash_table = 1;
-  }
 
   // Clear the one shot update flags for segmentation map and mode/ref loop
   // filter deltas.
@@ -6569,8 +6586,8 @@ int av1_encode(AV1_COMP *const cpi, uint8_t *const dest,
   cpi->unscaled_last_source = frame_input->last_source;
 
   current_frame->refresh_frame_flags = frame_params->refresh_frame_flags;
-  cm->error_resilient_mode = frame_params->error_resilient_mode;
-  cm->primary_ref_frame = frame_params->primary_ref_frame;
+  cm->features.error_resilient_mode = frame_params->error_resilient_mode;
+  cm->features.primary_ref_frame = frame_params->primary_ref_frame;
   cm->current_frame.frame_type = frame_params->frame_type;
   cm->show_frame = frame_params->show_frame;
   cpi->ref_frame_flags = frame_params->ref_frame_flags;
@@ -6581,10 +6598,8 @@ int av1_encode(AV1_COMP *const cpi, uint8_t *const dest,
   memcpy(cm->remapped_ref_idx, frame_params->remapped_ref_idx,
          REF_FRAMES * sizeof(*cm->remapped_ref_idx));
 
-  cpi->refresh_last_frame = frame_params->refresh_last_frame;
-  cpi->refresh_golden_frame = frame_params->refresh_golden_frame;
-  cpi->refresh_bwd_ref_frame = frame_params->refresh_bwd_ref_frame;
-  cpi->refresh_alt_ref_frame = frame_params->refresh_alt_ref_frame;
+  memcpy(&cpi->refresh_frame, &frame_params->refresh_frame,
+         sizeof(cpi->refresh_frame));
 
   if (current_frame->frame_type == KEY_FRAME && cm->show_frame)
     current_frame->frame_number = 0;
@@ -6828,10 +6843,6 @@ int av1_get_compressed_data(AV1_COMP *cpi, unsigned int *frame_flags,
     av1_one_pass_cbr_svc_start_layer(cpi);
   }
 
-  // Indicates whether or not to use an adaptive quantize b rather than
-  // the traditional version
-  cm->use_quant_b_adapt = cpi->oxcf.quant_b_adapt;
-
   cm->showable_frame = 0;
   *size = 0;
 #if CONFIG_INTERNAL_STATS
@@ -6841,11 +6852,11 @@ int av1_get_compressed_data(AV1_COMP *cpi, unsigned int *frame_flags,
   av1_set_high_precision_mv(cpi, 1, 0);
 
   // Normal defaults
-  cm->refresh_frame_context = oxcf->frame_parallel_decoding_mode
-                                  ? REFRESH_FRAME_CONTEXT_DISABLED
-                                  : REFRESH_FRAME_CONTEXT_BACKWARD;
+  cm->features.refresh_frame_context = oxcf->frame_parallel_decoding_mode
+                                           ? REFRESH_FRAME_CONTEXT_DISABLED
+                                           : REFRESH_FRAME_CONTEXT_BACKWARD;
   if (oxcf->large_scale_tile)
-    cm->refresh_frame_context = REFRESH_FRAME_CONTEXT_DISABLED;
+    cm->features.refresh_frame_context = REFRESH_FRAME_CONTEXT_DISABLED;
 
   // Initialize fields related to forward keyframes
   cpi->no_show_kf = 0;
@@ -6881,7 +6892,7 @@ int av1_get_compressed_data(AV1_COMP *cpi, unsigned int *frame_flags,
   }
 #endif
 
-  if (cpi->keep_level_stats && !is_stat_generation_stage(cpi)) {
+  if (cpi->level_params.keep_level_stats && !is_stat_generation_stage(cpi)) {
     // Initialize level info. at the beginning of each sequence.
     if (cm->current_frame.frame_type == KEY_FRAME && cm->show_frame) {
       av1_init_level_info(cpi);
@@ -6957,8 +6968,9 @@ aom_codec_err_t av1_copy_new_frame_enc(AV1_COMMON *cm,
   return cm->error.error_code;
 }
 
-int av1_set_internal_size(AV1_COMP *cpi, AOM_SCALING horiz_mode,
-                          AOM_SCALING vert_mode) {
+int av1_set_internal_size(AV1EncoderConfig *const oxcf,
+                          ResizePendingParams *resize_pending_params,
+                          AOM_SCALING horiz_mode, AOM_SCALING vert_mode) {
   int hr = 0, hs = 0, vr = 0, vs = 0;
 
   if (horiz_mode > ONETWO || vert_mode > ONETWO) return -1;
@@ -6967,13 +6979,15 @@ int av1_set_internal_size(AV1_COMP *cpi, AOM_SCALING horiz_mode,
   Scale2Ratio(vert_mode, &vr, &vs);
 
   // always go to the next whole number
-  cpi->resize_pending_width = (hs - 1 + cpi->oxcf.width * hr) / hs;
-  cpi->resize_pending_height = (vs - 1 + cpi->oxcf.height * vr) / vs;
+  resize_pending_params->width = (hs - 1 + oxcf->width * hr) / hs;
+  resize_pending_params->height = (vs - 1 + oxcf->height * vr) / vs;
 
   return 0;
 }
 
-int av1_get_quantizer(AV1_COMP *cpi) { return cpi->common.base_qindex; }
+int av1_get_quantizer(AV1_COMP *cpi) {
+  return cpi->common.quant_params.base_qindex;
+}
 
 int av1_convert_sect5obus_to_annexb(uint8_t *buffer, size_t *frame_size) {
   size_t output_size = 0;
@@ -7032,20 +7046,31 @@ int av1_convert_sect5obus_to_annexb(uint8_t *buffer, size_t *frame_size) {
   return AOM_CODEC_OK;
 }
 
-static void svc_set_updates_external_ref_frame_config(AV1_COMP *cpi) {
-  cpi->ext_refresh_frame_flags_pending = 1;
-  cpi->ext_refresh_last_frame = cpi->svc.refresh[cpi->svc.ref_idx[0]];
-  cpi->ext_refresh_golden_frame = cpi->svc.refresh[cpi->svc.ref_idx[3]];
-  cpi->ext_refresh_bwd_ref_frame = cpi->svc.refresh[cpi->svc.ref_idx[4]];
-  cpi->ext_refresh_alt2_ref_frame = cpi->svc.refresh[cpi->svc.ref_idx[5]];
-  cpi->ext_refresh_alt_ref_frame = cpi->svc.refresh[cpi->svc.ref_idx[6]];
-  cpi->svc.non_reference_frame = 1;
+static void svc_set_updates_external_ref_frame_config(
+    ExtRefreshFrameFlagsInfo *const ext_refresh_frame_flags, SVC *const svc) {
+  ext_refresh_frame_flags->update_pending = 1;
+  ext_refresh_frame_flags->last_frame = svc->refresh[svc->ref_idx[0]];
+  ext_refresh_frame_flags->golden_frame = svc->refresh[svc->ref_idx[3]];
+  ext_refresh_frame_flags->bwd_ref_frame = svc->refresh[svc->ref_idx[4]];
+  ext_refresh_frame_flags->alt2_ref_frame = svc->refresh[svc->ref_idx[5]];
+  ext_refresh_frame_flags->alt_ref_frame = svc->refresh[svc->ref_idx[6]];
+  svc->non_reference_frame = 1;
   for (int i = 0; i < REF_FRAMES; i++) {
-    if (cpi->svc.refresh[i] == 1) {
-      cpi->svc.non_reference_frame = 0;
+    if (svc->refresh[i] == 1) {
+      svc->non_reference_frame = 0;
       break;
     }
   }
+}
+
+static int svc_set_references_external_ref_frame_config(AV1_COMP *cpi) {
+  // LAST_FRAME (0), LAST2_FRAME(1), LAST3_FRAME(2), GOLDEN_FRAME(3),
+  // BWDREF_FRAME(4), ALTREF2_FRAME(5), ALTREF_FRAME(6).
+  int ref = AOM_REFFRAME_ALL;
+  for (int i = 0; i < INTER_REFS_PER_FRAME; i++) {
+    if (!cpi->svc.reference[i]) ref ^= (1 << i);
+  }
+  return ref;
 }
 
 void av1_apply_encoding_flags(AV1_COMP *cpi, aom_enc_frame_flags_t flags) {
@@ -7054,7 +7079,11 @@ void av1_apply_encoding_flags(AV1_COMP *cpi, aom_enc_frame_flags_t flags) {
   // ensure that there is not conflict between the two. In AV1 encoder, the
   // priority rank for 7 reference frames are: LAST, ALTREF, LAST2, LAST3,
   // GOLDEN, BWDREF, ALTREF2.
-  cpi->ext_ref_frame_flags = AOM_REFFRAME_ALL;
+
+  ExternalFlags *const ext_flags = &cpi->ext_flags;
+  ExtRefreshFrameFlagsInfo *const ext_refresh_frame_flags =
+      &ext_flags->refresh_frame;
+  ext_flags->ref_frame_flags = AOM_REFFRAME_ALL;
   if (flags &
       (AOM_EFLAG_NO_REF_LAST | AOM_EFLAG_NO_REF_LAST2 | AOM_EFLAG_NO_REF_LAST3 |
        AOM_EFLAG_NO_REF_GF | AOM_EFLAG_NO_REF_ARF | AOM_EFLAG_NO_REF_BWD |
@@ -7076,7 +7105,12 @@ void av1_apply_encoding_flags(AV1_COMP *cpi, aom_enc_frame_flags_t flags) {
       if (flags & AOM_EFLAG_NO_REF_ARF2) ref ^= AOM_ALT2_FLAG;
     }
 
-    av1_use_as_reference(cpi, ref);
+    av1_use_as_reference(&ext_flags->ref_frame_flags, ref);
+  } else {
+    if (cpi->svc.external_ref_frame_config) {
+      int ref = svc_set_references_external_ref_frame_config(cpi);
+      av1_use_as_reference(&ext_flags->ref_frame_flags, ref);
+    }
   }
 
   if (flags &
@@ -7094,29 +7128,32 @@ void av1_apply_encoding_flags(AV1_COMP *cpi, aom_enc_frame_flags_t flags) {
       upd ^= AOM_ALT2_FLAG;
     }
 
-    cpi->ext_refresh_last_frame = (upd & AOM_LAST_FLAG) != 0;
-    cpi->ext_refresh_golden_frame = (upd & AOM_GOLD_FLAG) != 0;
-    cpi->ext_refresh_alt_ref_frame = (upd & AOM_ALT_FLAG) != 0;
-    cpi->ext_refresh_bwd_ref_frame = (upd & AOM_BWD_FLAG) != 0;
-    cpi->ext_refresh_alt2_ref_frame = (upd & AOM_ALT2_FLAG) != 0;
-    cpi->ext_refresh_frame_flags_pending = 1;
+    ext_refresh_frame_flags->last_frame = (upd & AOM_LAST_FLAG) != 0;
+    ext_refresh_frame_flags->golden_frame = (upd & AOM_GOLD_FLAG) != 0;
+    ext_refresh_frame_flags->alt_ref_frame = (upd & AOM_ALT_FLAG) != 0;
+    ext_refresh_frame_flags->bwd_ref_frame = (upd & AOM_BWD_FLAG) != 0;
+    ext_refresh_frame_flags->alt2_ref_frame = (upd & AOM_ALT2_FLAG) != 0;
+    ext_refresh_frame_flags->update_pending = 1;
   } else {
     if (cpi->svc.external_ref_frame_config)
-      svc_set_updates_external_ref_frame_config(cpi);
+      svc_set_updates_external_ref_frame_config(ext_refresh_frame_flags,
+                                                &cpi->svc);
     else
-      cpi->ext_refresh_frame_flags_pending = 0;
+      ext_refresh_frame_flags->update_pending = 0;
   }
 
-  cpi->ext_use_ref_frame_mvs = cpi->oxcf.allow_ref_frame_mvs &
-                               ((flags & AOM_EFLAG_NO_REF_FRAME_MVS) == 0);
-  cpi->ext_use_error_resilient = cpi->oxcf.error_resilient_mode |
-                                 ((flags & AOM_EFLAG_ERROR_RESILIENT) != 0);
-  cpi->ext_use_s_frame =
+  ext_flags->use_ref_frame_mvs = cpi->oxcf.allow_ref_frame_mvs &
+                                 ((flags & AOM_EFLAG_NO_REF_FRAME_MVS) == 0);
+  ext_flags->use_error_resilient = cpi->oxcf.error_resilient_mode |
+                                   ((flags & AOM_EFLAG_ERROR_RESILIENT) != 0);
+  ext_flags->use_s_frame =
       cpi->oxcf.s_frame_mode | ((flags & AOM_EFLAG_SET_S_FRAME) != 0);
-  cpi->ext_use_primary_ref_none = (flags & AOM_EFLAG_SET_PRIMARY_REF_NONE) != 0;
+  ext_flags->use_primary_ref_none =
+      (flags & AOM_EFLAG_SET_PRIMARY_REF_NONE) != 0;
 
   if (flags & AOM_EFLAG_NO_UPD_ENTROPY) {
-    av1_update_entropy(cpi, 0);
+    av1_update_entropy(&ext_flags->refresh_frame_context,
+                       &ext_flags->refresh_frame_context_pending, 0);
   }
 }
 
@@ -7125,7 +7162,7 @@ aom_fixed_buf_t *av1_get_global_headers(AV1_COMP *cpi) {
 
   uint8_t header_buf[512] = { 0 };
   const uint32_t sequence_header_size =
-      av1_write_sequence_header_obu(cpi, &header_buf[0]);
+      av1_write_sequence_header_obu(&cpi->common.seq_params, &header_buf[0]);
   assert(sequence_header_size <= sizeof(header_buf));
   if (sequence_header_size == 0) return NULL;
 
@@ -7136,8 +7173,8 @@ aom_fixed_buf_t *av1_get_global_headers(AV1_COMP *cpi) {
   if (payload_offset + sequence_header_size > sizeof(header_buf)) return NULL;
   memmove(&header_buf[payload_offset], &header_buf[0], sequence_header_size);
 
-  if (av1_write_obu_header(cpi, OBU_SEQUENCE_HEADER, 0, &header_buf[0]) !=
-      obu_header_size) {
+  if (av1_write_obu_header(&cpi->level_params, OBU_SEQUENCE_HEADER, 0,
+                           &header_buf[0]) != obu_header_size) {
     return NULL;
   }
 

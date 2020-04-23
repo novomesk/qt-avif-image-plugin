@@ -19,6 +19,7 @@
 #include "test/util.h"
 #include "test/y4m_video_source.h"
 #include "aom/aom_codec.h"
+#include "av1/common/enums.h"
 
 namespace datarate_test {
 namespace {
@@ -114,12 +115,15 @@ class DatarateTestSVC
     // Set the referende map buffer idx for the 7 references:
     // LAST_FRAME (0), LAST2_FRAME(1), LAST3_FRAME(2), GOLDEN_FRAME(3),
     // BWDREF_FRAME(4), ALTREF2_FRAME(5), ALTREF_FRAME(6).
-    for (int i = 0; i < 7; i++) ref_frame_config->ref_idx[i] = i;
-    for (int i = 0; i < 8; i++) ref_frame_config->refresh[i] = 0;
-    // Note only use LAST and GF for prediction in non-rd mode (speed 8).
-    int layer_flags = AOM_EFLAG_NO_REF_LAST2 | AOM_EFLAG_NO_REF_LAST3 |
-                      AOM_EFLAG_NO_REF_ARF | AOM_EFLAG_NO_REF_BWD |
-                      AOM_EFLAG_NO_REF_ARF2;
+    for (int i = 0; i < INTER_REFS_PER_FRAME; i++) {
+      ref_frame_config->ref_idx[i] = i;
+      ref_frame_config->reference[i] = 0;
+    }
+    for (int i = 0; i < REF_FRAMES; i++) ref_frame_config->refresh[i] = 0;
+    // Set layer_flags to 0 when using ref_frame_config->reference.
+    int layer_flags = 0;
+    // Always reference LAST.
+    ref_frame_config->reference[0] = 1;
     if (number_temporal_layers_ == 3 && number_spatial_layers_ == 1) {
       // 3-layer:
       //   1    3   5    7
@@ -130,15 +134,14 @@ class DatarateTestSVC
         layer_id->temporal_layer_id = 0;
         // Update LAST on layer 0, reference LAST and GF.
         ref_frame_config->refresh[0] = 1;
+        ref_frame_config->reference[3] = 1;
       } else if ((frame_cnt - 1) % 4 == 0) {
         layer_id->temporal_layer_id = 2;
         // First top layer: no updates, only reference LAST (TL0).
-        layer_flags |= AOM_EFLAG_NO_REF_GF;
       } else if ((frame_cnt - 2) % 4 == 0) {
         layer_id->temporal_layer_id = 1;
         // Middle layer (TL1): update LAST2, only reference LAST (TL0).
         ref_frame_config->refresh[1] = 1;
-        layer_flags |= AOM_EFLAG_NO_REF_GF;
       } else if ((frame_cnt - 3) % 4 == 0) {
         layer_id->temporal_layer_id = 2;
         // Second top layer: no updates, only reference LAST.
@@ -146,7 +149,6 @@ class DatarateTestSVC
         // updated in previous frame. So LAST is TL1 frame.
         ref_frame_config->ref_idx[0] = 1;
         ref_frame_config->ref_idx[1] = 0;
-        layer_flags |= AOM_EFLAG_NO_REF_GF;
       }
     } else if (number_temporal_layers_ == 1 && number_spatial_layers_ == 2) {
       layer_id->temporal_layer_id = 0;
@@ -155,7 +157,6 @@ class DatarateTestSVC
         ref_frame_config->ref_idx[0] = 0;
         ref_frame_config->ref_idx[3] = 3;
         ref_frame_config->refresh[0] = 1;
-        layer_flags |= AOM_EFLAG_NO_REF_GF;
       } else if (layer_id->spatial_layer_id == 1) {
         // Reference LAST and GOLDEN. Set buffer_idx for LAST to slot 3
         // and GOLDEN to slot 0. Update slot 3 (LAST).
@@ -163,6 +164,8 @@ class DatarateTestSVC
         ref_frame_config->ref_idx[3] = 0;
         ref_frame_config->refresh[3] = 1;
       }
+      // Reference GOLDEN.
+      if (layer_id->spatial_layer_id > 0) ref_frame_config->reference[3] = 1;
     } else if (number_temporal_layers_ == 1 && number_spatial_layers_ == 3) {
       // 3 spatial layers, 1 temporal.
       // Note for this case , we set the buffer idx for all references to be
@@ -174,7 +177,6 @@ class DatarateTestSVC
         // Reference LAST, update LAST. Set all other buffer_idx to 0.
         for (int i = 0; i < 7; i++) ref_frame_config->ref_idx[i] = 0;
         ref_frame_config->refresh[0] = 1;
-        layer_flags |= AOM_EFLAG_NO_REF_GF;
       } else if (layer_id->spatial_layer_id == 1) {
         // Reference LAST and GOLDEN. Set buffer_idx for LAST to slot 1
         // and GOLDEN (and all other refs) to slot 0.
@@ -190,6 +192,8 @@ class DatarateTestSVC
         ref_frame_config->ref_idx[0] = 2;
         ref_frame_config->refresh[2] = 1;
       }
+      // Reference GOLDEN.
+      if (layer_id->spatial_layer_id > 0) ref_frame_config->reference[3] = 1;
     } else if (number_temporal_layers_ == 3 && number_spatial_layers_ == 3) {
       // 3 spatial and 3 temporal layer.
       if (superframe_cnt_ % 4 == 0) {
@@ -200,7 +204,6 @@ class DatarateTestSVC
           // Set all buffer_idx to 0.
           for (int i = 0; i < 7; i++) ref_frame_config->ref_idx[i] = 0;
           ref_frame_config->refresh[0] = 1;
-          layer_flags |= AOM_EFLAG_NO_REF_GF;
         } else if (layer_id->spatial_layer_id == 1) {
           // Reference LAST and GOLDEN. Set buffer_idx for LAST to slot 1,
           // GOLDEN (and all other refs) to slot 0.
@@ -226,7 +229,6 @@ class DatarateTestSVC
           for (int i = 0; i < 7; i++) ref_frame_config->ref_idx[i] = 0;
           ref_frame_config->ref_idx[3] = 3;
           ref_frame_config->refresh[3] = 1;
-          layer_flags |= AOM_EFLAG_NO_REF_GF;
         } else if (layer_id->spatial_layer_id == 1) {
           // Reference LAST and GOLDEN. Set buffer_idx for LAST to slot 1,
           // GOLDEN (and all other refs) to slot 3.
@@ -252,7 +254,6 @@ class DatarateTestSVC
           for (int i = 0; i < 7; i++) ref_frame_config->ref_idx[i] = 0;
           ref_frame_config->ref_idx[3] = 5;
           ref_frame_config->refresh[5] = 1;
-          layer_flags |= AOM_EFLAG_NO_REF_GF;
         } else if (layer_id->spatial_layer_id == 1) {
           // Reference LAST and GOLDEN. Set buffer_idx for LAST to slot 1,
           // GOLDEN (and all other refs) to slot 5.
@@ -281,7 +282,6 @@ class DatarateTestSVC
           ref_frame_config->ref_idx[0] = 5;
           ref_frame_config->ref_idx[3] = 3;
           ref_frame_config->refresh[3] = 1;
-          layer_flags |= AOM_EFLAG_NO_REF_GF;
         } else if (layer_id->spatial_layer_id == 1) {
           // Reference LAST and GOLDEN. Set buffer_idx for LAST to slot 6,
           // GOLDEN to slot 3. Set LAST2 to slot 4 and update slot 4.
@@ -298,6 +298,8 @@ class DatarateTestSVC
           ref_frame_config->ref_idx[3] = 4;
         }
       }
+      // Reference GOLDEN.
+      if (layer_id->spatial_layer_id > 0) ref_frame_config->reference[3] = 1;
     }
     return layer_flags;
   }
@@ -469,6 +471,47 @@ class DatarateTestSVC
     }
   }
 
+  virtual void BasicRateTargetingSVC3TL3SLHDTest() {
+    cfg_.rc_buf_initial_sz = 500;
+    cfg_.rc_buf_optimal_sz = 500;
+    cfg_.rc_buf_sz = 1000;
+    cfg_.rc_dropframe_thresh = 0;
+    cfg_.rc_min_quantizer = 0;
+    cfg_.rc_max_quantizer = 63;
+    cfg_.rc_end_usage = AOM_CBR;
+    cfg_.g_lag_in_frames = 0;
+    cfg_.g_error_resilient = 1;
+
+    ::libaom_test::Y4mVideoSource video("niklas_1280_720_30.y4m", 0, 60);
+    const int bitrate_array[2] = { 600, 1200 };
+    cfg_.rc_target_bitrate = bitrate_array[GET_PARAM(4)];
+    ResetModel();
+    number_temporal_layers_ = 3;
+    number_spatial_layers_ = 3;
+    // SL0
+    const int bitrate_sl0 = 1 * cfg_.rc_target_bitrate / 8;
+    target_layer_bitrate_[0] = 50 * bitrate_sl0 / 100;
+    target_layer_bitrate_[1] = 70 * bitrate_sl0 / 100;
+    target_layer_bitrate_[2] = bitrate_sl0;
+    // SL1
+    const int bitrate_sl1 = 3 * cfg_.rc_target_bitrate / 8;
+    target_layer_bitrate_[3] = 50 * bitrate_sl1 / 100;
+    target_layer_bitrate_[4] = 70 * bitrate_sl1 / 100;
+    target_layer_bitrate_[5] = bitrate_sl1;
+    // SL2
+    const int bitrate_sl2 = 4 * cfg_.rc_target_bitrate / 8;
+    target_layer_bitrate_[6] = 50 * bitrate_sl2 / 100;
+    target_layer_bitrate_[7] = 70 * bitrate_sl2 / 100;
+    target_layer_bitrate_[8] = bitrate_sl2;
+    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+    for (int i = 0; i < number_temporal_layers_ * number_spatial_layers_; i++) {
+      ASSERT_GE(effective_datarate_tl[i], target_layer_bitrate_[i] * 0.70)
+          << " The datarate for the file is lower than target by too much!";
+      ASSERT_LE(effective_datarate_tl[i], target_layer_bitrate_[i] * 1.4)
+          << " The datarate for the file is greater than target by too much!";
+    }
+  }
+
   virtual void BasicRateTargetingSVC3TL3SLKfTest() {
     cfg_.rc_buf_initial_sz = 500;
     cfg_.rc_buf_optimal_sz = 500;
@@ -543,6 +586,11 @@ TEST_P(DatarateTestSVC, BasicRateTargetingSVC1TL3SL) {
 // Check basic rate targeting for CBR, for 3 spatial, 3 temporal layers.
 TEST_P(DatarateTestSVC, BasicRateTargetingSVC3TL3SL) {
   BasicRateTargetingSVC3TL3SLTest();
+}
+
+// Check basic rate targeting for CBR, for 3 spatial, 3 temporal layers.
+TEST_P(DatarateTestSVC, BasicRateTargetingSVC3TL3SLHD) {
+  BasicRateTargetingSVC3TL3SLHDTest();
 }
 
 // Check basic rate targeting for CBR, for 3 spatial, 3 temporal layers,

@@ -40,13 +40,6 @@ enum {
 } UENUM1BYTE(GM_ERRORADV_TYPE);
 
 enum {
-  NO_TRELLIS_OPT,          // No trellis optimization
-  FULL_TRELLIS_OPT,        // Trellis optimization in all stages
-  FINAL_PASS_TRELLIS_OPT,  // Trellis optimization in only the final encode pass
-  NO_ESTIMATE_YRD_TRELLIS_OPT  // Disable trellis in estimate_yrd_for_sb
-} UENUM1BYTE(TRELLIS_OPT_TYPE);
-
-enum {
   FULL_TXFM_RD,
   LOW_TXFM_RD,
 } UENUM1BYTE(TXFM_RD_MODEL);
@@ -124,16 +117,6 @@ enum {
 } UENUM1BYTE(DEV_SPEED_FEATURES);
 
 enum {
-  DIAMOND = 0,
-  NSTEP = 1,
-  HEX = 2,
-  BIGDIA = 3,
-  SQUARE = 4,
-  FAST_HEX = 5,
-  FAST_DIAMOND = 6
-} UENUM1BYTE(SEARCH_METHODS);
-
-enum {
   // No recode.
   DISALLOW_RECODE = 0,
   // Allow recode for KF and exceeding maximum frame bandwidth.
@@ -209,6 +192,15 @@ enum {
   // More aggressive pruning based on tx type score and allowed tx count
   PRUNE_2D_AGGRESSIVE = 4,
 } UENUM1BYTE(TX_TYPE_PRUNE_MODE);
+
+enum {
+  // No reaction to rate control on a detected slide/scene change.
+  NO_DETECTION = 0,
+
+  // Set to larger Q based only on the detected slide/scene change and
+  // current/past Q.
+  FAST_DETECTION_MAXQ = 1,
+} UENUM1BYTE(OVERSHOOT_DETECTION_CBR);
 
 typedef struct {
   TX_TYPE_PRUNE_MODE prune_mode;
@@ -315,6 +307,12 @@ typedef struct TPL_SPEED_FEATURES {
   // full-pixel center MVs. If set to 2, motion estimation is skipped if the
   // difference between center MVs is less than the threshold.
   int skip_alike_starting_mv;
+
+  // When to stop subpel search.
+  SUBPEL_FORCE_STOP subpel_force_stop;
+
+  // Prune starting mvs in TPL based on sad scores.
+  int prune_starting_mv;
 } TPL_SPEED_FEATURES;
 
 typedef struct GLOBAL_MOTION_SPEED_FEATURES {
@@ -384,9 +382,11 @@ typedef struct PARTITION_SPEED_FEATURES {
   BLOCK_SIZE default_min_partition_size;
   BLOCK_SIZE default_max_partition_size;
 
-  // Whether or not we allow partitions one smaller or one greater than the last
-  // frame's partitioning. Only used if use_lastframe_partitioning is set.
-  int adjust_partitioning_from_last_frame;
+  // Sets level of adjustmet of variace-based partitioning during
+  // rd_use_partition 0 - no partition adjusment, 1 - try to merge partitions
+  // for small blocks and high QP, 2 - always try to merge leaf partitions, 3 -
+  // try to merge and split leaf partitions
+  int adjust_var_based_rd_partitioning;
 
   // Partition search early breakout thresholds.
   int64_t partition_search_breakout_dist_thr;
@@ -431,6 +431,9 @@ typedef struct PARTITION_SPEED_FEATURES {
 
   // Prune 1:4 partition search based on winner info from split partitions
   int prune_4_partition_using_split_info;
+
+  // Prune AB partition search using split and HORZ/VERT info
+  int prune_ab_partition_using_split_info;
 } PARTITION_SPEED_FEATURES;
 
 typedef struct MV_SPEED_FEATURES {
@@ -453,6 +456,9 @@ typedef struct MV_SPEED_FEATURES {
   // When to stop subpel search.
   SUBPEL_FORCE_STOP subpel_force_stop;
 
+  // When to stop subpel search in simple motion search.
+  SUBPEL_FORCE_STOP simple_motion_subpel_force_stop;
+
   // If true, sub-pixel search uses the exact convolve function used for final
   // encoding and decoding; otherwise, it uses bilinear interpolation.
   SUBPEL_SEARCH_TYPE use_accurate_subpel_search;
@@ -471,10 +477,6 @@ typedef struct MV_SPEED_FEATURES {
   // Pattern to be used for exhaustive mesh searches of intraBC ME.
   MESH_PATTERN intrabc_mesh_patterns[MAX_MESH_STEP];
 
-  // Use to control hash generation and use of the same
-  // Applicable only for screen contents
-  int disable_hash_me;
-
   // Reduce single motion search range based on MV result of prior ref_mv_idx.
   int reduce_search_range;
 
@@ -483,6 +485,14 @@ typedef struct MV_SPEED_FEATURES {
 
   // Use the rd cost around the best FULLPEL_MV to speed up subpel search
   int use_fullpel_costlist;
+
+  // Set the full pixel search level of obmc
+  // 0: obmc_full_pixel_diamond
+  // 1: obmc_refining_search_sad (faster)
+  int obmc_full_pixel_search_level;
+
+  // Accurate full pixel motion search based on TPL stats.
+  int full_pixel_search_level;
 } MV_SPEED_FEATURES;
 
 typedef struct INTER_MODE_SPEED_FEATURES {
@@ -583,6 +593,13 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // the single reference modes, it is one of the two best performers.
   int prune_compound_using_single_ref;
 
+  // Skip extended compound mode using ref frames of above and left neighbor
+  // blocks.
+  // 0 : no pruning
+  // 1 : prune extended compound mode (less aggressiveness)
+  // 2 : prune extended compound mode (high aggressiveness)
+  int prune_compound_using_neighbors;
+
   // Based on previous ref_mv_idx search result, prune the following search.
   int prune_ref_mv_idx_search;
 
@@ -594,11 +611,6 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // Values are 0 (not used) , 1 - 3 with progressively increasing
   // aggressiveness
   int prune_motion_mode_level;
-
-  // Set the full pixel search level of obmc
-  // 0: obmc_full_pixel_diamond
-  // 1: obmc_refining_search_sad (faster)
-  int obmc_full_pixel_search_level;
 
   // Prune obmc search using previous frame stats.
   int prune_obmc_prob_thresh;
@@ -657,6 +669,8 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   int disable_sb_level_mv_cost_upd;
 
   // Prune inter modes based on tpl stats
+  // 0 : no pruning
+  // 1 - 3 indicate increasing aggressiveness in order.
   int prune_inter_modes_based_on_tpl;
 
   // Model based breakout after interpolation filter search
@@ -766,6 +780,9 @@ typedef struct TX_SPEED_FEATURES {
   // Use hash table to store inter txb transform search results
   // to avoid repeated search on the same residue signal.
   int use_inter_txb_hash;
+
+  // Refine TX type after fast TX search.
+  int refine_fast_tx_search_results;
 } TX_SPEED_FEATURES;
 
 typedef struct RD_CALC_SPEED_FEATURES {
@@ -945,6 +962,13 @@ typedef struct REAL_TIME_SPEED_FEATURES {
 
   // Compute variance/sse on source difference, prior to encoding superblock.
   int source_metrics_sb_nonrd;
+
+  // Flag to indicate process for handling overshoot on slide/scene change,
+  // for real-time CBR mode.
+  OVERSHOOT_DETECTION_CBR overshoot_detection_cbr;
+
+  // Check for scene/content change detection on every frame before encoding.
+  int check_scene_detection;
 } REAL_TIME_SPEED_FEATURES;
 
 typedef struct SPEED_FEATURES {
@@ -1020,6 +1044,7 @@ void av1_set_speed_features_framesize_independent(struct AV1_COMP *cpi,
                                                   int speed);
 void av1_set_speed_features_framesize_dependent(struct AV1_COMP *cpi,
                                                 int speed);
+void av1_set_speed_features_qindex_dependent(struct AV1_COMP *cpi, int speed);
 
 #ifdef __cplusplus
 }  // extern "C"

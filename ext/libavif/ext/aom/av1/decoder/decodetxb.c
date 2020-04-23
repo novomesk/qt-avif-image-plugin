@@ -107,11 +107,12 @@ static INLINE void read_coeffs_reverse(aom_reader *r, TX_SIZE tx_size,
   }
 }
 
-uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
+uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, DecoderCodingBlock *dcb,
                             aom_reader *const r, const int blk_row,
                             const int blk_col, const int plane,
                             const TXB_CTX *const txb_ctx,
                             const TX_SIZE tx_size) {
+  MACROBLOCKD *const xd = &dcb->xd;
   FRAME_CONTEXT *const ec_ctx = xd->tile_ctx;
   const int32_t max_value = (1 << (7 + xd->bd)) - 1;
   const int32_t min_value = -(1 << (7 + xd->bd));
@@ -120,7 +121,7 @@ uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
   MB_MODE_INFO *const mbmi = xd->mi[0];
   struct macroblockd_plane *const pd = &xd->plane[plane];
   const int16_t *const dequant = pd->seg_dequant_QTX[mbmi->segment_id];
-  tran_low_t *const tcoeffs = pd->dqcoeff_block + xd->cb_offset[plane];
+  tran_low_t *const tcoeffs = dcb->dqcoeff_block[plane] + dcb->cb_offset[plane];
   const int shift = av1_get_tx_scale(tx_size);
   const int bwl = get_txb_bwl(tx_size);
   const int width = get_txb_wide(tx_size);
@@ -131,7 +132,7 @@ uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
   uint8_t *const levels = set_levels(levels_buf, width);
   const int all_zero = aom_read_symbol(
       r, ec_ctx->txb_skip_cdf[txs_ctx][txb_ctx->txb_skip_ctx], 2, ACCT_STR);
-  eob_info *eob_data = pd->eob_data + xd->txb_offset[plane];
+  eob_info *eob_data = dcb->eob_data[plane] + dcb->txb_offset[plane];
   uint16_t *const eob = &(eob_data->eob);
   uint16_t *const max_scan_line = &(eob_data->max_scan_line);
   *max_scan_line = 0;
@@ -157,14 +158,12 @@ uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
     // only y plane's tx_type is transmitted
     av1_read_tx_type(cm, xd, blk_row, blk_col, tx_size, r);
   }
-  const TX_TYPE tx_type = av1_get_tx_type(xd, plane_type, blk_row, blk_col,
-                                          tx_size, cm->reduced_tx_set_used);
+  const TX_TYPE tx_type =
+      av1_get_tx_type(xd, plane_type, blk_row, blk_col, tx_size,
+                      cm->features.reduced_tx_set_used);
   const TX_CLASS tx_class = tx_type_to_class[tx_type];
-  const TX_SIZE qm_tx_size = av1_get_adjusted_tx_size(tx_size);
   const qm_val_t *iqmatrix =
-      IS_2D_TRANSFORM(tx_type)
-          ? pd->seg_iqmatrix[mbmi->segment_id][qm_tx_size]
-          : cm->giqmatrix[NUM_QM_LEVELS - 1][0][qm_tx_size];
+      av1_get_iqmatrix(&cm->quant_params, xd, plane, tx_size, tx_type);
   const SCAN_ORDER *const scan_order = get_scan(tx_size, tx_type);
   const int16_t *const scan = scan_order->scan;
   int eob_extra = 0;
@@ -323,13 +322,14 @@ uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
 }
 
 void av1_read_coeffs_txb_facade(const AV1_COMMON *const cm,
-                                MACROBLOCKD *const xd, aom_reader *const r,
+                                DecoderCodingBlock *dcb, aom_reader *const r,
                                 const int plane, const int row, const int col,
                                 const TX_SIZE tx_size) {
 #if TXCOEFF_TIMER
   struct aom_usec_timer timer;
   aom_usec_timer_start(&timer);
 #endif
+  MACROBLOCKD *const xd = &dcb->xd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
   struct macroblockd_plane *const pd = &xd->plane[plane];
 
@@ -339,17 +339,18 @@ void av1_read_coeffs_txb_facade(const AV1_COMMON *const cm,
       get_plane_block_size(bsize, pd->subsampling_x, pd->subsampling_y);
 
   TXB_CTX txb_ctx;
-  get_txb_ctx(plane_bsize, tx_size, plane, pd->above_context + col,
-              pd->left_context + row, &txb_ctx);
+  get_txb_ctx(plane_bsize, tx_size, plane, pd->above_entropy_context + col,
+              pd->left_entropy_context + row, &txb_ctx);
   const uint8_t cul_level =
-      av1_read_coeffs_txb(cm, xd, r, row, col, plane, &txb_ctx, tx_size);
-  av1_set_contexts(xd, pd, plane, plane_bsize, tx_size, cul_level, col, row);
+      av1_read_coeffs_txb(cm, dcb, r, row, col, plane, &txb_ctx, tx_size);
+  av1_set_entropy_contexts(xd, pd, plane, plane_bsize, tx_size, cul_level, col,
+                           row);
 
   if (is_inter_block(mbmi)) {
     const PLANE_TYPE plane_type = get_plane_type(plane);
     // tx_type will be read out in av1_read_coeffs_txb_facade
     const TX_TYPE tx_type = av1_get_tx_type(xd, plane_type, row, col, tx_size,
-                                            cm->reduced_tx_set_used);
+                                            cm->features.reduced_tx_set_used);
 
     if (plane == 0) {
       const int txw = tx_size_wide_unit[tx_size];

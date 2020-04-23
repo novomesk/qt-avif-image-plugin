@@ -57,7 +57,7 @@ static void quantize_fp_helper_c(
       const int rc = scan[i];
       const int32_t thresh = (int32_t)(dequant_ptr[rc != 0]);
       const int coeff = coeff_ptr[rc];
-      const int coeff_sign = (coeff >> 31);
+      const int coeff_sign = AOMSIGN(coeff);
       int64_t abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
       int tmp32 = 0;
       if ((abs_coeff << (1 + log_scale)) >= thresh) {
@@ -84,7 +84,7 @@ static void quantize_fp_helper_c(
       const int dequant =
           (dequant_ptr[rc != 0] * iwt + (1 << (AOM_QM_BITS - 1))) >>
           AOM_QM_BITS;
-      const int coeff_sign = (coeff >> 31);
+      const int coeff_sign = AOMSIGN(coeff);
       int64_t abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
       int tmp32 = 0;
       if (abs_coeff * wt >=
@@ -132,7 +132,7 @@ static void highbd_quantize_fp_helper_c(
       const int dequant =
           (dequant_ptr[rc != 0] * iwt + (1 << (AOM_QM_BITS - 1))) >>
           AOM_QM_BITS;
-      const int coeff_sign = (coeff >> 31);
+      const int coeff_sign = AOMSIGN(coeff);
       const int64_t abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
       int abs_qcoeff = 0;
       if (abs_coeff * wt >=
@@ -159,7 +159,7 @@ static void highbd_quantize_fp_helper_c(
       const int rc = scan[i];
       const int coeff = coeff_ptr[rc];
       const int rc01 = (rc != 0);
-      const int coeff_sign = (coeff >> 31);
+      const int coeff_sign = AOMSIGN(coeff);
       const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
       const int log_scaled_round = log_scaled_round_arr[rc01];
       if ((abs_coeff << (1 + log_scale)) >= dequant_ptr[rc01]) {
@@ -207,7 +207,7 @@ void av1_quantize_lp_c(const int16_t *coeff_ptr, intptr_t n_coeffs,
   for (int i = 0; i < n_coeffs; i++) {
     const int rc = scan[i];
     const int coeff = coeff_ptr[rc];
-    const int coeff_sign = (coeff >> 31);
+    const int coeff_sign = AOMSIGN(coeff);
     const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
 
     int tmp = clamp(abs_coeff + round_ptr[rc != 0], INT16_MIN, INT16_MAX);
@@ -358,7 +358,7 @@ static void quantize_dc(const tran_low_t *coeff_ptr, int n_coeffs,
                         const qm_val_t *iqm_ptr, const int log_scale) {
   const int rc = 0;
   const int coeff = coeff_ptr[rc];
-  const int coeff_sign = (coeff >> 31);
+  const int coeff_sign = AOMSIGN(coeff);
   const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
   int64_t tmp;
   int eob = -1;
@@ -503,7 +503,7 @@ static INLINE void highbd_quantize_dc(
     const qm_val_t wt = qm_ptr != NULL ? qm_ptr[0] : (1 << AOM_QM_BITS);
     const qm_val_t iwt = iqm_ptr != NULL ? iqm_ptr[0] : (1 << AOM_QM_BITS);
     const int coeff = coeff_ptr[0];
-    const int coeff_sign = (coeff >> 31);
+    const int coeff_sign = AOMSIGN(coeff);
     const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
     const int64_t tmp = abs_coeff + ROUND_POWER_OF_TWO(round_ptr[0], log_scale);
     const int64_t tmpw = tmp * wt;
@@ -648,84 +648,90 @@ void av1_build_quantizer(aom_bit_depth_t bit_depth, int y_dc_delta_q,
   }
 }
 
-void av1_init_quantizer(AV1_COMP *cpi) {
-  AV1_COMMON *const cm = &cpi->common;
-  QUANTS *const quants = &cpi->quants;
-  Dequants *const dequants = &cpi->dequants;
-  av1_build_quantizer(cm->seq_params.bit_depth, cm->y_dc_delta_q,
-                      cm->u_dc_delta_q, cm->u_ac_delta_q, cm->v_dc_delta_q,
-                      cm->v_ac_delta_q, quants, dequants);
+void av1_init_quantizer(EncQuantDequantParams *const enc_quant_dequant_params,
+                        const CommonQuantParams *quant_params,
+                        aom_bit_depth_t bit_depth) {
+  QUANTS *const quants = &enc_quant_dequant_params->quants;
+  Dequants *const dequants = &enc_quant_dequant_params->dequants;
+  av1_build_quantizer(bit_depth, quant_params->y_dc_delta_q,
+                      quant_params->u_dc_delta_q, quant_params->u_ac_delta_q,
+                      quant_params->v_dc_delta_q, quant_params->v_ac_delta_q,
+                      quants, dequants);
 }
 
 void av1_init_plane_quantizers(const AV1_COMP *cpi, MACROBLOCK *x,
                                int segment_id) {
   const AV1_COMMON *const cm = &cpi->common;
+  const CommonQuantParams *const quant_params = &cm->quant_params;
   MACROBLOCKD *const xd = &x->e_mbd;
-  const QUANTS *const quants = &cpi->quants;
+  const QUANTS *const quants = &cpi->enc_quant_dequant_params.quants;
+  const Dequants *const dequants = &cpi->enc_quant_dequant_params.dequants;
 
-  int current_qindex = AOMMAX(
-      0, AOMMIN(QINDEX_RANGE - 1, cm->delta_q_info.delta_q_present_flag
-                                      ? cm->base_qindex + xd->delta_qindex
-                                      : cm->base_qindex));
+  const int current_qindex =
+      AOMMAX(0, AOMMIN(QINDEX_RANGE - 1,
+                       cm->delta_q_info.delta_q_present_flag
+                           ? quant_params->base_qindex + xd->delta_qindex
+                           : quant_params->base_qindex));
   const int qindex = av1_get_qindex(&cm->seg, segment_id, current_qindex);
-  const int rdmult = av1_compute_rd_mult(cpi, qindex + cm->y_dc_delta_q);
-  int qmlevel = (xd->lossless[segment_id] || cm->using_qmatrix == 0)
-                    ? NUM_QM_LEVELS - 1
-                    : cm->qm_y;
+  const int rdmult =
+      av1_compute_rd_mult(cpi, qindex + quant_params->y_dc_delta_q);
+  const int use_qmatrix = av1_use_qmatrix(quant_params, xd, segment_id);
 
   // Y
+  const int qmlevel_y =
+      use_qmatrix ? quant_params->qmatrix_level_y : NUM_QM_LEVELS - 1;
   x->plane[0].quant_QTX = quants->y_quant[qindex];
   x->plane[0].quant_fp_QTX = quants->y_quant_fp[qindex];
   x->plane[0].round_fp_QTX = quants->y_round_fp[qindex];
   x->plane[0].quant_shift_QTX = quants->y_quant_shift[qindex];
   x->plane[0].zbin_QTX = quants->y_zbin[qindex];
   x->plane[0].round_QTX = quants->y_round[qindex];
-  x->plane[0].dequant_QTX = cpi->dequants.y_dequant_QTX[qindex];
-  memcpy(&xd->plane[0].seg_qmatrix[segment_id], cm->gqmatrix[qmlevel][0],
-         sizeof(cm->gqmatrix[qmlevel][0]));
-  memcpy(&xd->plane[0].seg_iqmatrix[segment_id], cm->giqmatrix[qmlevel][0],
-         sizeof(cm->giqmatrix[qmlevel][0]));
+  x->plane[0].dequant_QTX = dequants->y_dequant_QTX[qindex];
+  memcpy(&xd->plane[0].seg_qmatrix[segment_id],
+         quant_params->gqmatrix[qmlevel_y][0],
+         sizeof(quant_params->gqmatrix[qmlevel_y][0]));
+  memcpy(&xd->plane[0].seg_iqmatrix[segment_id],
+         quant_params->giqmatrix[qmlevel_y][0],
+         sizeof(quant_params->giqmatrix[qmlevel_y][0]));
 
   // U
-  qmlevel = (xd->lossless[segment_id] || cm->using_qmatrix == 0)
-                ? NUM_QM_LEVELS - 1
-                : cm->qm_u;
-  {
-    x->plane[1].quant_QTX = quants->u_quant[qindex];
-    x->plane[1].quant_fp_QTX = quants->u_quant_fp[qindex];
-    x->plane[1].round_fp_QTX = quants->u_round_fp[qindex];
-    x->plane[1].quant_shift_QTX = quants->u_quant_shift[qindex];
-    x->plane[1].zbin_QTX = quants->u_zbin[qindex];
-    x->plane[1].round_QTX = quants->u_round[qindex];
-    x->plane[1].dequant_QTX = cpi->dequants.u_dequant_QTX[qindex];
-    memcpy(&xd->plane[1].seg_qmatrix[segment_id], cm->gqmatrix[qmlevel][1],
-           sizeof(cm->gqmatrix[qmlevel][1]));
-    memcpy(&xd->plane[1].seg_iqmatrix[segment_id], cm->giqmatrix[qmlevel][1],
-           sizeof(cm->giqmatrix[qmlevel][1]));
-  }
+  const int qmlevel_u =
+      use_qmatrix ? quant_params->qmatrix_level_u : NUM_QM_LEVELS - 1;
+  x->plane[1].quant_QTX = quants->u_quant[qindex];
+  x->plane[1].quant_fp_QTX = quants->u_quant_fp[qindex];
+  x->plane[1].round_fp_QTX = quants->u_round_fp[qindex];
+  x->plane[1].quant_shift_QTX = quants->u_quant_shift[qindex];
+  x->plane[1].zbin_QTX = quants->u_zbin[qindex];
+  x->plane[1].round_QTX = quants->u_round[qindex];
+  x->plane[1].dequant_QTX = dequants->u_dequant_QTX[qindex];
+  memcpy(&xd->plane[1].seg_qmatrix[segment_id],
+         quant_params->gqmatrix[qmlevel_u][1],
+         sizeof(quant_params->gqmatrix[qmlevel_u][1]));
+  memcpy(&xd->plane[1].seg_iqmatrix[segment_id],
+         quant_params->giqmatrix[qmlevel_u][1],
+         sizeof(quant_params->giqmatrix[qmlevel_u][1]));
   // V
-  qmlevel = (xd->lossless[segment_id] || cm->using_qmatrix == 0)
-                ? NUM_QM_LEVELS - 1
-                : cm->qm_v;
-  {
-    x->plane[2].quant_QTX = quants->v_quant[qindex];
-    x->plane[2].quant_fp_QTX = quants->v_quant_fp[qindex];
-    x->plane[2].round_fp_QTX = quants->v_round_fp[qindex];
-    x->plane[2].quant_shift_QTX = quants->v_quant_shift[qindex];
-    x->plane[2].zbin_QTX = quants->v_zbin[qindex];
-    x->plane[2].round_QTX = quants->v_round[qindex];
-    x->plane[2].dequant_QTX = cpi->dequants.v_dequant_QTX[qindex];
-    memcpy(&xd->plane[2].seg_qmatrix[segment_id], cm->gqmatrix[qmlevel][2],
-           sizeof(cm->gqmatrix[qmlevel][2]));
-    memcpy(&xd->plane[2].seg_iqmatrix[segment_id], cm->giqmatrix[qmlevel][2],
-           sizeof(cm->giqmatrix[qmlevel][2]));
-  }
+  const int qmlevel_v =
+      use_qmatrix ? quant_params->qmatrix_level_v : NUM_QM_LEVELS - 1;
+  x->plane[2].quant_QTX = quants->v_quant[qindex];
+  x->plane[2].quant_fp_QTX = quants->v_quant_fp[qindex];
+  x->plane[2].round_fp_QTX = quants->v_round_fp[qindex];
+  x->plane[2].quant_shift_QTX = quants->v_quant_shift[qindex];
+  x->plane[2].zbin_QTX = quants->v_zbin[qindex];
+  x->plane[2].round_QTX = quants->v_round[qindex];
+  x->plane[2].dequant_QTX = dequants->v_dequant_QTX[qindex];
+  memcpy(&xd->plane[2].seg_qmatrix[segment_id],
+         quant_params->gqmatrix[qmlevel_v][2],
+         sizeof(quant_params->gqmatrix[qmlevel_v][2]));
+  memcpy(&xd->plane[2].seg_iqmatrix[segment_id],
+         quant_params->giqmatrix[qmlevel_v][2],
+         sizeof(quant_params->giqmatrix[qmlevel_v][2]));
   x->skip_block = segfeature_active(&cm->seg, segment_id, SEG_LVL_SKIP);
   x->qindex = qindex;
 
-  set_error_per_bit(x, rdmult);
-
-  av1_initialize_me_consts(cpi, x, qindex);
+  MvCostInfo *mv_cost_info = &x->mv_cost_info;
+  av1_set_error_per_bit(mv_cost_info, rdmult);
+  av1_set_sad_per_bit(cpi, mv_cost_info, qindex);
 }
 
 void av1_frame_init_quantizer(AV1_COMP *cpi) {
@@ -734,24 +740,29 @@ void av1_frame_init_quantizer(AV1_COMP *cpi) {
   av1_init_plane_quantizers(cpi, x, xd->mi[0]->segment_id);
 }
 
-void av1_set_quantizer(AV1_COMMON *cm, int q) {
+void av1_set_quantizer(AV1_COMMON *const cm, int min_qmlevel, int max_qmlevel,
+                       int q) {
   // quantizer has to be reinitialized with av1_init_quantizer() if any
   // delta_q changes.
-  cm->base_qindex = AOMMAX(cm->delta_q_info.delta_q_present_flag, q);
-  cm->y_dc_delta_q = 0;
-  cm->u_dc_delta_q = 0;
-  cm->u_ac_delta_q = 0;
-  cm->v_dc_delta_q = 0;
-  cm->v_ac_delta_q = 0;
-  cm->qm_y = aom_get_qmlevel(cm->base_qindex, cm->min_qmlevel, cm->max_qmlevel);
-  cm->qm_u = aom_get_qmlevel(cm->base_qindex + cm->u_ac_delta_q,
-                             cm->min_qmlevel, cm->max_qmlevel);
+  CommonQuantParams *quant_params = &cm->quant_params;
+  quant_params->base_qindex = AOMMAX(cm->delta_q_info.delta_q_present_flag, q);
+  quant_params->y_dc_delta_q = 0;
+  quant_params->u_dc_delta_q = 0;
+  quant_params->u_ac_delta_q = 0;
+  quant_params->v_dc_delta_q = 0;
+  quant_params->v_ac_delta_q = 0;
+  quant_params->qmatrix_level_y =
+      aom_get_qmlevel(quant_params->base_qindex, min_qmlevel, max_qmlevel);
+  quant_params->qmatrix_level_u =
+      aom_get_qmlevel(quant_params->base_qindex + quant_params->u_ac_delta_q,
+                      min_qmlevel, max_qmlevel);
 
   if (!cm->seq_params.separate_uv_delta_q)
-    cm->qm_v = cm->qm_u;
+    quant_params->qmatrix_level_v = quant_params->qmatrix_level_u;
   else
-    cm->qm_v = aom_get_qmlevel(cm->base_qindex + cm->v_ac_delta_q,
-                               cm->min_qmlevel, cm->max_qmlevel);
+    quant_params->qmatrix_level_v =
+        aom_get_qmlevel(quant_params->base_qindex + quant_params->v_ac_delta_q,
+                        min_qmlevel, max_qmlevel);
 }
 
 // Table that converts 0-63 Q-range values passed in outside to the Qindex

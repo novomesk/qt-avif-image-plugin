@@ -12,7 +12,7 @@
 #ifndef AOM_AV1_ENCODER_GOP_STRUCTURE_H_
 #define AOM_AV1_ENCODER_GOP_STRUCTURE_H_
 
-#include "av1/common/onyxc_int.h"
+#include "av1/common/av1_common_int.h"
 #include "av1/encoder/ratectrl.h"
 
 #ifdef __cplusplus
@@ -34,7 +34,8 @@ void av1_gop_setup_structure(
 
 int av1_calc_arf_boost(const TWO_PASS *twopass, const RATE_CONTROL *rc,
                        FRAME_INFO *frame_info, int offset, int f_frames,
-                       int b_frames, int *num_fpstats_used);
+                       int b_frames, int *num_fpstats_used,
+                       int *num_fpstats_required);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

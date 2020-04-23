@@ -17,8 +17,8 @@
 #include "aom_dsp/aom_dsp_common.h"
 #include "aom_mem/aom_mem.h"
 #include "aom_ports/mem.h"
+#include "av1/common/av1_common_int.h"
 #include "av1/common/av1_loopfilter.h"
-#include "av1/common/onyxc_int.h"
 #include "av1/common/reconinter.h"
 #include "av1/common/seg_common.h"
 
@@ -202,7 +202,7 @@ static TX_SIZE get_transform_size(const MACROBLOCKD *const xd,
           : av1_get_max_uv_txsize(mbmi->sb_type, plane_ptr->subsampling_x,
                                   plane_ptr->subsampling_y);
   assert(tx_size < TX_SIZES_ALL);
-  if ((plane == AOM_PLANE_Y) && is_inter_block(mbmi) && !mbmi->skip) {
+  if ((plane == AOM_PLANE_Y) && is_inter_block(mbmi) && !mbmi->skip_txfm) {
     const BLOCK_SIZE sb_type = mbmi->sb_type;
     const int blk_row = mi_row & (mi_size_high[sb_type] - 1);
     const int blk_col = mi_col & (mi_size_wide[sb_type] - 1);
@@ -256,7 +256,8 @@ static TX_SIZE set_lpf_parameters(
   // and mi_col should be odd number for chroma plane.
   const int mi_row = scale_vert | ((y << scale_vert) >> MI_SIZE_LOG2);
   const int mi_col = scale_horz | ((x << scale_horz) >> MI_SIZE_LOG2);
-  MB_MODE_INFO **mi = cm->mi_grid_base + mi_row * cm->mi_stride + mi_col;
+  MB_MODE_INFO **mi =
+      cm->mi_params.mi_grid_base + mi_row * cm->mi_params.mi_stride + mi_col;
   const MB_MODE_INFO *mbmi = mi[0];
   // If current mbmi is not correctly setup, return an invalid value to stop
   // filtering. One example is that if this tile is not coded, then its mbmi
@@ -278,7 +279,7 @@ static TX_SIZE set_lpf_parameters(
     {
       const uint32_t curr_level =
           av1_get_filter_level(cm, &cm->lf_info, edge_dir, plane, mbmi);
-      const int curr_skipped = mbmi->skip && is_inter_block(mbmi);
+      const int curr_skipped = mbmi->skip_txfm && is_inter_block(mbmi);
       uint32_t level = curr_level;
       if (coord) {
         {
@@ -294,7 +295,8 @@ static TX_SIZE set_lpf_parameters(
           const uint32_t pv_lvl =
               av1_get_filter_level(cm, &cm->lf_info, edge_dir, plane, mi_prev);
 
-          const int pv_skip = mi_prev->skip && is_inter_block(mi_prev);
+          const int pv_skip_txfm =
+              mi_prev->skip_txfm && is_inter_block(mi_prev);
           const BLOCK_SIZE bsize =
               get_plane_block_size(mbmi->sb_type, plane_ptr->subsampling_x,
                                    plane_ptr->subsampling_y);
@@ -306,7 +308,7 @@ static TX_SIZE set_lpf_parameters(
           // if the current and the previous blocks are skipped,
           // deblock the edge if the edge belongs to a PU's edge only.
           if ((curr_level || pv_lvl) &&
-              (!pv_skip || !curr_skipped || pu_edge)) {
+              (!pv_skip_txfm || !curr_skipped || pu_edge)) {
             const TX_SIZE min_ts = AOMMIN(ts, pv_ts);
             if (TX_4X4 >= min_ts) {
               params->filter_length = 4;
@@ -479,9 +481,9 @@ void av1_filter_block_plane_horz(const AV1_COMMON *const cm,
       AV1_DEBLOCKING_PARAMETERS params;
       memset(&params, 0, sizeof(params));
 
-      tx_size =
-          set_lpf_parameters(&params, (cm->mi_stride << scale_vert), cm, xd,
-                             HORZ_EDGE, curr_x, curr_y, plane, plane_ptr);
+      tx_size = set_lpf_parameters(
+          &params, (cm->mi_params.mi_stride << scale_vert), cm, xd, HORZ_EDGE,
+          curr_x, curr_y, plane, plane_ptr);
       if (tx_size == TX_INVALID) {
         params.filter_length = 0;
         tx_size = TX_4X4;
@@ -581,8 +583,8 @@ void av1_filter_block_plane_vert_test(const AV1_COMMON *const cm,
   const uint32_t scale_vert = plane_ptr->subsampling_y;
   uint8_t *const dst_ptr = plane_ptr->dst.buf;
   const int dst_stride = plane_ptr->dst.stride;
-  const int y_range = cm->mi_rows >> scale_vert;
-  const int x_range = cm->mi_cols >> scale_horz;
+  const int y_range = cm->mi_params.mi_rows >> scale_vert;
+  const int x_range = cm->mi_params.mi_cols >> scale_horz;
   for (int y = 0; y < y_range; y++) {
     uint8_t *p = dst_ptr + y * MI_SIZE * dst_stride;
     for (int x = 0; x < x_range;) {
@@ -623,8 +625,8 @@ void av1_filter_block_plane_horz_test(const AV1_COMMON *const cm,
   const uint32_t scale_vert = plane_ptr->subsampling_y;
   uint8_t *const dst_ptr = plane_ptr->dst.buf;
   const int dst_stride = plane_ptr->dst.stride;
-  const int y_range = cm->mi_rows >> scale_vert;
-  const int x_range = cm->mi_cols >> scale_horz;
+  const int y_range = cm->mi_params.mi_rows >> scale_vert;
+  const int x_range = cm->mi_params.mi_cols >> scale_horz;
   for (int x = 0; x < x_range; x++) {
     uint8_t *p = dst_ptr + x * MI_SIZE;
     for (int y = 0; y < y_range;) {
@@ -639,9 +641,9 @@ void av1_filter_block_plane_horz_test(const AV1_COMMON *const cm,
       AV1_DEBLOCKING_PARAMETERS params;
       memset(&params, 0, sizeof(params));
 
-      tx_size =
-          set_lpf_parameters(&params, (cm->mi_stride << scale_vert), cm, xd,
-                             HORZ_EDGE, curr_x, curr_y, plane, plane_ptr);
+      tx_size = set_lpf_parameters(
+          &params, (cm->mi_params.mi_stride << scale_vert), cm, xd, HORZ_EDGE,
+          curr_x, curr_y, plane, plane_ptr);
       if (tx_size == TX_INVALID) {
         params.filter_length = 0;
         tx_size = TX_4X4;
@@ -663,7 +665,7 @@ static void loop_filter_rows(YV12_BUFFER_CONFIG *frame_buffer, AV1_COMMON *cm,
                              int plane_start, int plane_end) {
   struct macroblockd_plane *pd = xd->plane;
   const int col_start = 0;
-  const int col_end = cm->mi_cols;
+  const int col_end = cm->mi_params.mi_cols;
   int mi_row, mi_col;
   int plane;
 
@@ -773,11 +775,11 @@ void av1_loop_filter_frame(YV12_BUFFER_CONFIG *frame, AV1_COMMON *cm,
   int start_mi_row, end_mi_row, mi_rows_to_filter;
 
   start_mi_row = 0;
-  mi_rows_to_filter = cm->mi_rows;
-  if (partial_frame && cm->mi_rows > 8) {
-    start_mi_row = cm->mi_rows >> 1;
+  mi_rows_to_filter = cm->mi_params.mi_rows;
+  if (partial_frame && cm->mi_params.mi_rows > 8) {
+    start_mi_row = cm->mi_params.mi_rows >> 1;
     start_mi_row &= 0xfffffff8;
-    mi_rows_to_filter = AOMMAX(cm->mi_rows / 8, 8);
+    mi_rows_to_filter = AOMMAX(cm->mi_params.mi_rows / 8, 8);
   }
   end_mi_row = start_mi_row + mi_rows_to_filter;
   av1_loop_filter_frame_init(cm, plane_start, plane_end);

@@ -7,8 +7,6 @@
 
 #include <string.h>
 
-#define AVIF_RAV1E_VERSION (RAV1E_MAJOR * 10000) + (RAV1E_MINOR * 100) + RAV1E_PATCH
-
 struct avifCodecInternal
 {
     uint32_t unused; // rav1e codec has no state
@@ -57,7 +55,7 @@ static avifBool rav1eCodecEncodeImage(avifCodec * codec, avifImage * image, avif
                 yShift = 1;
                 break;
             case AVIF_PIXEL_FORMAT_YV12:
-                return AVIF_FALSE;
+            case AVIF_PIXEL_FORMAT_NONE:
             default:
                 return AVIF_FALSE;
         }
@@ -69,11 +67,9 @@ static avifBool rav1eCodecEncodeImage(avifCodec * codec, avifImage * image, avif
         goto cleanup;
     }
 
-#if AVIF_RAV1E_VERSION >= 300
     if (rav1e_config_parse(rav1eConfig, "still_picture", "true") == -1) {
         goto cleanup;
     }
-#endif
     if (rav1e_config_parse_int(rav1eConfig, "width", image->width) == -1) {
         goto cleanup;
     }
@@ -134,10 +130,7 @@ static avifBool rav1eCodecEncodeImage(avifCodec * codec, avifImage * image, avif
     if (alpha) {
         rav1e_frame_fill_plane(rav1eFrame, 0, image->alphaPlane, image->alphaRowBytes * image->height, image->alphaRowBytes, byteWidth);
     } else {
-        uint32_t uvHeight = image->height >> yShift;
-        if (uvHeight < 1) {
-            uvHeight = 1;
-        }
+        uint32_t uvHeight = (image->height + yShift) >> yShift;
         rav1e_frame_fill_plane(rav1eFrame, 0, image->yuvPlanes[0], image->yuvRowBytes[0] * image->height, image->yuvRowBytes[0], byteWidth);
         rav1e_frame_fill_plane(rav1eFrame, 1, image->yuvPlanes[1], image->yuvRowBytes[1] * uvHeight, image->yuvRowBytes[1], byteWidth);
         rav1e_frame_fill_plane(rav1eFrame, 2, image->yuvPlanes[2], image->yuvRowBytes[2] * uvHeight, image->yuvRowBytes[2], byteWidth);

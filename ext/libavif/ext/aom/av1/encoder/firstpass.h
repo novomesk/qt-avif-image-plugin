@@ -12,8 +12,8 @@
 #ifndef AOM_AV1_ENCODER_FIRSTPASS_H_
 #define AOM_AV1_ENCODER_FIRSTPASS_H_
 
+#include "av1/common/av1_common_int.h"
 #include "av1/common/enums.h"
-#include "av1/common/onyxc_int.h"
 #include "av1/encoder/lookahead.h"
 #include "av1/encoder/ratectrl.h"
 
@@ -29,8 +29,6 @@ extern "C" {
 #define MIN_MV_IN_OUT 0.4
 
 #define VLOW_MOTION_THRESHOLD 950
-
-#define MAX_ARF_LAYERS 6
 
 typedef struct {
   // Frame number in display order, if stats are for a single frame.
@@ -135,11 +133,12 @@ typedef struct {
   FIRSTPASS_STATS *stats_in_start;
   FIRSTPASS_STATS *stats_in_end;
   FIRSTPASS_STATS *stats_in_buf_end;
+  FIRSTPASS_STATS *total_stats;
+  FIRSTPASS_STATS *total_left_stats;
 } STATS_BUFFER_CTX;
 
 typedef struct {
   unsigned int section_intra_rating;
-  FIRSTPASS_STATS *total_stats;
   // Circular queue of first pass stats stored for most recent frames.
   // cpi->output_pkt_list[i].data.twopass_stats.buf points to actual data stored
   // here.
@@ -147,7 +146,6 @@ typedef struct {
   int frame_stats_next_idx;  // Index to next unused element in frame_stats_arr.
   const FIRSTPASS_STATS *stats_in;
   STATS_BUFFER_CTX *stats_buf_ctx;
-  FIRSTPASS_STATS *total_left_stats;
   int first_pass_done;
   int64_t bits_left;
   double modified_error_min;
@@ -185,12 +183,13 @@ struct AV1_COMP;
 struct EncodeFrameParams;
 struct AV1EncoderConfig;
 
-void av1_init_first_pass(struct AV1_COMP *cpi);
 void av1_rc_get_first_pass_params(struct AV1_COMP *cpi);
 void av1_first_pass(struct AV1_COMP *cpi, const int64_t ts_duration);
 void av1_end_first_pass(struct AV1_COMP *cpi);
 
 void av1_twopass_zero_stats(FIRSTPASS_STATS *section);
+void av1_accumulate_stats(FIRSTPASS_STATS *section,
+                          const FIRSTPASS_STATS *frame);
 
 #ifdef __cplusplus
 }  // extern "C"

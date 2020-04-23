@@ -87,10 +87,14 @@ static int read_bitstream_level(AV1_LEVEL *seq_level_idx,
 }
 
 // Returns whether two sequence headers are consistent with each other.
-// TODO(huisu,wtc@google.com): make sure the code matches the spec exactly.
+// Note that the 'op_params' field is not compared per Section 7.5 in the spec:
+//   Within a particular coded video sequence, the contents of
+//   sequence_header_obu must be bit-identical each time the sequence header
+//   appears except for the contents of operating_parameters_info.
 static int are_seq_headers_consistent(const SequenceHeader *seq_params_old,
                                       const SequenceHeader *seq_params_new) {
-  return !memcmp(seq_params_old, seq_params_new, sizeof(SequenceHeader));
+  return !memcmp(seq_params_old, seq_params_new,
+                 offsetof(SequenceHeader, op_params));
 }
 
 // On success, sets pbi->sequence_header_ready to 1 and returns the number of
@@ -125,7 +129,7 @@ static uint32_t read_sequence_header_obu(AV1Decoder *pbi,
   }
 
   if (seq_params->reduced_still_picture_hdr) {
-    cm->timing_info_present = 0;
+    seq_params->timing_info_present = 0;
     seq_params->decoder_model_info_present_flag = 0;
     seq_params->display_model_info_present_flag = 0;
     seq_params->operating_points_cnt_minus_1 = 0;
@@ -135,16 +139,16 @@ static uint32_t read_sequence_header_obu(AV1Decoder *pbi,
       return 0;
     }
     seq_params->tier[0] = 0;
-    cm->op_params[0].decoder_model_param_present_flag = 0;
-    cm->op_params[0].display_model_param_present_flag = 0;
+    seq_params->op_params[0].decoder_model_param_present_flag = 0;
+    seq_params->op_params[0].display_model_param_present_flag = 0;
   } else {
-    cm->timing_info_present = aom_rb_read_bit(rb);  // timing_info_present_flag
-    if (cm->timing_info_present) {
-      av1_read_timing_info_header(cm, rb);
+    seq_params->timing_info_present = aom_rb_read_bit(rb);
+    if (seq_params->timing_info_present) {
+      av1_read_timing_info_header(&seq_params->timing_info, &cm->error, rb);
 
       seq_params->decoder_model_info_present_flag = aom_rb_read_bit(rb);
       if (seq_params->decoder_model_info_present_flag)
-        av1_read_decoder_model_info(cm, rb);
+        av1_read_decoder_model_info(&seq_params->decoder_model_info, rb);
     } else {
       seq_params->decoder_model_info_present_flag = 0;
     }
@@ -165,51 +169,57 @@ static uint32_t read_sequence_header_obu(AV1Decoder *pbi,
       else
         seq_params->tier[i] = 0;
       if (seq_params->decoder_model_info_present_flag) {
-        cm->op_params[i].decoder_model_param_present_flag = aom_rb_read_bit(rb);
-        if (cm->op_params[i].decoder_model_param_present_flag)
-          av1_read_op_parameters_info(cm, rb, i);
+        seq_params->op_params[i].decoder_model_param_present_flag =
+            aom_rb_read_bit(rb);
+        if (seq_params->op_params[i].decoder_model_param_present_flag)
+          av1_read_op_parameters_info(&seq_params->op_params[i],
+                                      seq_params->decoder_model_info
+                                          .encoder_decoder_buffer_delay_length,
+                                      rb);
       } else {
-        cm->op_params[i].decoder_model_param_present_flag = 0;
+        seq_params->op_params[i].decoder_model_param_present_flag = 0;
       }
-      if (cm->timing_info_present &&
-          (cm->timing_info.equal_picture_interval ||
-           cm->op_params[i].decoder_model_param_present_flag)) {
-        cm->op_params[i].bitrate = av1_max_level_bitrate(
+      if (seq_params->timing_info_present &&
+          (seq_params->timing_info.equal_picture_interval ||
+           seq_params->op_params[i].decoder_model_param_present_flag)) {
+        seq_params->op_params[i].bitrate = av1_max_level_bitrate(
             seq_params->profile, seq_params->seq_level_idx[i],
             seq_params->tier[i]);
         // Level with seq_level_idx = 31 returns a high "dummy" bitrate to pass
         // the check
-        if (cm->op_params[i].bitrate == 0)
+        if (seq_params->op_params[i].bitrate == 0)
           aom_internal_error(&cm->error, AOM_CODEC_UNSUP_BITSTREAM,
                              "AV1 does not support this combination of "
                              "profile, level, and tier.");
         // Buffer size in bits/s is bitrate in bits/s * 1 s
-        cm->op_params[i].buffer_size = cm->op_params[i].bitrate;
+        seq_params->op_params[i].buffer_size = seq_params->op_params[i].bitrate;
       }
-      if (cm->timing_info_present && cm->timing_info.equal_picture_interval &&
-          !cm->op_params[i].decoder_model_param_present_flag) {
+      if (seq_params->timing_info_present &&
+          seq_params->timing_info.equal_picture_interval &&
+          !seq_params->op_params[i].decoder_model_param_present_flag) {
         // When the decoder_model_parameters are not sent for this op, set
         // the default ones that can be used with the resource availability mode
-        cm->op_params[i].decoder_buffer_delay = 70000;
-        cm->op_params[i].encoder_buffer_delay = 20000;
-        cm->op_params[i].low_delay_mode_flag = 0;
+        seq_params->op_params[i].decoder_buffer_delay = 70000;
+        seq_params->op_params[i].encoder_buffer_delay = 20000;
+        seq_params->op_params[i].low_delay_mode_flag = 0;
       }
 
       if (seq_params->display_model_info_present_flag) {
-        cm->op_params[i].display_model_param_present_flag = aom_rb_read_bit(rb);
-        if (cm->op_params[i].display_model_param_present_flag) {
-          cm->op_params[i].initial_display_delay =
+        seq_params->op_params[i].display_model_param_present_flag =
+            aom_rb_read_bit(rb);
+        if (seq_params->op_params[i].display_model_param_present_flag) {
+          seq_params->op_params[i].initial_display_delay =
               aom_rb_read_literal(rb, 4) + 1;
-          if (cm->op_params[i].initial_display_delay > 10)
+          if (seq_params->op_params[i].initial_display_delay > 10)
             aom_internal_error(
                 &cm->error, AOM_CODEC_UNSUP_BITSTREAM,
                 "AV1 does not support more than 10 decoded frames delay");
         } else {
-          cm->op_params[i].initial_display_delay = 10;
+          seq_params->op_params[i].initial_display_delay = 10;
         }
       } else {
-        cm->op_params[i].display_model_param_present_flag = 0;
-        cm->op_params[i].initial_display_delay = 10;
+        seq_params->op_params[i].display_model_param_present_flag = 0;
+        seq_params->op_params[i].initial_display_delay = 10;
       }
     }
   }
@@ -278,11 +288,12 @@ static int32_t read_tile_group_header(AV1Decoder *pbi,
                                       int *start_tile, int *end_tile,
                                       int tile_start_implicit) {
   AV1_COMMON *const cm = &pbi->common;
+  CommonTileParams *const tiles = &cm->tiles;
   uint32_t saved_bit_offset = rb->bit_offset;
   int tile_start_and_end_present_flag = 0;
-  const int num_tiles = pbi->common.tile_rows * pbi->common.tile_cols;
+  const int num_tiles = tiles->rows * tiles->cols;
 
-  if (!pbi->common.large_scale_tile && num_tiles > 1) {
+  if (!tiles->large_scale && num_tiles > 1) {
     tile_start_and_end_present_flag = aom_rb_read_bit(rb);
     if (tile_start_implicit && tile_start_and_end_present_flag) {
       aom_internal_error(
@@ -291,12 +302,12 @@ static int32_t read_tile_group_header(AV1Decoder *pbi,
       return -1;
     }
   }
-  if (pbi->common.large_scale_tile || num_tiles == 1 ||
+  if (tiles->large_scale || num_tiles == 1 ||
       !tile_start_and_end_present_flag) {
     *start_tile = 0;
     *end_tile = num_tiles - 1;
   } else {
-    int tile_bits = cm->log2_tile_rows + cm->log2_tile_cols;
+    int tile_bits = tiles->log2_rows + tiles->log2_cols;
     *start_tile = aom_rb_read_literal(rb, tile_bits);
     *end_tile = aom_rb_read_literal(rb, tile_bits);
   }
@@ -346,7 +357,7 @@ static uint32_t read_one_tile_group_obu(
 
   tg_payload_size = (uint32_t)(*p_data_end - data);
 
-  *is_last_tg = end_tile == cm->tile_rows * cm->tile_cols - 1;
+  *is_last_tg = end_tile == cm->tiles.rows * cm->tiles.cols - 1;
   return header_size + tg_payload_size;
 }
 
@@ -378,7 +389,7 @@ static void alloc_tile_list_buffer(AV1Decoder *pbi) {
                              cm->seq_params.subsampling_y,
                              (cm->seq_params.use_highbitdepth &&
                               (cm->seq_params.bit_depth > AOM_BITS_8)),
-                             0, cm->byte_alignment))
+                             0, cm->features.byte_alignment))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate the tile list output buffer");
 }
@@ -474,7 +485,7 @@ static uint32_t read_and_decode_one_tile_list(AV1Decoder *pbi,
                                               int *frame_decoding_finished) {
   AV1_COMMON *const cm = &pbi->common;
   uint32_t tile_list_payload_size = 0;
-  const int num_tiles = cm->tile_cols * cm->tile_rows;
+  const int num_tiles = cm->tiles.cols * cm->tiles.rows;
   const int start_tile = 0;
   const int end_tile = num_tiles - 1;
   int i = 0;
@@ -516,8 +527,8 @@ static uint32_t read_and_decode_one_tile_list(AV1Decoder *pbi,
     pbi->dec_tile_row = aom_rb_read_literal(rb, 8);
     pbi->dec_tile_col = aom_rb_read_literal(rb, 8);
     if (pbi->dec_tile_row < 0 || pbi->dec_tile_col < 0 ||
-        pbi->dec_tile_row >= cm->tile_rows ||
-        pbi->dec_tile_col >= cm->tile_cols) {
+        pbi->dec_tile_row >= cm->tiles.rows ||
+        pbi->dec_tile_col >= cm->tiles.cols) {
       cm->error.error_code = AOM_CODEC_CORRUPT_FRAME;
       return 0;
     }
@@ -860,8 +871,8 @@ int aom_decode_frame_from_obus(struct AV1Decoder *pbi, const uint8_t *data,
     return -1;
   }
 
-  // Reset pbi->camera_frame_header_ready to 0 if cm->large_scale_tile = 0.
-  if (!cm->large_scale_tile) pbi->camera_frame_header_ready = 0;
+  // Reset pbi->camera_frame_header_ready to 0 if cm->tiles.large_scale = 0.
+  if (!cm->tiles.large_scale) pbi->camera_frame_header_ready = 0;
 
   // decode frame as a series of OBUs
   while (!frame_decoding_finished && cm->error.error_code == AOM_CODEC_OK) {
@@ -879,7 +890,7 @@ int aom_decode_frame_from_obus(struct AV1Decoder *pbi, const uint8_t *data,
     }
 
     aom_codec_err_t status =
-        aom_read_obu_header_and_size(data, bytes_available, cm->is_annexb,
+        aom_read_obu_header_and_size(data, bytes_available, pbi->is_annexb,
                                      &obu_header, &payload_size, &bytes_read);
 
     if (status != AOM_CODEC_OK) {
@@ -947,11 +958,11 @@ int aom_decode_frame_from_obus(struct AV1Decoder *pbi, const uint8_t *data,
         }
         // Only decode first frame header received
         if (!pbi->seen_frame_header ||
-            (cm->large_scale_tile && !pbi->camera_frame_header_ready)) {
+            (cm->tiles.large_scale && !pbi->camera_frame_header_ready)) {
           frame_header_size = read_frame_header_obu(
               pbi, &rb, data, p_data_end, obu_header.type != OBU_FRAME);
           pbi->seen_frame_header = 1;
-          if (!pbi->ext_tile_debug && cm->large_scale_tile)
+          if (!pbi->ext_tile_debug && cm->tiles.large_scale)
             pbi->camera_frame_header_ready = 1;
         } else {
           // TODO(wtc): Verify that the frame_header_obu is identical to the
@@ -1029,7 +1040,7 @@ int aom_decode_frame_from_obus(struct AV1Decoder *pbi, const uint8_t *data,
           return -1;
         }
 
-        cm->large_scale_tile = 1;
+        cm->tiles.large_scale = 1;
         av1_set_single_tile_decoding_mode(cm);
         decoded_payload_size =
             read_and_decode_one_tile_list(pbi, &rb, data, data + payload_size,

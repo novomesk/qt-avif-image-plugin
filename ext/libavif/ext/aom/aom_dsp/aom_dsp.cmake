@@ -48,7 +48,6 @@ list(APPEND AOM_DSP_COMMON_SOURCES
             "${AOM_ROOT}/aom_dsp/avg.c")
 
 list(APPEND AOM_DSP_COMMON_ASM_SSE2
-            "${AOM_ROOT}/aom_dsp/x86/aom_convolve_copy_sse2.asm"
             "${AOM_ROOT}/aom_dsp/x86/aom_high_subpixel_8t_sse2.asm"
             "${AOM_ROOT}/aom_dsp/x86/aom_high_subpixel_bilinear_sse2.asm"
             "${AOM_ROOT}/aom_dsp/x86/aom_subpixel_8t_sse2.asm"
@@ -58,6 +57,7 @@ list(APPEND AOM_DSP_COMMON_ASM_SSE2
             "${AOM_ROOT}/aom_dsp/x86/inv_wht_sse2.asm")
 
 list(APPEND AOM_DSP_COMMON_INTRIN_SSE2
+            "${AOM_ROOT}/aom_dsp/x86/aom_convolve_copy_sse2.c"
             "${AOM_ROOT}/aom_dsp/x86/aom_subpixel_8t_intrin_sse2.c"
             "${AOM_ROOT}/aom_dsp/x86/aom_asm_stubs.c"
             "${AOM_ROOT}/aom_dsp/x86/convolve.h"
@@ -67,6 +67,7 @@ list(APPEND AOM_DSP_COMMON_INTRIN_SSE2
             "${AOM_ROOT}/aom_dsp/x86/highbd_intrapred_sse2.c"
             "${AOM_ROOT}/aom_dsp/x86/highbd_loopfilter_sse2.c"
             "${AOM_ROOT}/aom_dsp/x86/intrapred_sse2.c"
+            "${AOM_ROOT}/aom_dsp/x86/intrapred_x86.h"
             "${AOM_ROOT}/aom_dsp/x86/loopfilter_sse2.c"
             "${AOM_ROOT}/aom_dsp/x86/lpf_common_sse2.h"
             "${AOM_ROOT}/aom_dsp/x86/mem_sse2.h"
@@ -103,6 +104,7 @@ list(APPEND AOM_DSP_COMMON_INTRIN_SSE4_1
             "${AOM_ROOT}/aom_dsp/x86/blend_a64_vmask_sse4.c")
 
 list(APPEND AOM_DSP_COMMON_INTRIN_AVX2
+            "${AOM_ROOT}/aom_dsp/x86/aom_convolve_copy_avx2.c"
             "${AOM_ROOT}/aom_dsp/x86/aom_subpixel_8t_intrin_avx2.c"
             "${AOM_ROOT}/aom_dsp/x86/common_avx2.h"
             "${AOM_ROOT}/aom_dsp/x86/txfm_common_avx2.h"
@@ -121,19 +123,21 @@ if(NOT CONFIG_AV1_HIGHBITDEPTH)
                    "${AOM_ROOT}/aom_dsp/x86/highbd_loopfilter_avx2.c")
 endif()
 
-list(APPEND AOM_DSP_COMMON_INTRIN_NEON "${AOM_ROOT}/aom_dsp/arm/fwd_txfm_neon.c"
+list(APPEND AOM_DSP_COMMON_INTRIN_NEON
+            "${AOM_ROOT}/aom_dsp/arm/aom_convolve_copy_neon.c"
+            "${AOM_ROOT}/aom_dsp/arm/fwd_txfm_neon.c"
             "${AOM_ROOT}/aom_dsp/arm/loopfilter_neon.c"
             "${AOM_ROOT}/aom_dsp/arm/intrapred_neon.c"
             "${AOM_ROOT}/aom_dsp/arm/subtract_neon.c"
             "${AOM_ROOT}/aom_dsp/arm/blend_a64_mask_neon.c")
 
 list(APPEND AOM_DSP_COMMON_INTRIN_DSPR2
+            "${AOM_ROOT}/aom_dsp/mips/aom_convolve_copy_dspr2.c"
             "${AOM_ROOT}/aom_dsp/mips/common_dspr2.c"
             "${AOM_ROOT}/aom_dsp/mips/common_dspr2.h"
             "${AOM_ROOT}/aom_dsp/mips/convolve2_dspr2.c"
             "${AOM_ROOT}/aom_dsp/mips/convolve2_horiz_dspr2.c"
             "${AOM_ROOT}/aom_dsp/mips/convolve2_vert_dspr2.c"
-            "${AOM_ROOT}/aom_dsp/mips/convolve8_dspr2.c"
             "${AOM_ROOT}/aom_dsp/mips/convolve8_horiz_dspr2.c"
             "${AOM_ROOT}/aom_dsp/mips/convolve8_vert_dspr2.c"
             "${AOM_ROOT}/aom_dsp/mips/convolve_common_dspr2.h"
@@ -154,10 +158,9 @@ if(CONFIG_AV1_DECODER)
   list(APPEND AOM_DSP_DECODER_SOURCES
               "${AOM_ROOT}/aom_dsp/binary_codes_reader.c"
               "${AOM_ROOT}/aom_dsp/binary_codes_reader.h"
-              "${AOM_ROOT}/aom_dsp/bitreader.h"
-              "${AOM_ROOT}/aom_dsp/daalaboolreader.c"
-              "${AOM_ROOT}/aom_dsp/daalaboolreader.h"
-              "${AOM_ROOT}/aom_dsp/entdec.c" "${AOM_ROOT}/aom_dsp/entdec.h"
+              "${AOM_ROOT}/aom_dsp/bitreader.c"
+              "${AOM_ROOT}/aom_dsp/bitreader.h" "${AOM_ROOT}/aom_dsp/entdec.c"
+              "${AOM_ROOT}/aom_dsp/entdec.h"
               "${AOM_ROOT}/aom_dsp/grain_synthesis.c"
               "${AOM_ROOT}/aom_dsp/grain_synthesis.h")
 endif()
@@ -166,10 +169,9 @@ if(CONFIG_AV1_ENCODER)
   list(APPEND AOM_DSP_ENCODER_SOURCES
               "${AOM_ROOT}/aom_dsp/binary_codes_writer.c"
               "${AOM_ROOT}/aom_dsp/binary_codes_writer.h"
+              "${AOM_ROOT}/aom_dsp/bitwriter.c"
               "${AOM_ROOT}/aom_dsp/bitwriter.h"
               "${AOM_ROOT}/aom_dsp/blk_sse_sum.c"
-              "${AOM_ROOT}/aom_dsp/daalaboolwriter.c"
-              "${AOM_ROOT}/aom_dsp/daalaboolwriter.h"
               "${AOM_ROOT}/aom_dsp/entenc.c"
               "${AOM_ROOT}/aom_dsp/entenc.h"
               "${AOM_ROOT}/aom_dsp/fwd_txfm.c"

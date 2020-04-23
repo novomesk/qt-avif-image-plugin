@@ -377,13 +377,14 @@ static aom_codec_err_t update_error_state(
 static void init_buffer_callbacks(aom_codec_alg_priv_t *ctx) {
   AVxWorker *const worker = ctx->frame_worker;
   FrameWorkerData *const frame_worker_data = (FrameWorkerData *)worker->data1;
-  AV1_COMMON *const cm = &frame_worker_data->pbi->common;
+  AV1Decoder *const pbi = frame_worker_data->pbi;
+  AV1_COMMON *const cm = &pbi->common;
   BufferPool *const pool = cm->buffer_pool;
 
   cm->cur_frame = NULL;
-  cm->byte_alignment = ctx->byte_alignment;
-  cm->skip_loop_filter = ctx->skip_loop_filter;
-  cm->skip_film_grain = ctx->skip_film_grain;
+  cm->features.byte_alignment = ctx->byte_alignment;
+  pbi->skip_loop_filter = ctx->skip_loop_filter;
+  pbi->skip_film_grain = ctx->skip_film_grain;
 
   if (ctx->get_ext_fb_cb != NULL && ctx->release_ext_fb_cb != NULL) {
     pool->get_fb_cb = ctx->get_ext_fb_cb;
@@ -469,8 +470,8 @@ static aom_codec_err_t init_decoder(aom_codec_alg_priv_t *ctx) {
   // thread or loopfilter thread.
   frame_worker_data->pbi->max_threads = ctx->cfg.threads;
   frame_worker_data->pbi->inv_tile_order = ctx->invert_tile_order;
-  frame_worker_data->pbi->common.large_scale_tile = ctx->tile_mode;
-  frame_worker_data->pbi->common.is_annexb = ctx->is_annexb;
+  frame_worker_data->pbi->common.tiles.large_scale = ctx->tile_mode;
+  frame_worker_data->pbi->is_annexb = ctx->is_annexb;
   frame_worker_data->pbi->dec_tile_row = ctx->decode_tile_row;
   frame_worker_data->pbi->dec_tile_col = ctx->decode_tile_col;
   frame_worker_data->pbi->operating_point = ctx->operating_point;
@@ -523,14 +524,14 @@ static aom_codec_err_t decode_one(aom_codec_alg_priv_t *ctx,
   frame_worker_data->user_priv = user_priv;
   frame_worker_data->received_frame = 1;
 
-  frame_worker_data->pbi->common.large_scale_tile = ctx->tile_mode;
+  frame_worker_data->pbi->common.tiles.large_scale = ctx->tile_mode;
   frame_worker_data->pbi->dec_tile_row = ctx->decode_tile_row;
   frame_worker_data->pbi->dec_tile_col = ctx->decode_tile_col;
   frame_worker_data->pbi->ext_tile_debug = ctx->ext_tile_debug;
   frame_worker_data->pbi->row_mt = ctx->row_mt;
   frame_worker_data->pbi->ext_refs = ctx->ext_refs;
 
-  frame_worker_data->pbi->common.is_annexb = ctx->is_annexb;
+  frame_worker_data->pbi->is_annexb = ctx->is_annexb;
 
   worker->had_error = 0;
   winterface->execute(worker);
@@ -759,6 +760,7 @@ static aom_image_t *decoder_get_frame(aom_codec_alg_priv_t *ctx,
     FrameWorkerData *const frame_worker_data = (FrameWorkerData *)worker->data1;
     AV1Decoder *const pbi = frame_worker_data->pbi;
     AV1_COMMON *const cm = &pbi->common;
+    CommonTileParams *const tiles = &cm->tiles;
     // Wait for the frame from worker thread.
     if (winterface->sync(worker)) {
       // Check if worker has received any frames.
@@ -777,7 +779,7 @@ static aom_image_t *decoder_get_frame(aom_codec_alg_priv_t *ctx,
         yuvconfig2image(&ctx->img, sd, frame_worker_data->user_priv);
         move_decoder_metadata_to_img(pbi, &ctx->img);
 
-        if (!pbi->ext_tile_debug && cm->large_scale_tile) {
+        if (!pbi->ext_tile_debug && tiles->large_scale) {
           *index += 1;  // Advance the iterator to point to the next image
           aom_img_remove_metadata(&ctx->img);
           yuvconfig2image(&ctx->img, &pbi->tile_list_outbuf, NULL);
@@ -787,11 +789,11 @@ static aom_image_t *decoder_get_frame(aom_codec_alg_priv_t *ctx,
         }
 
         const int num_planes = av1_num_planes(cm);
-        if (pbi->ext_tile_debug && cm->single_tile_decoding &&
+        if (pbi->ext_tile_debug && tiles->single_tile_decoding &&
             pbi->dec_tile_row >= 0) {
           int tile_width, tile_height;
           av1_get_uniform_tile_size(cm, &tile_width, &tile_height);
-          const int tile_row = AOMMIN(pbi->dec_tile_row, cm->tile_rows - 1);
+          const int tile_row = AOMMIN(pbi->dec_tile_row, tiles->rows - 1);
           const int mi_row = tile_row * tile_height;
           const int ssy = ctx->img.y_chroma_shift;
           int plane;
@@ -802,14 +804,15 @@ static aom_image_t *decoder_get_frame(aom_codec_alg_priv_t *ctx,
                   mi_row * (MI_SIZE >> ssy) * ctx->img.stride[plane];
             }
           }
-          ctx->img.d_h = AOMMIN(tile_height, cm->mi_rows - mi_row) * MI_SIZE;
+          ctx->img.d_h =
+              AOMMIN(tile_height, cm->mi_params.mi_rows - mi_row) * MI_SIZE;
         }
 
-        if (pbi->ext_tile_debug && cm->single_tile_decoding &&
+        if (pbi->ext_tile_debug && tiles->single_tile_decoding &&
             pbi->dec_tile_col >= 0) {
           int tile_width, tile_height;
           av1_get_uniform_tile_size(cm, &tile_width, &tile_height);
-          const int tile_col = AOMMIN(pbi->dec_tile_col, cm->tile_cols - 1);
+          const int tile_col = AOMMIN(pbi->dec_tile_col, tiles->cols - 1);
           const int mi_col = tile_col * tile_width;
           const int ssx = ctx->img.x_chroma_shift;
           const int is_hbd = (ctx->img.fmt & AOM_IMG_FMT_HIGHBITDEPTH) ? 1 : 0;
@@ -821,14 +824,15 @@ static aom_image_t *decoder_get_frame(aom_codec_alg_priv_t *ctx,
                   mi_col * (MI_SIZE >> ssx) * (1 + is_hbd);
             }
           }
-          ctx->img.d_w = AOMMIN(tile_width, cm->mi_cols - mi_col) * MI_SIZE;
+          ctx->img.d_w =
+              AOMMIN(tile_width, cm->mi_params.mi_cols - mi_col) * MI_SIZE;
         }
 
         ctx->img.fb_priv = output_frame_buf->raw_frame_buffer.priv;
         img = &ctx->img;
         img->temporal_id = cm->temporal_layer_id;
         img->spatial_id = cm->spatial_layer_id;
-        if (cm->skip_film_grain) grain_params->apply_grain = 0;
+        if (pbi->skip_film_grain) grain_params->apply_grain = 0;
         aom_image_t *res =
             add_grain_if_needed(ctx, img, &ctx->image_with_grain, grain_params);
         if (!res) {
@@ -990,7 +994,8 @@ static aom_codec_err_t ctrl_get_last_quantizer(aom_codec_alg_priv_t *ctx,
                                                va_list args) {
   int *const arg = va_arg(args, int *);
   if (arg == NULL) return AOM_CODEC_INVALID_PARAM;
-  *arg = ((FrameWorkerData *)ctx->frame_worker->data1)->pbi->common.base_qindex;
+  *arg = ((FrameWorkerData *)ctx->frame_worker->data1)
+             ->pbi->common.quant_params.base_qindex;
   return AOM_CODEC_OK;
 }
 
@@ -1239,7 +1244,7 @@ static aom_codec_err_t ctrl_set_byte_alignment(aom_codec_alg_priv_t *ctx,
   if (ctx->frame_worker) {
     AVxWorker *const worker = ctx->frame_worker;
     FrameWorkerData *const frame_worker_data = (FrameWorkerData *)worker->data1;
-    frame_worker_data->pbi->common.byte_alignment = byte_alignment;
+    frame_worker_data->pbi->common.features.byte_alignment = byte_alignment;
   }
   return AOM_CODEC_OK;
 }
@@ -1251,7 +1256,7 @@ static aom_codec_err_t ctrl_set_skip_loop_filter(aom_codec_alg_priv_t *ctx,
   if (ctx->frame_worker) {
     AVxWorker *const worker = ctx->frame_worker;
     FrameWorkerData *const frame_worker_data = (FrameWorkerData *)worker->data1;
-    frame_worker_data->pbi->common.skip_loop_filter = ctx->skip_loop_filter;
+    frame_worker_data->pbi->skip_loop_filter = ctx->skip_loop_filter;
   }
 
   return AOM_CODEC_OK;
@@ -1264,7 +1269,7 @@ static aom_codec_err_t ctrl_set_skip_film_grain(aom_codec_alg_priv_t *ctx,
   if (ctx->frame_worker) {
     AVxWorker *const worker = ctx->frame_worker;
     FrameWorkerData *const frame_worker_data = (FrameWorkerData *)worker->data1;
-    frame_worker_data->pbi->common.skip_film_grain = ctx->skip_film_grain;
+    frame_worker_data->pbi->skip_film_grain = ctx->skip_film_grain;
   }
 
   return AOM_CODEC_OK;
@@ -1417,7 +1422,7 @@ CODEC_INTERFACE(aom_codec_av1_dx) = {
   {
       // NOLINT
       0,
-      NULL,  // aom_codec_enc_cfg_map_t
+      NULL,  // aom_codec_enc_cfg_t
       NULL,  // aom_codec_encode_fn_t
       NULL,  // aom_codec_get_cx_data_fn_t
       NULL,  // aom_codec_enc_config_set_fn_t

@@ -12,6 +12,7 @@ void avifImageDump(avifImage * avif)
     printf(" * Bit Depth      : %d\n", avif->depth);
     printf(" * Format         : %s\n", avifPixelFormatToString(avif->yuvFormat));
     printf(" * Alpha          : %s\n", (avif->alphaPlane && (avif->alphaRowBytes > 0)) ? "Present" : "Absent");
+    printf(" * Range          : %s\n", (avif->yuvRange == AVIF_RANGE_FULL) ? "Full" : "Limited");
     switch (avif->profileFormat) {
         case AVIF_PROFILE_FORMAT_NONE:
             printf(" * Color Profile  : None\n");
@@ -24,7 +25,7 @@ void avifImageDump(avifImage * avif)
                    avif->nclx.colourPrimaries,
                    avif->nclx.transferCharacteristics,
                    avif->nclx.matrixCoefficients,
-                   avif->nclx.fullRangeFlag ? "Full" : "Limited");
+                   (avif->nclx.range == AVIF_RANGE_FULL) ? "Full" : "Limited");
             break;
     }
 
@@ -54,7 +55,6 @@ void avifImageDump(avifImage * avif)
             printf("    * imir (Mirror)        : %u (%s)\n", avif->imir.axis, (avif->imir.axis == 0) ? "Vertical" : "Horizontal");
         }
     }
-    printf("\n");
 }
 
 void avifPrintVersions(void)

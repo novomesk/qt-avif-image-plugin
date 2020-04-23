@@ -86,7 +86,11 @@ static int rtc_minq_12[QINDEX_RANGE];
 
 static int gf_high = 2400;
 static int gf_low = 300;
+#ifdef STRICT_RC
+static int kf_high = 3200;
+#else
 static int kf_high = 5000;
+#endif
 static int kf_low = 400;
 
 // How many times less pixels there are to encode given the current scaling.
@@ -372,6 +376,7 @@ int av1_rc_drop_frame(AV1_COMP *cpi) {
 static int adjust_q_cbr(const AV1_COMP *cpi, int q, int active_worst_quality) {
   const RATE_CONTROL *const rc = &cpi->rc;
   const AV1_COMMON *const cm = &cpi->common;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   const int max_delta = 16;
   const int change_avg_frame_bandwidth =
       abs(rc->avg_frame_bandwidth - rc->prev_avg_frame_bandwidth) >
@@ -385,8 +390,8 @@ static int adjust_q_cbr(const AV1_COMP *cpi, int q, int active_worst_quality) {
   // Apply some control/clamp to QP under certain conditions.
   if (cm->current_frame.frame_type != KEY_FRAME && !cpi->use_svc &&
       rc->frames_since_key > 1 && !change_target_bits_mb &&
-      (!cpi->oxcf.gf_cbr_boost_pct ||
-       !(cpi->refresh_alt_ref_frame || cpi->refresh_golden_frame))) {
+      (!cpi->oxcf.gf_cbr_boost_pct || !(refresh_frame_flags->alt_ref_frame ||
+                                        refresh_frame_flags->golden_frame))) {
     // Make sure q is between oscillating Qs to prevent resonance.
     if (rc->rc_1_frame * rc->rc_2_frame == -1 &&
         rc->q_1_frame != rc->q_2_frame) {
@@ -398,7 +403,7 @@ static int adjust_q_cbr(const AV1_COMP *cpi, int q, int active_worst_quality) {
   }
   // For single spatial layer: if resolution has increased push q closer
   // to the active_worst to avoid excess overshoot.
-  if (cpi->svc.number_spatial_layers == 1 && cm->prev_frame &&
+  if (cpi->svc.number_spatial_layers <= 1 && cm->prev_frame &&
       (cm->width * cm->height >
        1.5 * cm->prev_frame->width * cm->prev_frame->height))
     q = (q + active_worst_quality) >> 1;
@@ -424,6 +429,7 @@ static RATE_FACTOR_LEVEL get_rate_factor_level(const GF_GROUP *const gf_group) {
 static double get_rate_correction_factor(const AV1_COMP *cpi, int width,
                                          int height) {
   const RATE_CONTROL *const rc = &cpi->rc;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   double rcf;
 
   if (cpi->common.current_frame.frame_type == KEY_FRAME) {
@@ -432,7 +438,8 @@ static double get_rate_correction_factor(const AV1_COMP *cpi, int width,
     const RATE_FACTOR_LEVEL rf_lvl = get_rate_factor_level(&cpi->gf_group);
     rcf = rc->rate_correction_factors[rf_lvl];
   } else {
-    if ((cpi->refresh_alt_ref_frame || cpi->refresh_golden_frame) &&
+    if ((refresh_frame_flags->alt_ref_frame ||
+         refresh_frame_flags->golden_frame) &&
         !rc->is_src_frame_alt_ref && !cpi->use_svc &&
         (cpi->oxcf.rc_mode != AOM_CBR || cpi->oxcf.gf_cbr_boost_pct > 20))
       rcf = rc->rate_correction_factors[GF_ARF_STD];
@@ -446,6 +453,7 @@ static double get_rate_correction_factor(const AV1_COMP *cpi, int width,
 static void set_rate_correction_factor(AV1_COMP *cpi, double factor, int width,
                                        int height) {
   RATE_CONTROL *const rc = &cpi->rc;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
 
   // Normalize RCF to account for the size-dependent scaling factor.
   factor /= resize_rate_factor(cpi, width, height);
@@ -458,7 +466,8 @@ static void set_rate_correction_factor(AV1_COMP *cpi, double factor, int width,
     const RATE_FACTOR_LEVEL rf_lvl = get_rate_factor_level(&cpi->gf_group);
     rc->rate_correction_factors[rf_lvl] = factor;
   } else {
-    if ((cpi->refresh_alt_ref_frame || cpi->refresh_golden_frame) &&
+    if ((refresh_frame_flags->alt_ref_frame ||
+         refresh_frame_flags->golden_frame) &&
         !rc->is_src_frame_alt_ref && !cpi->use_svc &&
         (cpi->oxcf.rc_mode != AOM_CBR || cpi->oxcf.gf_cbr_boost_pct > 20))
       rc->rate_correction_factors[GF_ARF_STD] = factor;
@@ -492,7 +501,7 @@ void av1_rc_update_rate_correction_factors(AV1_COMP *cpi, int width,
         av1_cyclic_refresh_estimate_bits_at_q(cpi, rate_correction_factor);
   } else {
     projected_size_based_on_q = av1_estimate_bits_at_q(
-        cpi->common.current_frame.frame_type, cm->base_qindex, MBs,
+        cm->current_frame.frame_type, cm->quant_params.base_qindex, MBs,
         rate_correction_factor, cm->seq_params.bit_depth);
   }
   // Work out a size correction factor.
@@ -510,7 +519,7 @@ void av1_rc_update_rate_correction_factors(AV1_COMP *cpi, int width,
   }
 
   cpi->rc.q_2_frame = cpi->rc.q_1_frame;
-  cpi->rc.q_1_frame = cm->base_qindex;
+  cpi->rc.q_1_frame = cm->quant_params.base_qindex;
   cpi->rc.rc_2_frame = cpi->rc.rc_1_frame;
   if (correction_factor > 110)
     cpi->rc.rc_1_frame = -1;
@@ -666,6 +675,7 @@ static int get_gf_high_motion_quality(int q, aom_bit_depth_t bit_depth) {
 
 static int calc_active_worst_quality_one_pass_vbr(const AV1_COMP *cpi) {
   const RATE_CONTROL *const rc = &cpi->rc;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   const unsigned int curr_frame = cpi->common.current_frame.frame_number;
   int active_worst_quality;
 
@@ -673,9 +683,9 @@ static int calc_active_worst_quality_one_pass_vbr(const AV1_COMP *cpi) {
     active_worst_quality =
         curr_frame == 0 ? rc->worst_quality : rc->last_q[KEY_FRAME] * 2;
   } else {
-    if (!rc->is_src_frame_alt_ref &&
-        (cpi->refresh_golden_frame || cpi->refresh_bwd_ref_frame ||
-         cpi->refresh_alt_ref_frame)) {
+    if (!rc->is_src_frame_alt_ref && (refresh_frame_flags->golden_frame ||
+                                      refresh_frame_flags->bwd_ref_frame ||
+                                      refresh_frame_flags->alt_ref_frame)) {
       active_worst_quality = curr_frame == 1 ? rc->last_q[KEY_FRAME] * 5 / 4
                                              : rc->last_q[INTER_FRAME];
     } else {
@@ -747,6 +757,7 @@ static int rc_pick_q_and_bounds_one_pass_cbr(const AV1_COMP *cpi, int width,
                                              int *top_index) {
   const AV1_COMMON *const cm = &cpi->common;
   const RATE_CONTROL *const rc = &cpi->rc;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   const CurrentFrame *const current_frame = &cm->current_frame;
   int active_best_quality;
   int active_worst_quality = calc_active_worst_quality_one_pass_cbr(cpi);
@@ -787,7 +798,8 @@ static int rc_pick_q_and_bounds_one_pass_cbr(const AV1_COMP *cpi, int width,
     }
   } else if (!rc->is_src_frame_alt_ref && !cpi->use_svc &&
              cpi->oxcf.gf_cbr_boost_pct &&
-             (cpi->refresh_golden_frame || cpi->refresh_alt_ref_frame)) {
+             (refresh_frame_flags->golden_frame ||
+              refresh_frame_flags->alt_ref_frame)) {
     // Use the lower of active_worst_quality and recent
     // average Q as basis for GF/ARF best Q limit unless last frame was
     // a key frame.
@@ -861,15 +873,16 @@ static int gf_group_pyramid_level(const GF_GROUP *gf_group, int gf_index) {
 
 static int get_active_cq_level(const RATE_CONTROL *rc,
                                const AV1EncoderConfig *const oxcf,
-                               int intra_only, int superres_denom) {
+                               int intra_only, aom_superres_mode superres_mode,
+                               int superres_denom) {
   static const double cq_adjust_threshold = 0.1;
   int active_cq_level = oxcf->cq_level;
   (void)intra_only;
   if (oxcf->rc_mode == AOM_CQ || oxcf->rc_mode == AOM_Q) {
     // printf("Superres %d %d %d = %d\n", superres_denom, intra_only,
     //        rc->frames_to_key, !(intra_only && rc->frames_to_key <= 1));
-    if ((oxcf->superres_mode == SUPERRES_QTHRESH ||
-         oxcf->superres_mode == SUPERRES_AUTO) &&
+    if ((superres_mode == AOM_SUPERRES_QTHRESH ||
+         superres_mode == AOM_SUPERRES_AUTO) &&
         superres_denom != SCALE_NUMERATOR) {
       int mult = SUPERRES_QADJ_PER_DENOM_KEYFRAME_SOLO;
       if (intra_only && rc->frames_to_key <= 1) {
@@ -937,8 +950,10 @@ static int rc_pick_q_and_bounds_one_pass_vbr(const AV1_COMP *cpi, int width,
   const RATE_CONTROL *const rc = &cpi->rc;
   const CurrentFrame *const current_frame = &cm->current_frame;
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
-  const int cq_level = get_active_cq_level(rc, oxcf, frame_is_intra_only(cm),
-                                           cm->superres_scale_denominator);
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
+  const int cq_level =
+      get_active_cq_level(rc, oxcf, frame_is_intra_only(cm), cpi->superres_mode,
+                          cm->superres_scale_denominator);
   const int bit_depth = cm->seq_params.bit_depth;
 
   if (oxcf->use_fixed_qp_offsets) {
@@ -985,7 +1000,8 @@ static int rc_pick_q_and_bounds_one_pass_vbr(const AV1_COMP *cpi, int width,
       }
     }
   } else if (!rc->is_src_frame_alt_ref &&
-             (cpi->refresh_golden_frame || cpi->refresh_alt_ref_frame)) {
+             (refresh_frame_flags->golden_frame ||
+              refresh_frame_flags->alt_ref_frame)) {
     // Use the lower of active_worst_quality and recent
     // average Q as basis for GF/ARF best Q limit unless last frame was
     // a key frame.
@@ -1003,7 +1019,7 @@ static int rc_pick_q_and_bounds_one_pass_vbr(const AV1_COMP *cpi, int width,
       const int qindex = cq_level;
       const double q_val = av1_convert_qindex_to_q(qindex, bit_depth);
       const int delta_qindex =
-          (cpi->refresh_alt_ref_frame)
+          (refresh_frame_flags->alt_ref_frame)
               ? av1_compute_qdelta(rc, q_val, q_val * 0.40, bit_depth)
               : av1_compute_qdelta(rc, q_val, q_val * 0.50, bit_depth);
       active_best_quality = AOMMAX(qindex + delta_qindex, rc->best_quality);
@@ -1052,7 +1068,8 @@ static int rc_pick_q_and_bounds_one_pass_vbr(const AV1_COMP *cpi, int width,
       qdelta = av1_compute_qdelta_by_rate(&cpi->rc, current_frame->frame_type,
                                           active_worst_quality, 2.0, bit_depth);
     } else if (!rc->is_src_frame_alt_ref &&
-               (cpi->refresh_golden_frame || cpi->refresh_alt_ref_frame)) {
+               (refresh_frame_flags->golden_frame ||
+                refresh_frame_flags->alt_ref_frame)) {
       qdelta =
           av1_compute_qdelta_by_rate(&cpi->rc, current_frame->frame_type,
                                      active_worst_quality, 1.75, bit_depth);
@@ -1100,7 +1117,7 @@ int av1_frame_type_qdelta(const AV1_COMP *cpi, int q) {
 
   rate_factor = rate_factor_deltas[rf_lvl];
   if (rf_lvl == GF_ARF_LOW) {
-    rate_factor -= (cpi->gf_group.layer_depth[cpi->gf_group.index] - 2) * 0.2;
+    rate_factor -= (cpi->gf_group.layer_depth[cpi->gf_group.index] - 2) * 0.1;
     rate_factor = AOMMAX(rate_factor, 1.0);
   }
   return av1_compute_qdelta_by_rate(&cpi->rc, frame_type, q, rate_factor,
@@ -1212,8 +1229,8 @@ static void get_intra_q_and_bounds_two_pass(const AV1_COMP *cpi, int width,
     // Tweak active_best_quality for AOM_Q mode when superres is on, as this
     // will be used directly as 'q' later.
     if (oxcf->rc_mode == AOM_Q &&
-        (oxcf->superres_mode == SUPERRES_QTHRESH ||
-         oxcf->superres_mode == SUPERRES_AUTO) &&
+        (cpi->superres_mode == AOM_SUPERRES_QTHRESH ||
+         cpi->superres_mode == AOM_SUPERRES_AUTO) &&
         cm->superres_scale_denominator != SCALE_NUMERATOR) {
       active_best_quality =
           AOMMAX(active_best_quality -
@@ -1232,6 +1249,7 @@ static void adjust_active_best_and_worst_quality(const AV1_COMP *cpi,
                                                  int *active_best) {
   const AV1_COMMON *const cm = &cpi->common;
   const RATE_CONTROL *const rc = &cpi->rc;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   const int bit_depth = cpi->common.seq_params.bit_depth;
   int active_best_quality = *active_best;
   int active_worst_quality = *active_worst;
@@ -1240,8 +1258,8 @@ static void adjust_active_best_and_worst_quality(const AV1_COMP *cpi,
   if (cpi->oxcf.rc_mode != AOM_Q) {
     if (frame_is_intra_only(cm) ||
         (!rc->is_src_frame_alt_ref &&
-         (cpi->refresh_golden_frame || is_intrl_arf_boost ||
-          cpi->refresh_alt_ref_frame))) {
+         (refresh_frame_flags->golden_frame || is_intrl_arf_boost ||
+          refresh_frame_flags->alt_ref_frame))) {
       active_best_quality -=
           (cpi->twopass.extend_minq + cpi->twopass.extend_minq_fast);
       active_worst_quality += (cpi->twopass.extend_maxq / 2);
@@ -1253,6 +1271,7 @@ static void adjust_active_best_and_worst_quality(const AV1_COMP *cpi,
   }
 
   aom_clear_system_state();
+#ifndef STRICT_RC
   // Static forced key frames Q restrictions dealt with elsewhere.
   if (!(frame_is_intra_only(cm)) || !rc->this_key_frame_forced ||
       (cpi->twopass.last_kfgroup_zeromotion_pct < STATIC_MOTION_THRESH)) {
@@ -1260,6 +1279,7 @@ static void adjust_active_best_and_worst_quality(const AV1_COMP *cpi,
     active_worst_quality =
         AOMMAX(active_worst_quality + qdelta, active_best_quality);
   }
+#endif
 
   // Modify active_best_quality for downscaled normal frames.
   if (av1_frame_scaled(cm) && !frame_is_kf_gf_arf(cpi)) {
@@ -1326,6 +1346,7 @@ static int get_active_best_quality(const AV1_COMP *const cpi,
   const int bit_depth = cm->seq_params.bit_depth;
   const RATE_CONTROL *const rc = &cpi->rc;
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   const GF_GROUP *gf_group = &cpi->gf_group;
   const int rc_mode = oxcf->rc_mode;
   int *inter_minq;
@@ -1333,8 +1354,9 @@ static int get_active_best_quality(const AV1_COMP *const cpi,
   int active_best_quality = 0;
   const int is_intrl_arf_boost =
       gf_group->update_type[gf_index] == INTNL_ARF_UPDATE;
-  const int is_leaf_frame = !(cpi->refresh_golden_frame ||
-                              cpi->refresh_alt_ref_frame || is_intrl_arf_boost);
+  const int is_leaf_frame =
+      !(refresh_frame_flags->golden_frame ||
+        refresh_frame_flags->alt_ref_frame || is_intrl_arf_boost);
   const int is_overlay_frame = rc->is_src_frame_alt_ref;
 
   if (is_leaf_frame || is_overlay_frame) {
@@ -1350,7 +1372,8 @@ static int get_active_best_quality(const AV1_COMP *const cpi,
   }
 
   // TODO(chengchen): can we remove this condition?
-  if (rc_mode == AOM_Q && !cpi->refresh_alt_ref_frame && !is_intrl_arf_boost) {
+  if (rc_mode == AOM_Q && !refresh_frame_flags->alt_ref_frame &&
+      !is_intrl_arf_boost) {
     return cq_level;
   }
 
@@ -1387,9 +1410,11 @@ static int rc_pick_q_and_bounds_two_pass(const AV1_COMP *cpi, int width,
   const AV1_COMMON *const cm = &cpi->common;
   const RATE_CONTROL *const rc = &cpi->rc;
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   const GF_GROUP *gf_group = &cpi->gf_group;
-  const int cq_level = get_active_cq_level(rc, oxcf, frame_is_intra_only(cm),
-                                           cm->superres_scale_denominator);
+  const int cq_level =
+      get_active_cq_level(rc, oxcf, frame_is_intra_only(cm), cpi->superres_mode,
+                          cm->superres_scale_denominator);
   const int bit_depth = cm->seq_params.bit_depth;
 
   if (oxcf->use_fixed_qp_offsets) {
@@ -1409,9 +1434,20 @@ static int rc_pick_q_and_bounds_two_pass(const AV1_COMP *cpi, int width,
         cm->current_frame.frame_type == KEY_FRAME && cm->show_frame == 0;
     get_intra_q_and_bounds_two_pass(cpi, width, height, &active_best_quality,
                                     &active_worst_quality, cq_level, is_fwd_kf);
+#ifdef STRICT_RC
+    active_best_quality = 0;
+#endif
   } else {
+#ifdef STRICT_RC
+    //  Active best quality limited by previous layer.
+    const int pyramid_level = gf_group_pyramid_level(gf_group, gf_index);
+    active_best_quality =
+        rc->active_best_quality[pyramid_level - 1] +
+        AOMMAX((rc->active_best_quality[pyramid_level - 1] / 10), 5);
+#else
     active_best_quality =
         get_active_best_quality(cpi, active_worst_quality, cq_level, gf_index);
+#endif
 
     // For alt_ref and GF frames (including internal arf frames) adjust the
     // worst allowed quality as well. This insures that even on hard
@@ -1419,8 +1455,8 @@ static int rc_pick_q_and_bounds_two_pass(const AV1_COMP *cpi, int width,
     // leaf (non arf) frames. This is important to the TPL model which assumes
     // Q drops with each arf level.
     if (!(rc->is_src_frame_alt_ref) &&
-        (cpi->refresh_golden_frame || cpi->refresh_alt_ref_frame ||
-         is_intrl_arf_boost)) {
+        (refresh_frame_flags->golden_frame ||
+         refresh_frame_flags->alt_ref_frame || is_intrl_arf_boost)) {
       active_worst_quality =
           (active_best_quality + (3 * active_worst_quality) + 2) / 4;
     }
@@ -1436,7 +1472,11 @@ static int rc_pick_q_and_bounds_two_pass(const AV1_COMP *cpi, int width,
     active_worst_quality = q;
   }
 
+#ifdef STRICT_RC
+  *top_index = rc->worst_quality;
+#else
   *top_index = active_worst_quality;
+#endif
   *bottom_index = active_best_quality;
 
   assert(*top_index <= rc->worst_quality && *top_index >= rc->best_quality);
@@ -1486,10 +1526,11 @@ void av1_rc_compute_frame_size_bounds(const AV1_COMP *cpi, int frame_target,
   } else {
     // For very small rate targets where the fractional adjustment
     // may be tiny make sure there is at least a minimum range.
-    const int tolerance = (cpi->sf.hl_sf.recode_tolerance * frame_target) / 100;
-    *frame_under_shoot_limit = AOMMAX(frame_target - tolerance - 200, 0);
+    const int tolerance =
+        AOMMAX(100, (cpi->sf.hl_sf.recode_tolerance * frame_target) / 100);
+    *frame_under_shoot_limit = AOMMAX(frame_target - tolerance, 0);
     *frame_over_shoot_limit =
-        AOMMIN(frame_target + tolerance + 200, cpi->rc.max_frame_bandwidth);
+        AOMMIN(frame_target + tolerance, cpi->rc.max_frame_bandwidth);
   }
 }
 
@@ -1526,7 +1567,7 @@ static void update_golden_frame_stats(AV1_COMP *cpi) {
   const GF_GROUP *const gf_group = &cpi->gf_group;
 
   // Update the Golden frame usage counts.
-  if (cpi->refresh_golden_frame || rc->is_src_frame_alt_ref) {
+  if (cpi->refresh_frame.golden_frame || rc->is_src_frame_alt_ref) {
     rc->frames_since_golden = 0;
 
     // If we are not using alt ref in the up and coming group clear the arf
@@ -1544,11 +1585,12 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
   const CurrentFrame *const current_frame = &cm->current_frame;
   RATE_CONTROL *const rc = &cpi->rc;
   const GF_GROUP *const gf_group = &cpi->gf_group;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
 
   const int is_intrnl_arf =
       gf_group->update_type[gf_group->index] == INTNL_ARF_UPDATE;
 
-  const int qindex = cm->base_qindex;
+  const int qindex = cm->quant_params.base_qindex;
 
   // Update rate control heuristics
   rc->projected_frame_size = (int)(bytes_used << 3);
@@ -1564,8 +1606,8 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
   } else {
     if ((cpi->use_svc && cpi->oxcf.rc_mode == AOM_CBR) ||
         (!rc->is_src_frame_alt_ref &&
-         !(cpi->refresh_golden_frame || is_intrnl_arf ||
-           cpi->refresh_alt_ref_frame))) {
+         !(refresh_frame_flags->golden_frame || is_intrnl_arf ||
+           refresh_frame_flags->alt_ref_frame))) {
       rc->last_q[INTER_FRAME] = qindex;
       rc->avg_frame_qindex[INTER_FRAME] =
           ROUND_POWER_OF_TWO(3 * rc->avg_frame_qindex[INTER_FRAME] + qindex, 2);
@@ -1587,8 +1629,8 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
   if ((qindex < rc->last_boosted_qindex) ||
       (current_frame->frame_type == KEY_FRAME) ||
       (!rc->constrained_gf_group &&
-       (cpi->refresh_alt_ref_frame || is_intrnl_arf ||
-        (cpi->refresh_golden_frame && !rc->is_src_frame_alt_ref)))) {
+       (refresh_frame_flags->alt_ref_frame || is_intrnl_arf ||
+        (refresh_frame_flags->golden_frame && !rc->is_src_frame_alt_ref)))) {
     rc->last_boosted_qindex = qindex;
   }
   if (current_frame->frame_type == KEY_FRAME) rc->last_kf_qindex = qindex;
@@ -1603,13 +1645,13 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
         (int)(rc->this_frame_target /
               resize_rate_factor(cpi, cm->width, cm->height));
   if (current_frame->frame_type != KEY_FRAME) {
-    rc->rolling_target_bits = ROUND_POWER_OF_TWO(
+    rc->rolling_target_bits = (int)ROUND_POWER_OF_TWO_64(
         rc->rolling_target_bits * 3 + rc->this_frame_target, 2);
-    rc->rolling_actual_bits = ROUND_POWER_OF_TWO(
+    rc->rolling_actual_bits = (int)ROUND_POWER_OF_TWO_64(
         rc->rolling_actual_bits * 3 + rc->projected_frame_size, 2);
-    rc->long_rolling_target_bits = ROUND_POWER_OF_TWO(
+    rc->long_rolling_target_bits = (int)ROUND_POWER_OF_TWO_64(
         rc->long_rolling_target_bits * 31 + rc->this_frame_target, 5);
-    rc->long_rolling_actual_bits = ROUND_POWER_OF_TWO(
+    rc->long_rolling_actual_bits = (int)ROUND_POWER_OF_TWO_64(
         rc->long_rolling_actual_bits * 31 + rc->projected_frame_size, 5);
   }
 
@@ -1619,7 +1661,7 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
 
   rc->total_target_vs_actual = rc->total_actual_bits - rc->total_target_bits;
 
-  if (is_altref_enabled(cpi) && cpi->refresh_alt_ref_frame &&
+  if (is_altref_enabled(cpi) && refresh_frame_flags->alt_ref_frame &&
       (current_frame->frame_type != KEY_FRAME))
     // Update the alternate reference frame stats as appropriate.
     update_alt_ref_frame_stats(cpi);
@@ -1737,9 +1779,15 @@ void av1_rc_set_gf_interval_range(const AV1_COMP *const cpi,
     if (rc->max_gf_interval == 0)
       rc->max_gf_interval = av1_rc_get_default_max_gf_interval(
           cpi->framerate, rc->min_gf_interval);
-
-    // Extended max interval for genuinely static scenes like slide shows.
-    rc->static_scene_max_gf_interval = MAX_STATIC_GF_GROUP_LENGTH;
+    /*
+     * Extended max interval for genuinely static scenes like slide shows.
+     * The no.of.stats available in the case of LAP is limited,
+     * hence setting to max_gf_interval.
+     */
+    if (cpi->lap_enabled)
+      rc->static_scene_max_gf_interval = rc->max_gf_interval + 1;
+    else
+      rc->static_scene_max_gf_interval = MAX_STATIC_GF_GROUP_LENGTH;
 
     if (rc->max_gf_interval > rc->static_scene_max_gf_interval)
       rc->max_gf_interval = rc->static_scene_max_gf_interval;
@@ -1783,9 +1831,10 @@ void av1_rc_update_framerate(AV1_COMP *cpi, int width, int height) {
 static void vbr_rate_correction(AV1_COMP *cpi, int *this_frame_target) {
   RATE_CONTROL *const rc = &cpi->rc;
   int64_t vbr_bits_off_target = rc->vbr_bits_off_target;
-  const int stats_count = cpi->twopass.total_stats != NULL
-                              ? (int)cpi->twopass.total_stats->count
-                              : 0;
+  const int stats_count =
+      cpi->twopass.stats_buf_ctx->total_stats != NULL
+          ? (int)cpi->twopass.stats_buf_ctx->total_stats->count
+          : 0;
   const int frame_window = AOMMIN(
       16, (int)(stats_count - (int)cpi->common.current_frame.frame_number));
 
@@ -1828,20 +1877,22 @@ int av1_calc_pframe_target_size_one_pass_vbr(
     const AV1_COMP *const cpi, FRAME_UPDATE_TYPE frame_update_type) {
   static const int af_ratio = 10;
   const RATE_CONTROL *const rc = &cpi->rc;
-  int target;
+  int64_t target;
 #if USE_ALTREF_FOR_ONE_PASS
   if (frame_update_type == KF_UPDATE || frame_update_type == GF_UPDATE ||
       frame_update_type == ARF_UPDATE) {
-    target = (rc->avg_frame_bandwidth * rc->baseline_gf_interval * af_ratio) /
+    target = ((int64_t)rc->avg_frame_bandwidth * rc->baseline_gf_interval *
+              af_ratio) /
              (rc->baseline_gf_interval + af_ratio - 1);
   } else {
-    target = (rc->avg_frame_bandwidth * rc->baseline_gf_interval) /
+    target = ((int64_t)rc->avg_frame_bandwidth * rc->baseline_gf_interval) /
              (rc->baseline_gf_interval + af_ratio - 1);
   }
+  if (target > INT_MAX) target = INT_MAX;
 #else
   target = rc->avg_frame_bandwidth;
 #endif
-  return av1_rc_clamp_pframe_target_size(cpi, target, frame_update_type);
+  return av1_rc_clamp_pframe_target_size(cpi, (int)target, frame_update_type);
 }
 
 int av1_calc_iframe_target_size_one_pass_vbr(const AV1_COMP *const cpi) {
@@ -1925,6 +1976,10 @@ int av1_calc_iframe_target_size_one_pass_cbr(const AV1_COMP *cpi) {
 
 static void set_reference_structure_one_pass_rt(AV1_COMP *cpi, int gf_update) {
   AV1_COMMON *const cm = &cpi->common;
+  ExternalFlags *const ext_flags = &cpi->ext_flags;
+  ExtRefreshFrameFlagsInfo *const ext_refresh_frame_flags =
+      &ext_flags->refresh_frame;
+  SVC *const svc = &cpi->svc;
   // Specify the reference prediction structure, for 1 layer nonrd mode.
   // Current structue is to use 3 references (LAST, GOLDEN, ALTREF),
   // where ALT_REF always behind current by lag_alt frames, and GOLDEN is
@@ -1936,18 +1991,18 @@ static void set_reference_structure_one_pass_rt(AV1_COMP *cpi, int gf_update) {
   int last_idx_refresh = 0;
   int gld_idx = 0;
   int alt_ref_idx = 0;
-  cpi->ext_refresh_frame_flags_pending = 1;
-  cpi->svc.external_ref_frame_config = 1;
-  cpi->ext_ref_frame_flags = 0;
-  cpi->ext_refresh_last_frame = 1;
-  cpi->ext_refresh_golden_frame = 0;
-  cpi->ext_refresh_alt_ref_frame = 0;
-  for (int i = 0; i < INTER_REFS_PER_FRAME; ++i) cpi->svc.ref_idx[i] = 7;
-  for (int i = 0; i < REF_FRAMES; ++i) cpi->svc.refresh[i] = 0;
+  ext_refresh_frame_flags->update_pending = 1;
+  svc->external_ref_frame_config = 1;
+  ext_flags->ref_frame_flags = 0;
+  ext_refresh_frame_flags->last_frame = 1;
+  ext_refresh_frame_flags->golden_frame = 0;
+  ext_refresh_frame_flags->alt_ref_frame = 0;
+  for (int i = 0; i < INTER_REFS_PER_FRAME; ++i) svc->ref_idx[i] = 7;
+  for (int i = 0; i < REF_FRAMES; ++i) svc->refresh[i] = 0;
   // Always reference LAST, GOLDEN, ALTREF
-  cpi->ext_ref_frame_flags ^= AOM_LAST_FLAG;
-  cpi->ext_ref_frame_flags ^= AOM_GOLD_FLAG;
-  cpi->ext_ref_frame_flags ^= AOM_ALT_FLAG;
+  ext_flags->ref_frame_flags ^= AOM_LAST_FLAG;
+  ext_flags->ref_frame_flags ^= AOM_GOLD_FLAG;
+  ext_flags->ref_frame_flags ^= AOM_ALT_FLAG;
   const int sh = 7 - gld_fixed_slot;
   // Moving index slot for last: 0 - (sh - 1).
   if (cm->current_frame.frame_number > 1)
@@ -1965,21 +2020,121 @@ static void set_reference_structure_one_pass_rt(AV1_COMP *cpi, int gf_update) {
   // Moving index for alt_ref, lag behind LAST by lag_alt frames.
   if (cm->current_frame.frame_number > lag_alt)
     alt_ref_idx = ((cm->current_frame.frame_number - lag_alt) % sh);
-  cpi->svc.ref_idx[0] = last_idx;          // LAST
-  cpi->svc.ref_idx[1] = last_idx_refresh;  // LAST2 (for refresh of last).
-  cpi->svc.ref_idx[3] = gld_idx;           // GOLDEN
-  cpi->svc.ref_idx[6] = alt_ref_idx;       // ALT_REF
+  svc->ref_idx[0] = last_idx;          // LAST
+  svc->ref_idx[1] = last_idx_refresh;  // LAST2 (for refresh of last).
+  svc->ref_idx[3] = gld_idx;           // GOLDEN
+  svc->ref_idx[6] = alt_ref_idx;       // ALT_REF
   // Refresh this slot, which will become LAST on next frame.
-  cpi->svc.refresh[last_idx_refresh] = 1;
+  svc->refresh[last_idx_refresh] = 1;
   // Update GOLDEN on period for fixed slot case.
   if (gld_fixed_slot && gf_update) {
-    cpi->ext_refresh_golden_frame = 1;
-    cpi->svc.refresh[gld_idx] = 1;
+    ext_refresh_frame_flags->golden_frame = 1;
+    svc->refresh[gld_idx] = 1;
   }
 }
 
 #define DEFAULT_KF_BOOST_RT 2300
 #define DEFAULT_GF_BOOST_RT 2000
+
+// Compute average source sad (temporal sad: between current source and
+// previous source) over a subset of superblocks. Use this is detect big changes
+// in content and allow rate control to react.
+static void av1_scene_detection_onepass(AV1_COMP *cpi) {
+  AV1_COMMON *const cm = &cpi->common;
+  RATE_CONTROL *const rc = &cpi->rc;
+  YV12_BUFFER_CONFIG const *unscaled_src = cpi->unscaled_source;
+  YV12_BUFFER_CONFIG const *unscaled_last_src = cpi->unscaled_last_source;
+  uint8_t *src_y;
+  int src_ystride;
+  int src_width;
+  int src_height;
+  uint8_t *last_src_y;
+  int last_src_ystride;
+  int last_src_width;
+  int last_src_height;
+  if (cpi->unscaled_source == NULL || cpi->unscaled_last_source == NULL) return;
+  src_y = unscaled_src->y_buffer;
+  src_ystride = unscaled_src->y_stride;
+  src_width = unscaled_src->y_width;
+  src_height = unscaled_src->y_height;
+  last_src_y = unscaled_last_src->y_buffer;
+  last_src_ystride = unscaled_last_src->y_stride;
+  last_src_width = unscaled_last_src->y_width;
+  last_src_height = unscaled_last_src->y_height;
+  rc->high_source_sad = 0;
+  if (src_width == last_src_width && src_height == last_src_height) {
+    const int num_mi_cols = cm->mi_params.mi_cols;
+    const int num_mi_rows = cm->mi_params.mi_rows;
+    int num_zero_temp_sad = 0;
+    uint32_t min_thresh = 10000;
+    if (cpi->oxcf.content != AOM_CONTENT_SCREEN) min_thresh = 65000;
+    const BLOCK_SIZE bsize = BLOCK_64X64;
+    int full_sampling = (cm->width * cm->height < 640 * 360) ? 1 : 0;
+    // Loop over sub-sample of frame, compute average sad over 64x64 blocks.
+    uint64_t avg_sad = 0;
+    uint64_t tmp_sad = 0;
+    int num_samples = 0;
+    const int thresh = 6;
+    // SAD is computed on 64x64 blocks
+    const int sb_size_by_mb = (cm->seq_params.sb_size == BLOCK_128X128)
+                                  ? (cm->seq_params.mib_size >> 1)
+                                  : cm->seq_params.mib_size;
+    const int sb_cols = (num_mi_cols + sb_size_by_mb - 1) / sb_size_by_mb;
+    const int sb_rows = (num_mi_rows + sb_size_by_mb - 1) / sb_size_by_mb;
+    uint64_t sum_sq_thresh = 10000;  // sum = sqrt(thresh / 64*64)) ~1.5
+    int num_low_var_high_sumdiff = 0;
+    int light_change = 0;
+    // Flag to check light change or not.
+    const int check_light_change = 0;
+    for (int sbi_row = 0; sbi_row < sb_rows; ++sbi_row) {
+      for (int sbi_col = 0; sbi_col < sb_cols; ++sbi_col) {
+        // Checker-board pattern, ignore boundary.
+        if (full_sampling ||
+            ((sbi_row > 0 && sbi_col > 0) &&
+             (sbi_row < sb_rows - 1 && sbi_col < sb_cols - 1) &&
+             ((sbi_row % 2 == 0 && sbi_col % 2 == 0) ||
+              (sbi_row % 2 != 0 && sbi_col % 2 != 0)))) {
+          tmp_sad = cpi->fn_ptr[bsize].sdf(src_y, src_ystride, last_src_y,
+                                           last_src_ystride);
+          if (check_light_change) {
+            unsigned int sse, variance;
+            variance = cpi->fn_ptr[bsize].vf(src_y, src_ystride, last_src_y,
+                                             last_src_ystride, &sse);
+            // Note: sse - variance = ((sum * sum) >> 12)
+            // Detect large lighting change.
+            if (variance < (sse >> 1) && (sse - variance) > sum_sq_thresh) {
+              num_low_var_high_sumdiff++;
+            }
+          }
+          avg_sad += tmp_sad;
+          num_samples++;
+          if (tmp_sad == 0) num_zero_temp_sad++;
+        }
+        src_y += 64;
+        last_src_y += 64;
+      }
+      src_y += (src_ystride << 6) - (sb_cols << 6);
+      last_src_y += (last_src_ystride << 6) - (sb_cols << 6);
+    }
+    if (check_light_change && num_samples > 0 &&
+        num_low_var_high_sumdiff > (num_samples >> 1))
+      light_change = 1;
+    if (num_samples > 0) avg_sad = avg_sad / num_samples;
+    // Set high_source_sad flag if we detect very high increase in avg_sad
+    // between current and previous frame value(s). Use minimum threshold
+    // for cases where there is small change from content that is completely
+    // static.
+    if (!light_change &&
+        avg_sad >
+            AOMMAX(min_thresh, (unsigned int)(rc->avg_source_sad * thresh)) &&
+        rc->frames_since_key > 1 + cpi->svc.number_spatial_layers &&
+        num_zero_temp_sad < 3 * (num_samples >> 2))
+      rc->high_source_sad = 1;
+    else
+      rc->high_source_sad = 0;
+    rc->avg_source_sad = (3 * rc->avg_source_sad + avg_sad) >> 2;
+  }
+}
 
 void av1_get_one_pass_rt_params(AV1_COMP *cpi,
                                 EncodeFrameParams *const frame_params,
@@ -1987,12 +2142,14 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi,
   RATE_CONTROL *const rc = &cpi->rc;
   AV1_COMMON *const cm = &cpi->common;
   GF_GROUP *const gf_group = &cpi->gf_group;
+  ResizePendingParams *const resize_pending_params =
+      &cpi->resize_pending_params;
   int gf_update = 0;
   int target;
   const int resize_pending =
-      (cpi->resize_pending_width && cpi->resize_pending_height &&
-       (cm->width != cpi->resize_pending_width ||
-        cm->height != cpi->resize_pending_height));
+      (resize_pending_params->width && resize_pending_params->height &&
+       (cm->width != resize_pending_params->width ||
+        cm->height != resize_pending_params->height));
   // Turn this on to explicitly set the reference structure rather than
   // relying on internal/default structure.
   const int set_reference_structure = 1;
@@ -2017,6 +2174,10 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi,
     frame_params->frame_type = INTER_FRAME;
     gf_group->update_type[gf_group->index] = LF_UPDATE;
   }
+
+  if (!cpi->use_svc && cm->show_frame && cpi->sf.rt_sf.check_scene_detection)
+    av1_scene_detection_onepass(cpi);
+
   // GF update based on frames_till_gf_update_due, also
   // force upddate on resize pending frame.
   if ((resize_pending || rc->frames_till_gf_update_due == 0) &&
@@ -2077,4 +2238,58 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi,
       cm->number_spatial_layers == 1 && cm->number_temporal_layers == 1)
     set_reference_structure_one_pass_rt(cpi, gf_update);
   cm->current_frame.frame_type = frame_params->frame_type;
+}
+
+// Test if the frame to be encoded will significantly overshoot the target
+// bitrate, and if so, set the QP, reset/adjust some rate control parameters,
+// and return 1.
+int av1_encodedframe_overshoot(AV1_COMP *cpi, int *q) {
+  AV1_COMMON *const cm = &cpi->common;
+  RATE_CONTROL *const rc = &cpi->rc;
+  SPEED_FEATURES *const sf = &cpi->sf;
+  int thresh_qp = 7 * (rc->worst_quality >> 3);
+  // Lower thresh_qp for video (more overshoot at lower Q) to be
+  // more conservative for video.
+  if (cpi->oxcf.content != AOM_CONTENT_SCREEN)
+    thresh_qp = 3 * (rc->worst_quality >> 2);
+  if (sf->rt_sf.overshoot_detection_cbr == FAST_DETECTION_MAXQ &&
+      cm->quant_params.base_qindex < thresh_qp) {
+    double rate_correction_factor =
+        cpi->rc.rate_correction_factors[INTER_NORMAL];
+    const int target_size = cpi->rc.avg_frame_bandwidth;
+    double new_correction_factor;
+    int target_bits_per_mb;
+    double q2;
+    int enumerator;
+    *q = (3 * cpi->rc.worst_quality + *q) >> 2;
+    // Adjust avg_frame_qindex, buffer_level, and rate correction factors, as
+    // these parameters will affect QP selection for subsequent frames. If they
+    // have settled down to a very different (low QP) state, then not adjusting
+    // them may cause next frame to select low QP and overshoot again.
+    cpi->rc.avg_frame_qindex[INTER_FRAME] = *q;
+    rc->buffer_level = rc->optimal_buffer_level;
+    rc->bits_off_target = rc->optimal_buffer_level;
+    // Reset rate under/over-shoot flags.
+    cpi->rc.rc_1_frame = 0;
+    cpi->rc.rc_2_frame = 0;
+    // Adjust rate correction factor.
+    target_bits_per_mb =
+        (int)(((uint64_t)target_size << BPER_MB_NORMBITS) / cm->mi_params.MBs);
+    // Rate correction factor based on target_bits_per_mb and qp (==max_QP).
+    // This comes from the inverse computation of vp9_rc_bits_per_mb().
+    q2 = av1_convert_qindex_to_q(*q, cm->seq_params.bit_depth);
+    enumerator = 1800000;  // Factor for inter frame.
+    enumerator += (int)(enumerator * q2) >> 12;
+    new_correction_factor = (double)target_bits_per_mb * q2 / enumerator;
+    if (new_correction_factor > rate_correction_factor) {
+      rate_correction_factor =
+          AOMMIN(2.0 * rate_correction_factor, new_correction_factor);
+      if (rate_correction_factor > MAX_BPB_FACTOR)
+        rate_correction_factor = MAX_BPB_FACTOR;
+      cpi->rc.rate_correction_factors[INTER_NORMAL] = rate_correction_factor;
+    }
+    return 1;
+  } else {
+    return 0;
+  }
 }

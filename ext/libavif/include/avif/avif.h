@@ -15,8 +15,8 @@ extern "C" {
 // Constants
 
 #define AVIF_VERSION_MAJOR 0
-#define AVIF_VERSION_MINOR 6
-#define AVIF_VERSION_PATCH 2
+#define AVIF_VERSION_MINOR 7
+#define AVIF_VERSION_PATCH 1
 #define AVIF_VERSION (AVIF_VERSION_MAJOR * 10000) + (AVIF_VERSION_MINOR * 100) + AVIF_VERSION_PATCH
 
 typedef int avifBool;
@@ -146,6 +146,15 @@ typedef struct avifPixelFormatInfo
 void avifGetPixelFormatInfo(avifPixelFormat format, avifPixelFormatInfo * info);
 
 // ---------------------------------------------------------------------------
+// avifRange
+
+typedef enum avifRange
+{
+    AVIF_RANGE_LIMITED = 0,
+    AVIF_RANGE_FULL = 0x80
+} avifRange;
+
+// ---------------------------------------------------------------------------
 // avifNclxColorProfile
 
 typedef enum avifNclxColourPrimaries
@@ -234,29 +243,13 @@ typedef enum avifNclxMatrixCoefficients
     AVIF_NCLX_MATRIX_COEFFICIENTS_ICTCP = 14
 } avifNclxMatrixCoefficients;
 
-// for fullRangeFlag
-typedef enum avifNclxRangeFlag
-{
-    AVIF_NCLX_LIMITED_RANGE = 0,
-    AVIF_NCLX_FULL_RANGE = 0x80
-} avifNclxRangeFlag;
-
 typedef struct avifNclxColorProfile
 {
-    uint16_t colourPrimaries;
-    uint16_t transferCharacteristics;
-    uint16_t matrixCoefficients;
-    uint8_t fullRangeFlag;
+    avifNclxColourPrimaries colourPrimaries;
+    avifNclxTransferCharacteristics transferCharacteristics;
+    avifNclxMatrixCoefficients matrixCoefficients;
+    avifRange range;
 } avifNclxColorProfile;
-
-// ---------------------------------------------------------------------------
-// avifRange
-
-typedef enum avifRange
-{
-    AVIF_RANGE_LIMITED = 0,
-    AVIF_RANGE_FULL,
-} avifRange;
 
 // ---------------------------------------------------------------------------
 // avifProfileFormat
@@ -450,6 +443,12 @@ int avifFullToLimitedUV(int depth, int v);
 int avifLimitedToFullY(int depth, int v);
 int avifLimitedToFullUV(int depth, int v);
 
+typedef enum avifReformatMode
+{
+    AVIF_REFORMAT_MODE_YUV_COEFFICIENTS = 0, // Normal YUV conversion using coefficients
+    AVIF_REFORMAT_MODE_IDENTITY              // Pack GBR directly into YUV planes (AVIF_NCLX_MATRIX_COEFFICIENTS_IDENTITY)
+} avifReformatMode;
+
 typedef struct avifReformatState
 {
     // YUV coefficients
@@ -467,6 +466,12 @@ typedef struct avifReformatState
     uint32_t rgbOffsetBytesA;
 
     avifPixelFormatInfo formatInfo;
+
+    // LUTs for going from YUV limited/full unorm -> full range RGB FP32
+    float unormFloatTableY[1 << 12];
+    float unormFloatTableUV[1 << 12];
+
+    avifReformatMode mode;
 } avifReformatState;
 avifBool avifPrepareReformatState(avifImage * image, avifRGBImage * rgb, avifReformatState * state);
 
@@ -502,7 +507,7 @@ typedef struct avifIOStats
     size_t alphaOBUSize;
 } avifIOStats;
 
-struct avifData;
+struct avifDecoderData;
 
 typedef enum avifDecoderSource
 {
@@ -540,7 +545,7 @@ typedef struct avifDecoder
     // Set this via avifDecoderSetSource().
     avifDecoderSource requestedSource;
 
-    // The current decoded image, owned by the decoder. Can be NULL if the decoder hasn't run or has run
+    // The current decoded image, owned by the decoder. Is invalid if the decoder hasn't run or has run
     // out of images. The YUV and A contents of this image are likely owned by the decoder, so be
     // sure to copy any data inside of this image before advancing to the next image or reusing the
     // decoder. It is legal to call avifImageYUVToRGB() on this in between calls to avifDecoderNextImage(),
@@ -579,7 +584,7 @@ typedef struct avifDecoder
     avifIOStats ioStats;
 
     // Internals used by the decoder
-    struct avifData * data;
+    struct avifDecoderData * data;
 } avifDecoder;
 
 avifDecoder * avifDecoderCreate(void);
@@ -594,13 +599,18 @@ avifResult avifDecoderRead(avifDecoder * decoder, avifImage * image, avifROData 
 //
 // Usage / function call order is:
 // * avifDecoderCreate()
-// * avifDecoderSetSource() - optional
+// * avifDecoderSetSource() - optional, the default (AVIF_DECODER_SOURCE_AUTO) is usually sufficient
 // * avifDecoderParse()
 // * avifDecoderNextImage() - in a loop, using decoder->image after each successful call
 // * avifDecoderDestroy()
 //
 // You can use avifDecoderReset() any time after a successful call to avifDecoderParse()
-// to reset the internal decoder back to before the first frame.
+// to reset the internal decoder back to before the first frame. Calling either
+// avifDecoderSetSource() or avifDecoderParse() will automatically Reset the decoder.
+//
+// avifDecoderSetSource() allows you not only to choose whether to parse tracks or
+// items in a file containing both, but switch between sources without having to
+// Parse again. Normally AVIF_DECODER_SOURCE_AUTO is enough for the common path.
 avifResult avifDecoderSetSource(avifDecoder * decoder, avifDecoderSource source);
 avifResult avifDecoderParse(avifDecoder * decoder, avifROData * input);
 avifResult avifDecoderNextImage(avifDecoder * decoder);
@@ -613,8 +623,13 @@ avifResult avifDecoderReset(avifDecoder * decoder);
 avifBool avifDecoderIsKeyframe(avifDecoder * decoder, uint32_t frameIndex);
 uint32_t avifDecoderNearestKeyframe(avifDecoder * decoder, uint32_t frameIndex);
 
+// Timing helper - This does not change the current image or invoke the codec (safe to call repeatedly)
+avifResult avifDecoderNthImageTiming(avifDecoder * decoder, uint32_t frameIndex, avifImageTiming * outTiming);
+
 // ---------------------------------------------------------------------------
 // avifEncoder
+
+struct avifEncoderData;
 
 // Notes:
 // * If avifEncoderWrite() returns AVIF_RESULT_OK, output must be freed with avifRWDataFree()
@@ -643,6 +658,9 @@ typedef struct avifEncoder
 
     // stats from the most recent write
     avifIOStats ioStats;
+
+    // Internals used by the encoder
+    struct avifEncoderData * data;
 } avifEncoder;
 
 avifEncoder * avifEncoderCreate(void);

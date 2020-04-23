@@ -94,7 +94,6 @@ static INLINE InterpFilter av1_unswitchable_filter(InterpFilter filter) {
 /* (1 << LOG_SWITCHABLE_FILTERS) > SWITCHABLE_FILTERS */
 #define LOG_SWITCHABLE_FILTERS 2
 
-#define MAX_SUBPEL_TAPS 12
 #define SWITCHABLE_FILTER_CONTEXTS ((SWITCHABLE_FILTERS + 1) * 4)
 #define INTER_FILTER_COMP_OFFSET (SWITCHABLE_FILTERS + 1)
 #define INTER_FILTER_DIR_OFFSET ((SWITCHABLE_FILTERS + 1) * 2)
@@ -103,7 +102,6 @@ static INLINE InterpFilter av1_unswitchable_filter(InterpFilter filter) {
 typedef struct InterpFilterParams {
   const int16_t *filter_ptr;
   uint16_t taps;
-  uint16_t subpel_shifts;
   InterpFilter interp_filter;
 } InterpFilterParams;
 
@@ -157,14 +155,12 @@ DECLARE_ALIGNED(256, static const InterpKernel,
 
 static const InterpFilterParams
     av1_interp_filter_params_list[SWITCHABLE_FILTERS + 1] = {
-      { (const int16_t *)av1_sub_pel_filters_8, SUBPEL_TAPS, SUBPEL_SHIFTS,
-        EIGHTTAP_REGULAR },
+      { (const int16_t *)av1_sub_pel_filters_8, SUBPEL_TAPS, EIGHTTAP_REGULAR },
       { (const int16_t *)av1_sub_pel_filters_8smooth, SUBPEL_TAPS,
-        SUBPEL_SHIFTS, EIGHTTAP_SMOOTH },
-      { (const int16_t *)av1_sub_pel_filters_8sharp, SUBPEL_TAPS, SUBPEL_SHIFTS,
+        EIGHTTAP_SMOOTH },
+      { (const int16_t *)av1_sub_pel_filters_8sharp, SUBPEL_TAPS,
         MULTITAP_SHARP },
-      { (const int16_t *)av1_bilinear_filters, SUBPEL_TAPS, SUBPEL_SHIFTS,
-        BILINEAR }
+      { (const int16_t *)av1_bilinear_filters, SUBPEL_TAPS, BILINEAR }
     };
 
 // A special 2-tap bilinear filter for IntraBC chroma. IntraBC uses full pixel
@@ -176,7 +172,7 @@ DECLARE_ALIGNED(256, static const int16_t,
 };
 
 static const InterpFilterParams av1_intrabc_filter_params = {
-  av1_intrabc_bilinear_filter, 2, 0, BILINEAR
+  av1_intrabc_bilinear_filter, 2, BILINEAR
 };
 
 DECLARE_ALIGNED(256, static const InterpKernel,
@@ -214,14 +210,11 @@ static const uint16_t
 
 // For w<=4, MULTITAP_SHARP is the same as EIGHTTAP_REGULAR
 static const InterpFilterParams av1_interp_4tap[SWITCHABLE_FILTERS + 1] = {
-  { (const int16_t *)av1_sub_pel_filters_4, SUBPEL_TAPS, SUBPEL_SHIFTS,
-    EIGHTTAP_REGULAR },
-  { (const int16_t *)av1_sub_pel_filters_4smooth, SUBPEL_TAPS, SUBPEL_SHIFTS,
+  { (const int16_t *)av1_sub_pel_filters_4, SUBPEL_TAPS, EIGHTTAP_REGULAR },
+  { (const int16_t *)av1_sub_pel_filters_4smooth, SUBPEL_TAPS,
     EIGHTTAP_SMOOTH },
-  { (const int16_t *)av1_sub_pel_filters_4, SUBPEL_TAPS, SUBPEL_SHIFTS,
-    EIGHTTAP_REGULAR },
-  { (const int16_t *)av1_bilinear_filters, SUBPEL_TAPS, SUBPEL_SHIFTS,
-    BILINEAR },
+  { (const int16_t *)av1_sub_pel_filters_4, SUBPEL_TAPS, EIGHTTAP_REGULAR },
+  { (const int16_t *)av1_bilinear_filters, SUBPEL_TAPS, BILINEAR },
 };
 
 static INLINE const InterpFilterParams *
@@ -229,11 +222,6 @@ av1_get_interp_filter_params_with_block_size(const InterpFilter interp_filter,
                                              const int w) {
   if (w <= 4) return &av1_interp_4tap[interp_filter];
   return &av1_interp_filter_params_list[interp_filter];
-}
-
-static INLINE const InterpFilterParams *get_4tap_interp_filter_params(
-    const InterpFilter interp_filter) {
-  return &av1_interp_4tap[interp_filter];
 }
 
 static INLINE const int16_t *av1_get_interp_filter_kernel(
@@ -255,8 +243,8 @@ static INLINE const InterpFilterParams *av1_get_filter(int subpel_search) {
   assert(subpel_search >= USE_2_TAPS);
 
   switch (subpel_search) {
-    case USE_2_TAPS: return get_4tap_interp_filter_params(BILINEAR);
-    case USE_4_TAPS: return get_4tap_interp_filter_params(EIGHTTAP_REGULAR);
+    case USE_2_TAPS: return &av1_interp_4tap[BILINEAR];
+    case USE_4_TAPS: return &av1_interp_4tap[EIGHTTAP_REGULAR];
     case USE_8_TAPS: return &av1_interp_filter_params_list[EIGHTTAP_REGULAR];
     default: assert(0); return NULL;
   }

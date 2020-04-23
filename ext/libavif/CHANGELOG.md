@@ -5,6 +5,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- avifenc - Allow --nclx to override embedded ICC profiles (with a warning), instead of --nclx being ignored
+- avifenc - Choose high-quality-but-lossy QP defaults, and a default speed of 8
+- avifdump - Fix format specifiers for 32bit
+- Now prioritizing libaom over rav1e when both are present
+
+## [0.7.1] - 2020-04-16
+### Changed
+- avifenc: Set nclx/range values in avifImage earlier so proper YUV coefficients are used when converting JPEG/PNG
+
+## [0.7.0] - 2020-04-16
+### Added
+- avifenc JPEG support
+- Docker test script to build avifenc + deps in a shared libs (distro-like) env
+- Added simple `avifdump` tool for aiding in AVIF debugging
+- Added some comments in `avif.h` to clarify `avifDecoderSetSource()` usage
+
+### Changed
+- avifRange cleanup/refactor (breaking change)
+- avifenc now has `-r` to set YUV range (when using JPEG/PNG), `--nclx` now takes 3 arguments as a result
+
+## [0.6.4] - 2020-04-14
+### Added
+- Added `avifDecoderNthImageTiming()` for querying frame timing without needing to decode the frame
+- Added some comments explaining `avifDecoderSetSource()`
+
+### Changed
+- Fix clang warning (switch clamp to min)
+- Fix a few clang analyzer issues
+- Avoid incorrect YUV range cast
+- Call dav1d_data_unref in dav1dCodecDestroyInternal (wantehchang)
+- Declare some avifSampleTable * pointers as const (wantehchang)
+- Update to cJSON v1.7.13 (wantehchang)
+- Minor code cleanup
+
+## [0.6.3] - 2020-03-30
+### Changed
+- Avoid throwing away const unnecessarily in `avifROStreamReadString()`
+- Re-enable a bunch of clang warnings
+- Set dav1dSettings.frame_size_limit to avoid OOM (wantehchang)
+- Refactor write.c to use a similar Data/Item design as read.c
+- YUV to RGB optimizations
 
 ## [0.6.2] - 2020-03-11
 ### Changed
@@ -342,8 +384,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.6.2...HEAD
-[0.6.1]: https://github.com/AOMediaCodec/libavif/compare/v0.6.1...v0.6.2
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/AOMediaCodec/libavif/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/AOMediaCodec/libavif/compare/v0.6.4...v0.7.0
+[0.6.4]: https://github.com/AOMediaCodec/libavif/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/AOMediaCodec/libavif/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/AOMediaCodec/libavif/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/AOMediaCodec/libavif/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/AOMediaCodec/libavif/compare/v0.5.7...v0.6.0
 [0.5.7]: https://github.com/AOMediaCodec/libavif/compare/v0.5.6...v0.5.7

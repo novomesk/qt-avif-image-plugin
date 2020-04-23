@@ -92,14 +92,14 @@ void av1_fill_mode_rates(AV1_COMMON *const cm, MACROBLOCK *x,
     av1_cost_tokens_from_cdf(x->partition_cost[i], fc->partition_cdf[i], NULL);
 
   if (cm->current_frame.skip_mode_info.skip_mode_flag) {
-    for (i = 0; i < SKIP_CONTEXTS; ++i) {
+    for (i = 0; i < SKIP_MODE_CONTEXTS; ++i) {
       av1_cost_tokens_from_cdf(x->skip_mode_cost[i], fc->skip_mode_cdfs[i],
                                NULL);
     }
   }
 
   for (i = 0; i < SKIP_CONTEXTS; ++i) {
-    av1_cost_tokens_from_cdf(x->skip_cost[i], fc->skip_cdfs[i], NULL);
+    av1_cost_tokens_from_cdf(x->skip_txfm_cost[i], fc->skip_txfm_cdfs[i], NULL);
   }
 
   for (i = 0; i < KF_MODE_CONTEXTS; ++i)
@@ -312,14 +312,11 @@ void av1_fill_mode_rates(AV1_COMMON *const cm, MACROBLOCK *x,
 }
 
 // Values are now correlated to quantizer.
-static int sad_per_bit16lut_8[QINDEX_RANGE];
-static int sad_per_bit4lut_8[QINDEX_RANGE];
-static int sad_per_bit16lut_10[QINDEX_RANGE];
-static int sad_per_bit4lut_10[QINDEX_RANGE];
-static int sad_per_bit16lut_12[QINDEX_RANGE];
-static int sad_per_bit4lut_12[QINDEX_RANGE];
+static int sad_per_bit_lut_8[QINDEX_RANGE];
+static int sad_per_bit_lut_10[QINDEX_RANGE];
+static int sad_per_bit_lut_12[QINDEX_RANGE];
 
-static void init_me_luts_bd(int *bit16lut, int *bit4lut, int range,
+static void init_me_luts_bd(int *bit16lut, int range,
                             aom_bit_depth_t bit_depth) {
   int i;
   // Initialize the sad lut tables using a formulaic calculation for now.
@@ -328,17 +325,13 @@ static void init_me_luts_bd(int *bit16lut, int *bit4lut, int range,
   for (i = 0; i < range; i++) {
     const double q = av1_convert_qindex_to_q(i, bit_depth);
     bit16lut[i] = (int)(0.0418 * q + 2.4107);
-    bit4lut[i] = (int)(0.063 * q + 2.742);
   }
 }
 
 void av1_init_me_luts(void) {
-  init_me_luts_bd(sad_per_bit16lut_8, sad_per_bit4lut_8, QINDEX_RANGE,
-                  AOM_BITS_8);
-  init_me_luts_bd(sad_per_bit16lut_10, sad_per_bit4lut_10, QINDEX_RANGE,
-                  AOM_BITS_10);
-  init_me_luts_bd(sad_per_bit16lut_12, sad_per_bit4lut_12, QINDEX_RANGE,
-                  AOM_BITS_12);
+  init_me_luts_bd(sad_per_bit_lut_8, QINDEX_RANGE, AOM_BITS_8);
+  init_me_luts_bd(sad_per_bit_lut_10, QINDEX_RANGE, AOM_BITS_10);
+  init_me_luts_bd(sad_per_bit_lut_12, QINDEX_RANGE, AOM_BITS_12);
 }
 
 static const int rd_boost_factor[16] = { 64, 32, 32, 32, 24, 16, 12, 12,
@@ -398,23 +391,23 @@ int av1_get_deltaq_offset(const AV1_COMP *cpi, int qindex, double beta) {
 int av1_get_adaptive_rdmult(const AV1_COMP *cpi, double beta) {
   assert(beta > 0.0);
   const AV1_COMMON *cm = &cpi->common;
-  int64_t q =
-      av1_dc_quant_QTX(cm->base_qindex, 0, cpi->common.seq_params.bit_depth);
+  int64_t q = av1_dc_quant_QTX(cm->quant_params.base_qindex, 0,
+                               cm->seq_params.bit_depth);
   int64_t rdmult = 0;
 
-  switch (cpi->common.seq_params.bit_depth) {
+  switch (cm->seq_params.bit_depth) {
     case AOM_BITS_8: rdmult = (int)((88 * q * q / beta) / 24); break;
     case AOM_BITS_10:
       rdmult = ROUND_POWER_OF_TWO((int)((88 * q * q / beta) / 24), 4);
       break;
     default:
-      assert(cpi->common.seq_params.bit_depth == AOM_BITS_12);
+      assert(cm->seq_params.bit_depth == AOM_BITS_12);
       rdmult = ROUND_POWER_OF_TWO((int)((88 * q * q / beta) / 24), 8);
       break;
   }
 
   if (is_stat_consumption_stage(cpi) &&
-      (cpi->common.current_frame.frame_type != KEY_FRAME)) {
+      (cm->current_frame.frame_type != KEY_FRAME)) {
     const GF_GROUP *const gf_group = &cpi->gf_group;
     const FRAME_UPDATE_TYPE frame_type = gf_group->update_type[gf_group->index];
     const int boost_index = AOMMIN(15, (cpi->rc.gfu_boost / 100));
@@ -444,19 +437,15 @@ static int compute_rd_thresh_factor(int qindex, aom_bit_depth_t bit_depth) {
   return AOMMAX((int)(pow(q, RD_THRESH_POW) * 5.12), 8);
 }
 
-void av1_initialize_me_consts(const AV1_COMP *cpi, MACROBLOCK *x, int qindex) {
+void av1_set_sad_per_bit(const AV1_COMP *cpi, MvCostInfo *mv_cost_info,
+                         int qindex) {
   switch (cpi->common.seq_params.bit_depth) {
-    case AOM_BITS_8:
-      x->sadperbit16 = sad_per_bit16lut_8[qindex];
-      x->sadperbit4 = sad_per_bit4lut_8[qindex];
-      break;
+    case AOM_BITS_8: mv_cost_info->sadperbit = sad_per_bit_lut_8[qindex]; break;
     case AOM_BITS_10:
-      x->sadperbit16 = sad_per_bit16lut_10[qindex];
-      x->sadperbit4 = sad_per_bit4lut_10[qindex];
+      mv_cost_info->sadperbit = sad_per_bit_lut_10[qindex];
       break;
     case AOM_BITS_12:
-      x->sadperbit16 = sad_per_bit16lut_12[qindex];
-      x->sadperbit4 = sad_per_bit4lut_12[qindex];
+      mv_cost_info->sadperbit = sad_per_bit_lut_12[qindex];
       break;
     default:
       assert(0 && "bit_depth should be AOM_BITS_8, AOM_BITS_10 or AOM_BITS_12");
@@ -467,10 +456,10 @@ static void set_block_thresholds(const AV1_COMMON *cm, RD_OPT *rd) {
   int i, bsize, segment_id;
 
   for (segment_id = 0; segment_id < MAX_SEGMENTS; ++segment_id) {
-    const int qindex =
-        clamp(av1_get_qindex(&cm->seg, segment_id, cm->base_qindex) +
-                  cm->y_dc_delta_q,
-              0, MAXQ);
+    const int qindex = clamp(
+        av1_get_qindex(&cm->seg, segment_id, cm->quant_params.base_qindex) +
+            cm->quant_params.y_dc_delta_q,
+        0, MAXQ);
     const int q = compute_rd_thresh_factor(qindex, cm->seq_params.bit_depth);
 
     for (bsize = 0; bsize < BLOCK_SIZES_ALL; ++bsize) {
@@ -581,20 +570,21 @@ void av1_fill_coeff_costs(MACROBLOCK *x, FRAME_CONTEXT *fc,
 }
 
 void av1_fill_mv_costs(const FRAME_CONTEXT *fc, int integer_mv, int usehp,
-                       MACROBLOCK *x) {
-  x->nmvcost[0] = &x->nmv_costs[0][MV_MAX];
-  x->nmvcost[1] = &x->nmv_costs[1][MV_MAX];
-  x->nmvcost_hp[0] = &x->nmv_costs_hp[0][MV_MAX];
-  x->nmvcost_hp[1] = &x->nmv_costs_hp[1][MV_MAX];
+                       MvCostInfo *mv_cost_info) {
+  mv_cost_info->nmv_cost[0] = &mv_cost_info->nmv_cost_alloc[0][MV_MAX];
+  mv_cost_info->nmv_cost[1] = &mv_cost_info->nmv_cost_alloc[1][MV_MAX];
+  mv_cost_info->nmv_cost_hp[0] = &mv_cost_info->nmv_cost_hp_alloc[0][MV_MAX];
+  mv_cost_info->nmv_cost_hp[1] = &mv_cost_info->nmv_cost_hp_alloc[1][MV_MAX];
   if (integer_mv) {
-    av1_build_nmv_cost_table(x->nmv_vec_cost, x->nmvcost, &fc->nmvc,
+    mv_cost_info->mv_cost_stack = (int **)&mv_cost_info->nmv_cost;
+    av1_build_nmv_cost_table(mv_cost_info->nmv_joint_cost,
+                             mv_cost_info->mv_cost_stack, &fc->nmvc,
                              MV_SUBPEL_NONE);
-    x->mv_cost_stack = (int **)&x->nmvcost;
   } else {
-    int *(*src)[2] = usehp ? &x->nmvcost_hp : &x->nmvcost;
-    x->mv_cost_stack = *src;
-    av1_build_nmv_cost_table(
-        x->nmv_vec_cost, usehp ? x->nmvcost_hp : x->nmvcost, &fc->nmvc, usehp);
+    mv_cost_info->mv_cost_stack =
+        usehp ? mv_cost_info->nmv_cost_hp : mv_cost_info->nmv_cost;
+    av1_build_nmv_cost_table(mv_cost_info->nmv_joint_cost,
+                             mv_cost_info->mv_cost_stack, &fc->nmvc, usehp);
   }
 }
 
@@ -602,25 +592,30 @@ void av1_initialize_rd_consts(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
   RD_OPT *const rd = &cpi->rd;
+  MvCostInfo *mv_cost_info = &x->mv_cost_info;
 
   aom_clear_system_state();
 
-  rd->RDMULT = av1_compute_rd_mult(cpi, cm->base_qindex + cm->y_dc_delta_q);
+  rd->RDMULT = av1_compute_rd_mult(
+      cpi, cm->quant_params.base_qindex + cm->quant_params.y_dc_delta_q);
 
-  set_error_per_bit(x, rd->RDMULT);
+  av1_set_error_per_bit(mv_cost_info, rd->RDMULT);
 
   set_block_thresholds(cm, rd);
 
   if ((!cpi->sf.rt_sf.use_nonrd_pick_mode &&
        cpi->oxcf.mv_cost_upd_freq != COST_UPD_OFF) ||
       frame_is_intra_only(cm) || (cm->current_frame.frame_number & 0x07) == 1)
-    av1_fill_mv_costs(cm->fc, cm->cur_frame_force_integer_mv,
-                      cm->allow_high_precision_mv, x);
+    av1_fill_mv_costs(cm->fc, cm->features.cur_frame_force_integer_mv,
+                      cm->features.allow_high_precision_mv, mv_cost_info);
 
   if (!cpi->sf.rt_sf.use_nonrd_pick_mode && frame_is_intra_only(cm) &&
-      cm->allow_screen_content_tools && !is_stat_generation_stage(cpi)) {
-    int *dvcost[2] = { &cpi->dv_cost[0][MV_MAX], &cpi->dv_cost[1][MV_MAX] };
-    av1_build_nmv_cost_table(cpi->dv_joint_cost, dvcost, &cm->fc->ndvc,
+      cm->features.allow_screen_content_tools &&
+      !is_stat_generation_stage(cpi)) {
+    IntraBCMVCosts *const dv_costs = &cpi->dv_costs;
+    int *dvcost[2] = { &dv_costs->mv_component[0][MV_MAX],
+                       &dv_costs->mv_component[1][MV_MAX] };
+    av1_build_nmv_cost_table(dv_costs->joint_mv, dvcost, &cm->fc->ndvc,
                              MV_SUBPEL_NONE);
   }
 
@@ -630,8 +625,8 @@ void av1_initialize_rd_consts(AV1_COMP *cpi) {
       // TRANSLATION: 3 bits
       // ROTZOOM: 2 bits
       // AFFINE: 3 bits
-      cpi->gmtype_cost[i] = (1 + (i > 0 ? (i == ROTZOOM ? 1 : 2) : 0))
-                            << AV1_PROB_COST_SHIFT;
+      cpi->gm_info.type_cost[i] = (1 + (i > 0 ? (i == ROTZOOM ? 1 : 2) : 0))
+                                  << AV1_PROB_COST_SHIFT;
   }
 }
 
@@ -982,8 +977,8 @@ static void get_entropy_contexts_plane(BLOCK_SIZE plane_bsize,
                                        ENTROPY_CONTEXT t_left[MAX_MIB_SIZE]) {
   const int num_4x4_w = mi_size_wide[plane_bsize];
   const int num_4x4_h = mi_size_high[plane_bsize];
-  const ENTROPY_CONTEXT *const above = pd->above_context;
-  const ENTROPY_CONTEXT *const left = pd->left_context;
+  const ENTROPY_CONTEXT *const above = pd->above_entropy_context;
+  const ENTROPY_CONTEXT *const left = pd->left_entropy_context;
 
   memcpy(t_above, above, sizeof(ENTROPY_CONTEXT) * num_4x4_w);
   memcpy(t_left, left, sizeof(ENTROPY_CONTEXT) * num_4x4_h);
@@ -1080,9 +1075,9 @@ YV12_BUFFER_CONFIG *av1_get_scaled_ref_frame(const AV1_COMP *cpi,
                                                        : NULL;
 }
 
-int av1_get_switchable_rate(const AV1_COMMON *const cm, MACROBLOCK *x,
-                            const MACROBLOCKD *xd) {
-  if (cm->interp_filter == SWITCHABLE) {
+int av1_get_switchable_rate(const MACROBLOCK *x, const MACROBLOCKD *xd,
+                            InterpFilter interp_filter) {
+  if (interp_filter == SWITCHABLE) {
     const MB_MODE_INFO *const mbmi = xd->mi[0];
     int inter_filter_cost = 0;
     int dir;

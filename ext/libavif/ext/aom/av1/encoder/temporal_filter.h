@@ -25,19 +25,38 @@ extern "C" {
 // Block size used in temporal filtering.
 #define TF_BLOCK_SIZE BLOCK_32X32
 
-// Window size for YUV temporal filtering.
-// This is particually used for function `av1_apply_temporal_filter_yuv()`.
-#define TF_YUV_FILTER_WINDOW_LENGTH 3
-// A scale factor used in YUV temporal filtering for weight adjustment.
-#define TF_YUV_FILTER_WEIGHT_SCALE 3
+// Threshold for passing down searched motion vector from previous frame to the
+// next frame in the temporal sequence.
+#define TF_PASS_DOWN_MV_THRESHOLD 12
 
-#define TF_ENABLE_PLANEWISE_STRATEGY 1
-// Window size for plane-wise temporal filtering.
-// This is particually used for function `av1_apply_temporal_filter_planewise()`
-#define TF_PLANEWISE_FILTER_WINDOW_LENGTH 5
-// A scale factor used in plane-wise temporal filtering to raise the filter
-// weight from `double` with range [0, 1] to `int` with range [0, 1000].
-#define TF_PLANEWISE_FILTER_WEIGHT_SCALE 1000
+// Window size for temporal filtering.
+#define TF_WINDOW_LENGTH 5
+
+// Hyper-parameters used to compute filtering weight. These hyper-parameters can
+// be tuned for a better performance.
+// 1. Weight factor used to balance the weighted-average between window error
+//    and block error. The weight is for window error while the weight for block
+//    error is always set as 1.
+#define TF_WINDOW_BLOCK_BALANCE_WEIGHT 5
+// 2. Threshold for using q to adjust the filtering weight. Concretely, when
+//    using a small q (high bitrate), we would like to reduce the filtering
+//    strength such that more detailed information can be preserved. Hence, when
+//    q is smaller than this threshold, we will adjust the filtering weight
+//    based on the q-value.
+#define TF_Q_DECAY_THRESHOLD 20
+// 3. Normalization factor used to normalize the motion search error. Since the
+//    motion search error can be large and uncontrollable, we will simply
+//    normalize it before using it to compute the filtering weight.
+#define TF_SEARCH_ERROR_NORM_WEIGHT 20
+// 4. Threshold for using `arnr_strength` to adjust the filtering strength.
+//    Concretely, users can use `arnr_strength` arguments to control the
+//    strength of temporal filtering. When `arnr_strength` is small enough (
+//    i.e., smaller than this threshold), we will adjust the filtering weight
+//    based on the strength value.
+#define TF_STRENGTH_THRESHOLD 4
+// 5. A scale factor to raise the filtering weight from `double` type with range
+//    [0, 1] to `int` type with range [0, 1000].
+#define TF_WEIGHT_SCALE 1000
 
 #define NOISE_ESTIMATION_EDGE_THRESHOLD 50
 // Estimates noise level from a given frame using a single plane (Y, U, or V).

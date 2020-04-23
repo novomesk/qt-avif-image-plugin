@@ -93,6 +93,7 @@ list(APPEND AOM_TEST_INTRA_PRED_SPEED_SOURCES "${AOM_GEN_SRC_DIR}/usage_exit.c"
 
 if(NOT BUILD_SHARED_LIBS)
   list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
+              "${AOM_ROOT}/test/av1_common_int_test.cc"
               "${AOM_ROOT}/test/cdef_test.cc"
               "${AOM_ROOT}/test/cfl_test.cc"
               "${AOM_ROOT}/test/convolve_test.cc"
@@ -102,7 +103,6 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/intrabc_test.cc"
               "${AOM_ROOT}/test/intrapred_test.cc"
               "${AOM_ROOT}/test/lpf_test.cc"
-              "${AOM_ROOT}/test/onyxc_int_test.cc"
               "${AOM_ROOT}/test/scan_test.cc"
               "${AOM_ROOT}/test/selfguided_filter_test.cc"
               "${AOM_ROOT}/test/simd_cmp_impl.h"
@@ -131,12 +131,10 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/segment_binarization_sync.cc"
                 "${AOM_ROOT}/test/superframe_test.cc"
                 "${AOM_ROOT}/test/tile_independence_test.cc"
-                "${AOM_ROOT}/test/temporal_filter_planewise_test.cc"
-                "${AOM_ROOT}/test/temporal_filter_yuv_test.cc")
+                "${AOM_ROOT}/test/temporal_filter_test.cc")
     if(CONFIG_REALTIME_ONLY)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
-                       "${AOM_ROOT}/test/cnn_test.cc"
-                       "${AOM_ROOT}/test/temporal_filter_yuv_test.cc")
+                       "${AOM_ROOT}/test/cnn_test.cc")
     endif()
     if(NOT CONFIG_AV1_HIGHBITDEPTH)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
@@ -184,9 +182,7 @@ if(NOT BUILD_SHARED_LIBS)
 
   list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
               "${AOM_ROOT}/test/arf_freq_test.cc"
-              "${AOM_ROOT}/test/av1_convolve_2d_test.cc"
-              "${AOM_ROOT}/test/av1_convolve_2d_test_util.cc"
-              "${AOM_ROOT}/test/av1_convolve_2d_test_util.h"
+              "${AOM_ROOT}/test/av1_convolve_test.cc"
               "${AOM_ROOT}/test/av1_fwd_txfm1d_test.cc"
               "${AOM_ROOT}/test/av1_fwd_txfm2d_test.cc"
               "${AOM_ROOT}/test/av1_inv_txfm1d_test.cc"

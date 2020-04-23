@@ -13,10 +13,10 @@
 
 #include "aom/aom_integer.h"
 #include "aom_mem/aom_mem.h"
+#include "av1/common/av1_common_int.h"
 #include "av1/common/blockd.h"
 #include "av1/common/entropy.h"
 #include "av1/common/entropymode.h"
-#include "av1/common/onyxc_int.h"
 #include "av1/common/scan.h"
 #include "av1/common/token_cdfs.h"
 #include "av1/common/txb_common.h"
@@ -29,7 +29,7 @@ static int get_q_ctx(int q) {
 }
 
 void av1_default_coef_probs(AV1_COMMON *cm) {
-  const int index = get_q_ctx(cm->base_qindex);
+  const int index = get_q_ctx(cm->quant_params.base_qindex);
 #if CONFIG_ENTROPY_STATS
   cm->coef_cdf_category = index;
 #endif
@@ -130,7 +130,7 @@ void av1_reset_cdf_symbol_counters(FRAME_CONTEXT *fc) {
   RESET_CDF_COUNTER(fc->compound_index_cdf, 2);
   RESET_CDF_COUNTER(fc->comp_group_idx_cdf, 2);
   RESET_CDF_COUNTER(fc->skip_mode_cdfs, 2);
-  RESET_CDF_COUNTER(fc->skip_cdfs, 2);
+  RESET_CDF_COUNTER(fc->skip_txfm_cdfs, 2);
   RESET_CDF_COUNTER(fc->intra_inter_cdf, 2);
   reset_nmv_counter(&fc->nmvc);
   reset_nmv_counter(&fc->ndvc);

@@ -65,7 +65,7 @@ static AOM_INLINE int keep_one_comp_stat(MV_STATS *mv_stats, int comp_val,
   const int int_part = offset >> 3;         // int mv data
   const int frac_part = (offset >> 1) & 3;  // fractional mv data
   const int high_part = offset & 1;         // high precision mv data
-  const int use_hp = cpi->common.allow_high_precision_mv;
+  const int use_hp = cpi->common.features.allow_high_precision_mv;
   int r_idx = 0;
 
   const MACROBLOCK *const x = &cpi->td.mb;
@@ -128,7 +128,7 @@ static AOM_INLINE void keep_one_mv_stat(MV_STATS *mv_stats, const MV *ref_mv,
   FRAME_CONTEXT *ec_ctx = xd->tile_ctx;
   nmv_context *nmvc = &ec_ctx->nmvc;
   aom_cdf_prob *joint_cdf = nmvc->joints_cdf;
-  const int use_hp = cpi->common.allow_high_precision_mv;
+  const int use_hp = cpi->common.features.allow_high_precision_mv;
 
   const MV diff = { cur_mv->row - ref_mv->row, cur_mv->col - ref_mv->col };
   const int mv_joint = av1_get_mv_joint(&diff);
@@ -177,14 +177,18 @@ static AOM_INLINE void collect_mv_stats_b(MV_STATS *mv_stats,
                                           const AV1_COMP *cpi, int mi_row,
                                           int mi_col) {
   const AV1_COMMON *cm = &cpi->common;
+  const CommonModeInfoParams *const mi_params = &cm->mi_params;
 
-  if (mi_row >= cm->mi_rows || mi_col >= cm->mi_cols) {
+  if (mi_row >= mi_params->mi_rows || mi_col >= mi_params->mi_cols) {
     return;
   }
 
-  const MB_MODE_INFO *mbmi = cm->mi_grid_base[mi_row * cm->mi_stride + mi_col];
+  const MB_MODE_INFO *mbmi =
+      mi_params->mi_grid_base[mi_row * mi_params->mi_stride + mi_col];
   const MB_MODE_INFO_EXT_FRAME *mbmi_ext_frame =
-      cpi->mbmi_ext_frame_base + get_mi_ext_idx(cm, mi_row, mi_col);
+      cpi->mbmi_ext_info.frame_base +
+      get_mi_ext_idx(mi_row, mi_col, cm->mi_params.mi_alloc_bsize,
+                     cpi->mbmi_ext_info.stride);
 
   if (!is_inter_block(mbmi)) {
     mv_stats->intra_count++;
@@ -265,7 +269,8 @@ static AOM_INLINE void collect_mv_stats_sb(MV_STATS *mv_stats,
   assert(bsize < BLOCK_SIZES_ALL);
   const AV1_COMMON *cm = &cpi->common;
 
-  if (mi_row >= cm->mi_rows || mi_col >= cm->mi_cols) return;
+  if (mi_row >= cm->mi_params.mi_rows || mi_col >= cm->mi_params.mi_cols)
+    return;
 
   const PARTITION_TYPE partition = get_partition(cm, mi_row, mi_col, bsize);
   const BLOCK_SIZE subsize = get_partition_subsize(bsize, partition);
@@ -346,8 +351,8 @@ static AOM_INLINE void collect_mv_stats_tile(MV_STATS *mv_stats,
 void av1_collect_mv_stats(AV1_COMP *cpi, int current_q) {
   MV_STATS *mv_stats = &cpi->mv_stats;
   const AV1_COMMON *cm = &cpi->common;
-  const int tile_cols = cm->tile_cols;
-  const int tile_rows = cm->tile_rows;
+  const int tile_cols = cm->tiles.cols;
+  const int tile_rows = cm->tiles.rows;
 
   for (int tile_row = 0; tile_row < tile_rows; tile_row++) {
     TileInfo tile_info;
@@ -421,5 +426,5 @@ void av1_pick_and_set_high_precision_mv(AV1_COMP *cpi, int qindex) {
 #endif  // !CONFIG_REALTIME_ONLY
 
   av1_set_high_precision_mv(cpi, use_hp,
-                            cpi->common.cur_frame_force_integer_mv);
+                            cpi->common.features.cur_frame_force_integer_mv);
 }

@@ -17,7 +17,7 @@
 #include "config/aom_scale_rtcd.h"
 
 #include "aom_mem/aom_mem.h"
-#include "av1/common/onyxc_int.h"
+#include "av1/common/av1_common_int.h"
 #include "av1/common/resize.h"
 #include "av1/common/restoration.h"
 #include "aom_dsp/aom_dsp_common.h"
@@ -1117,7 +1117,7 @@ void av1_loop_restoration_filter_frame_init(AV1LrStruct *lr_ctxt,
   if (aom_realloc_frame_buffer(
           lr_ctxt->dst, frame_width, frame_height, seq_params->subsampling_x,
           seq_params->subsampling_y, highbd, AOM_RESTORATION_FRAME_BORDER,
-          cm->byte_alignment, NULL, NULL, NULL) < 0)
+          cm->features.byte_alignment, NULL, NULL, NULL) < 0)
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate restoration dst buffer");
 
@@ -1190,7 +1190,7 @@ static void foreach_rest_unit_in_planes(AV1LrStruct *lr_ctxt, AV1_COMMON *cm,
 void av1_loop_restoration_filter_frame(YV12_BUFFER_CONFIG *frame,
                                        AV1_COMMON *cm, int optimized_lr,
                                        void *lr_ctxt) {
-  assert(!cm->all_lossless);
+  assert(!cm->features.all_lossless);
   const int num_planes = av1_num_planes(cm);
 
   AV1LrStruct *loop_rest_ctxt = (AV1LrStruct *)lr_ctxt;
@@ -1318,7 +1318,7 @@ int av1_loop_restoration_corners_in_sb(const struct AV1Common *cm, int plane,
   if (bsize != cm->seq_params.sb_size) return 0;
   if (cm->rst_info[plane].frame_restoration_type == RESTORE_NONE) return 0;
 
-  assert(!cm->all_lossless);
+  assert(!cm->features.all_lossless);
 
   const int is_uv = plane > 0;
 

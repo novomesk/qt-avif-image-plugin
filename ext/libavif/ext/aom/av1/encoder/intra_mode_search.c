@@ -217,7 +217,7 @@ static int64_t intra_model_yrd(const AV1_COMP *const cpi, MACROBLOCK *const x,
   model_rd_sb_fn[cpi->sf.rt_sf.use_simple_rd_model ? MODELRD_LEGACY
                                                    : MODELRD_TYPE_INTRA](
       cpi, bsize, x, xd, 0, 0, &this_rd_stats.rate, &this_rd_stats.dist,
-      &this_rd_stats.skip, &temp_sse, NULL, NULL, NULL);
+      &this_rd_stats.skip_txfm, &temp_sse, NULL, NULL, NULL);
   if (av1_is_directional_mode(mbmi->mode) && av1_use_angle_delta(bsize)) {
     mode_cost +=
         x->angle_delta_cost[mbmi->mode - V_PRED]
@@ -274,7 +274,8 @@ static int64_t calc_rd_given_intra_angle(
       return INT64_MAX;
     }
   }
-  av1_super_block_yrd(cpi, x, &tokenonly_rd_stats, bsize, best_rd_in);
+  av1_pick_uniform_tx_size_type_yrd(cpi, x, &tokenonly_rd_stats, bsize,
+                                    best_rd_in);
   if (tokenonly_rd_stats.rate == INT_MAX) return INT64_MAX;
 
   int this_rate =
@@ -291,7 +292,7 @@ static int64_t calc_rd_given_intra_angle(
     *rate = this_rate;
     rd_stats->rate = tokenonly_rd_stats.rate;
     rd_stats->dist = tokenonly_rd_stats.dist;
-    rd_stats->skip = tokenonly_rd_stats.skip;
+    rd_stats->skip_txfm = tokenonly_rd_stats.skip_txfm;
   }
   return this_rd;
 }
@@ -317,8 +318,8 @@ static int intra_mode_info_cost_y(const AV1_COMP *cpi, const MACROBLOCK *x,
   // Can only activate one mode.
   assert(((mbmi->mode != DC_PRED) + use_palette + use_intrabc +
           use_filter_intra) <= 1);
-  const int try_palette =
-      av1_allow_palette(cpi->common.allow_screen_content_tools, mbmi->sb_type);
+  const int try_palette = av1_allow_palette(
+      cpi->common.features.allow_screen_content_tools, mbmi->sb_type);
   if (try_palette && mbmi->mode == DC_PRED) {
     const MACROBLOCKD *xd = &x->e_mbd;
     const int bsize_ctx = av1_get_palette_bsize_ctx(bsize);
@@ -372,8 +373,8 @@ static int intra_mode_info_cost_uv(const AV1_COMP *cpi, const MACROBLOCK *x,
   // Can only activate one mode.
   assert(((mode != UV_DC_PRED) + use_palette + mbmi->use_intrabc) <= 1);
 
-  const int try_palette =
-      av1_allow_palette(cpi->common.allow_screen_content_tools, mbmi->sb_type);
+  const int try_palette = av1_allow_palette(
+      cpi->common.features.allow_screen_content_tools, mbmi->sb_type);
   if (try_palette && mode == UV_DC_PRED) {
     const PALETTE_MODE_INFO *pmi = &mbmi->palette_mode_info;
     total_rate +=
@@ -433,7 +434,8 @@ static int rd_pick_filter_intra_sby(const AV1_COMP *const cpi, MACROBLOCK *x,
     if (model_intra_yrd_and_prune(cpi, x, bsize, mode_cost, best_model_rd)) {
       continue;
     }
-    av1_super_block_yrd(cpi, x, &tokenonly_rd_stats, bsize, *best_rd);
+    av1_pick_uniform_tx_size_type_yrd(cpi, x, &tokenonly_rd_stats, bsize,
+                                      *best_rd);
     if (tokenonly_rd_stats.rate == INT_MAX) continue;
     const int this_rate =
         tokenonly_rd_stats.rate +
@@ -456,7 +458,7 @@ static int rd_pick_filter_intra_sby(const AV1_COMP *const cpi, MACROBLOCK *x,
       *rate = this_rate;
       *rate_tokenonly = tokenonly_rd_stats.rate;
       *distortion = tokenonly_rd_stats.dist;
-      *skippable = tokenonly_rd_stats.skip;
+      *skippable = tokenonly_rd_stats.skip_txfm;
       filter_intra_selected_flag = 1;
     }
   }
@@ -601,7 +603,8 @@ static AOM_INLINE void palette_rd_y(
   }
 
   RD_STATS tokenonly_rd_stats;
-  av1_super_block_yrd(cpi, x, &tokenonly_rd_stats, bsize, *best_rd);
+  av1_pick_uniform_tx_size_type_yrd(cpi, x, &tokenonly_rd_stats, bsize,
+                                    *best_rd);
   if (tokenonly_rd_stats.rate == INT_MAX) return;
   int this_rate = tokenonly_rd_stats.rate + palette_mode_cost;
   int64_t this_rd = RDCOST(x->rdmult, this_rate, tokenonly_rd_stats.dist);
@@ -627,7 +630,7 @@ static AOM_INLINE void palette_rd_y(
     if (rate) *rate = this_rate;
     if (rate_tokenonly) *rate_tokenonly = tokenonly_rd_stats.rate;
     if (distortion) *distortion = tokenonly_rd_stats.dist;
-    if (skippable) *skippable = tokenonly_rd_stats.skip;
+    if (skippable) *skippable = tokenonly_rd_stats.skip_txfm;
     if (beat_best_pallette_rd) *beat_best_pallette_rd = 1;
   }
 }
@@ -811,7 +814,8 @@ static void rd_pick_palette_intra_sby(
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
   assert(!is_inter_block(mbmi));
-  assert(av1_allow_palette(cpi->common.allow_screen_content_tools, bsize));
+  assert(av1_allow_palette(cpi->common.features.allow_screen_content_tools,
+                           bsize));
 
   const int src_stride = x->plane[0].src.stride;
   const uint8_t *const src = x->plane[0].src.buf;
@@ -1007,8 +1011,8 @@ static AOM_INLINE void rd_pick_palette_intra_sbuv(
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
   assert(!is_inter_block(mbmi));
-  assert(
-      av1_allow_palette(cpi->common.allow_screen_content_tools, mbmi->sb_type));
+  assert(av1_allow_palette(cpi->common.features.allow_screen_content_tools,
+                           mbmi->sb_type));
   PALETTE_MODE_INFO *const pmi = &mbmi->palette_mode_info;
   const BLOCK_SIZE bsize = mbmi->sb_type;
   const SequenceHeader *const seq_params = &cpi->common.seq_params;
@@ -1123,7 +1127,7 @@ static AOM_INLINE void rd_pick_palette_intra_sbuv(
         }
       }
 
-      av1_super_block_uvrd(cpi, x, &tokenonly_rd_stats, bsize, *best_rd);
+      av1_txfm_uvrd(cpi, x, &tokenonly_rd_stats, bsize, *best_rd);
       if (tokenonly_rd_stats.rate == INT_MAX) continue;
       this_rate = tokenonly_rd_stats.rate +
                   intra_mode_info_cost_uv(cpi, x, mbmi, bsize, dc_mode_cost);
@@ -1137,7 +1141,7 @@ static AOM_INLINE void rd_pick_palette_intra_sbuv(
         *rate = this_rate;
         *distortion = tokenonly_rd_stats.dist;
         *rate_tokenonly = tokenonly_rd_stats.rate;
-        *skippable = tokenonly_rd_stats.skip;
+        *skippable = tokenonly_rd_stats.skip_txfm;
       }
     }
   }
@@ -1215,6 +1219,7 @@ static AOM_INLINE void choose_intra_uv_mode(
   if (xd->cfl.store_y) {
     // Restore reconstructed luma values.
     av1_encode_intra_block_plane(cpi, x, mbmi->sb_type, AOM_PLANE_Y,
+                                 DRY_RUN_NORMAL,
                                  cpi->optimize_seg_arr[mbmi->segment_id]);
     xd->cfl.store_y = 0;
   }
@@ -1235,7 +1240,7 @@ static int64_t pick_intra_angle_routine_sbuv(
   int64_t this_rd;
   RD_STATS tokenonly_rd_stats;
 
-  if (!av1_super_block_uvrd(cpi, x, &tokenonly_rd_stats, bsize, best_rd_in))
+  if (!av1_txfm_uvrd(cpi, x, &tokenonly_rd_stats, bsize, best_rd_in))
     return INT64_MAX;
   this_rate = tokenonly_rd_stats.rate +
               intra_mode_info_cost_uv(cpi, x, mbmi, bsize, rate_overhead);
@@ -1246,7 +1251,7 @@ static int64_t pick_intra_angle_routine_sbuv(
     *rate = this_rate;
     rd_stats->rate = tokenonly_rd_stats.rate;
     rd_stats->dist = tokenonly_rd_stats.dist;
-    rd_stats->skip = tokenonly_rd_stats.skip;
+    rd_stats->skip_txfm = tokenonly_rd_stats.skip_txfm;
   }
   return this_rd;
 }
@@ -1264,7 +1269,7 @@ static int rd_pick_intra_angle_sbuv(const AV1_COMP *const cpi, MACROBLOCK *x,
   int64_t this_rd, best_rd_in, rd_cost[2 * (MAX_ANGLE_DELTA + 2)];
 
   rd_stats->rate = INT_MAX;
-  rd_stats->skip = 0;
+  rd_stats->skip_txfm = 0;
   rd_stats->dist = INT64_MAX;
   for (i = 0; i < 2 * (MAX_ANGLE_DELTA + 2); ++i) rd_cost[i] = INT64_MAX;
 
@@ -1335,6 +1340,7 @@ static int cfl_rd_pick_alpha(MACROBLOCK *const x, const AV1_COMP *const cpi,
   int best_rate_uv[CFL_JOINT_SIGNS][CFL_PRED_PLANES];
 #endif  // CONFIG_DEBUG
 
+  const int skip_trellis = 0;
   for (int plane = 0; plane < CFL_PRED_PLANES; plane++) {
     RD_STATS rd_stats;
     av1_init_rd_stats(&rd_stats);
@@ -1350,9 +1356,9 @@ static int cfl_rd_pick_alpha(MACROBLOCK *const x, const AV1_COMP *const cpi,
       if (i == CFL_SIGN_NEG) {
         mbmi->cfl_alpha_idx = 0;
         mbmi->cfl_alpha_signs = joint_sign;
-        av1_txfm_rd_in_plane(x, cpi, &rd_stats, best_rd, 0, plane + 1,
-                             plane_bsize, tx_size,
-                             cpi->sf.rd_sf.use_fast_coef_costing, FTXS_NONE, 0);
+        av1_txfm_rd_in_plane(
+            x, cpi, &rd_stats, best_rd, 0, plane + 1, plane_bsize, tx_size,
+            cpi->sf.rd_sf.use_fast_coef_costing, FTXS_NONE, skip_trellis);
         if (rd_stats.rate == INT_MAX) break;
       }
       const int alpha_rate = x->cfl_cost[joint_sign][plane][0];
@@ -1381,7 +1387,7 @@ static int cfl_rd_pick_alpha(MACROBLOCK *const x, const AV1_COMP *const cpi,
             mbmi->cfl_alpha_signs = joint_sign;
             av1_txfm_rd_in_plane(
                 x, cpi, &rd_stats, best_rd, 0, plane + 1, plane_bsize, tx_size,
-                cpi->sf.rd_sf.use_fast_coef_costing, FTXS_NONE, 0);
+                cpi->sf.rd_sf.use_fast_coef_costing, FTXS_NONE, skip_trellis);
             if (rd_stats.rate == INT_MAX) break;
           }
           const int alpha_rate = x->cfl_cost[joint_sign][plane][c];
@@ -1473,7 +1479,7 @@ int64_t av1_rd_pick_intra_sbuv_mode(const AV1_COMP *const cpi, MACROBLOCK *x,
                                     &this_rate, &tokenonly_rd_stats))
         continue;
     } else {
-      if (!av1_super_block_uvrd(cpi, x, &tokenonly_rd_stats, bsize, best_rd)) {
+      if (!av1_txfm_uvrd(cpi, x, &tokenonly_rd_stats, bsize, best_rd)) {
         continue;
       }
     }
@@ -1497,13 +1503,14 @@ int64_t av1_rd_pick_intra_sbuv_mode(const AV1_COMP *const cpi, MACROBLOCK *x,
       *rate = this_rate;
       *rate_tokenonly = tokenonly_rd_stats.rate;
       *distortion = tokenonly_rd_stats.dist;
-      *skippable = tokenonly_rd_stats.skip;
+      *skippable = tokenonly_rd_stats.skip_txfm;
     }
   }
 
   const int try_palette =
       cpi->oxcf.enable_palette &&
-      av1_allow_palette(cpi->common.allow_screen_content_tools, mbmi->sb_type);
+      av1_allow_palette(cpi->common.features.allow_screen_content_tools,
+                        mbmi->sb_type);
   if (try_palette) {
     uint8_t *best_palette_color_map = x->palette_buffer->best_palette_color_map;
     rd_pick_palette_intra_sbuv(
@@ -1553,8 +1560,8 @@ int av1_search_palette_mode(const AV1_COMP *cpi, MACROBLOCK *x,
   rd_pick_palette_intra_sby(
       cpi, x, bsize, intra_mode_cost[DC_PRED], &best_mbmi_palette,
       best_palette_color_map, &best_rd_palette, &best_model_rd_palette,
-      &rd_stats_y.rate, NULL, &rd_stats_y.dist, &rd_stats_y.skip, NULL, ctx,
-      best_blk_skip, best_tx_type_map);
+      &rd_stats_y.rate, NULL, &rd_stats_y.dist, &rd_stats_y.skip_txfm, NULL,
+      ctx, best_blk_skip, best_tx_type_map);
   if (rd_stats_y.rate == INT_MAX || pmi->palette_size[0] == 0) {
     this_rd_cost->rdcost = INT64_MAX;
     return skippable;
@@ -1566,7 +1573,7 @@ int av1_search_palette_mode(const AV1_COMP *cpi, MACROBLOCK *x,
   memcpy(color_map, best_palette_color_map,
          rows * cols * sizeof(best_palette_color_map[0]));
 
-  skippable = rd_stats_y.skip;
+  skippable = rd_stats_y.skip_txfm;
   distortion2 = rd_stats_y.dist;
   rate2 = rd_stats_y.rate + ref_costs_single[INTRA_FRAME];
   if (num_planes > 1) {
@@ -1595,9 +1602,9 @@ int av1_search_palette_mode(const AV1_COMP *cpi, MACROBLOCK *x,
   if (skippable) {
     rate2 -= rd_stats_y.rate;
     if (num_planes > 1) rate2 -= intra_search_state->rate_uv_tokenonly;
-    rate2 += x->skip_cost[av1_get_skip_context(xd)][1];
+    rate2 += x->skip_txfm_cost[av1_get_skip_txfm_context(xd)][1];
   } else {
-    rate2 += x->skip_cost[av1_get_skip_context(xd)][0];
+    rate2 += x->skip_txfm_cost[av1_get_skip_txfm_context(xd)][0];
   }
   this_rd = RDCOST(x->rdmult, rate2, distortion2);
   this_rd_cost->rate = rate2;
@@ -1618,12 +1625,12 @@ static AOM_INLINE int intra_block_yrd(const AV1_COMP *const cpi, MACROBLOCK *x,
   RD_STATS rd_stats;
   // In order to improve txfm search avoid rd based breakouts during winner
   // mode evaluation. Hence passing ref_best_rd as a maximum value
-  av1_super_block_yrd(cpi, x, &rd_stats, bsize, INT64_MAX);
+  av1_pick_uniform_tx_size_type_yrd(cpi, x, &rd_stats, bsize, INT64_MAX);
   if (rd_stats.rate == INT_MAX) return 0;
   int this_rate_tokenonly = rd_stats.rate;
   if (!xd->lossless[mbmi->segment_id] && block_signals_txsize(mbmi->sb_type)) {
-    // av1_super_block_yrd above includes the cost of the tx_size in the
-    // tokenonly rate, but for intra blocks, tx_size is always coded
+    // av1_pick_uniform_tx_size_type_yrd above includes the cost of the tx_size
+    // in the tokenonly rate, but for intra blocks, tx_size is always coded
     // (prediction granularity), so we account for it in the full rate,
     // not the tokenonly rate.
     this_rate_tokenonly -= tx_size_cost(x, bsize, mbmi->tx_size);
@@ -1638,7 +1645,7 @@ static AOM_INLINE int intra_block_yrd(const AV1_COMP *const cpi, MACROBLOCK *x,
     *rate = this_rate;
     *rate_tokenonly = this_rate_tokenonly;
     *distortion = rd_stats.dist;
-    *skippable = rd_stats.skip;
+    *skippable = rd_stats.skip_txfm;
     av1_copy_array(ctx->blk_skip, x->blk_skip, ctx->num_4x4_blk);
     av1_copy_array(ctx->tx_type_map, xd->tx_type_map, ctx->num_4x4_blk);
     return 1;
@@ -1719,7 +1726,8 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
                               const PICK_MODE_CONTEXT *ctx, int disable_skip,
                               RD_STATS *rd_stats, RD_STATS *rd_stats_y,
                               RD_STATS *rd_stats_uv, int64_t best_rd,
-                              int64_t *best_intra_rd, int8_t best_mbmode_skip) {
+                              int64_t *best_intra_rd,
+                              int8_t best_mbmode_skip_txfm) {
   const AV1_COMMON *cm = &cpi->common;
   const SPEED_FEATURES *const sf = &cpi->sf;
   MACROBLOCKD *const xd = &x->e_mbd;
@@ -1729,13 +1737,15 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
   const int mode_cost =
       x->mbmode_cost[size_group_lookup[bsize]][mode] + ref_frame_cost;
   const int intra_cost_penalty = av1_get_intra_cost_penalty(
-      cm->base_qindex, cm->y_dc_delta_q, cm->seq_params.bit_depth);
-  const int skip_ctx = av1_get_skip_context(xd);
+      cm->quant_params.base_qindex, cm->quant_params.y_dc_delta_q,
+      cm->seq_params.bit_depth);
+  const int skip_ctx = av1_get_skip_txfm_context(xd);
 
   int known_rate = mode_cost;
   known_rate += ref_frame_cost;
   if (mode != DC_PRED && mode != PAETH_PRED) known_rate += intra_cost_penalty;
-  known_rate += AOMMIN(x->skip_cost[skip_ctx][0], x->skip_cost[skip_ctx][1]);
+  known_rate +=
+      AOMMIN(x->skip_txfm_cost[skip_ctx][0], x->skip_txfm_cost[skip_ctx][1]);
   const int64_t known_rd = RDCOST(x->rdmult, known_rate, 0);
   if (known_rd > best_rd) {
     intra_search_state->skip_intra_modes = 1;
@@ -1763,7 +1773,7 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
   } else {
     av1_init_rd_stats(rd_stats_y);
     mbmi->angle_delta[PLANE_TYPE_Y] = 0;
-    av1_super_block_yrd(cpi, x, rd_stats_y, bsize, best_rd);
+    av1_pick_uniform_tx_size_type_yrd(cpi, x, rd_stats_y, bsize, best_rd);
   }
 
   // Pick filter intra modes.
@@ -1776,7 +1786,7 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
       best_rd_so_far = RDCOST(x->rdmult, tmp_rate, rd_stats_y->dist);
       try_filter_intra = (best_rd_so_far / 2) <= best_rd;
     } else {
-      try_filter_intra = !best_mbmode_skip;
+      try_filter_intra = !best_mbmode_skip_txfm;
     }
 
     if (try_filter_intra) {
@@ -1793,7 +1803,8 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
       for (FILTER_INTRA_MODE fi_mode = FILTER_DC_PRED;
            fi_mode < FILTER_INTRA_MODES; ++fi_mode) {
         mbmi->filter_intra_mode_info.filter_intra_mode = fi_mode;
-        av1_super_block_yrd(cpi, x, &rd_stats_y_fi, bsize, best_rd);
+        av1_pick_uniform_tx_size_type_yrd(cpi, x, &rd_stats_y_fi, bsize,
+                                          best_rd);
         if (rd_stats_y_fi.rate == INT_MAX) continue;
         const int this_rate_tmp =
             rd_stats_y_fi.rate +
@@ -1841,11 +1852,12 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
     PALETTE_MODE_INFO *const pmi = &mbmi->palette_mode_info;
     const int try_palette =
         cpi->oxcf.enable_palette &&
-        av1_allow_palette(cm->allow_screen_content_tools, mbmi->sb_type);
+        av1_allow_palette(cm->features.allow_screen_content_tools,
+                          mbmi->sb_type);
     const TX_SIZE uv_tx = av1_get_tx_size(AOM_PLANE_U, xd);
     if (intra_search_state->rate_uv_intra == INT_MAX) {
-      const int rate_y =
-          rd_stats_y->skip ? x->skip_cost[skip_ctx][1] : rd_stats_y->rate;
+      const int rate_y = rd_stats_y->skip_txfm ? x->skip_txfm_cost[skip_ctx][1]
+                                               : rd_stats_y->rate;
       const int64_t rdy =
           RDCOST(x->rdmult, rate_y + mode_cost_y, rd_stats_y->dist);
       if (best_rd < (INT64_MAX / 2) && rdy > (best_rd + (best_rd >> 2))) {
@@ -1870,8 +1882,8 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
 
     rd_stats_uv->rate = intra_search_state->rate_uv_tokenonly;
     rd_stats_uv->dist = intra_search_state->dist_uvs;
-    rd_stats_uv->skip = intra_search_state->skip_uvs;
-    rd_stats->skip = rd_stats_y->skip && rd_stats_uv->skip;
+    rd_stats_uv->skip_txfm = intra_search_state->skip_uvs;
+    rd_stats->skip_txfm = rd_stats_y->skip_txfm && rd_stats_uv->skip_txfm;
     mbmi->uv_mode = intra_search_state->mode_uv;
     if (try_palette) {
       pmi->palette_size[1] = intra_search_state->pmi_uv.palette_size[1];
@@ -1884,8 +1896,8 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
 
   rd_stats->rate = rd_stats_y->rate + mode_cost_y;
   if (!xd->lossless[mbmi->segment_id] && block_signals_txsize(bsize)) {
-    // av1_super_block_yrd above includes the cost of the tx_size in the
-    // tokenonly rate, but for intra blocks, tx_size is always coded
+    // av1_pick_uniform_tx_size_type_yrd above includes the cost of the tx_size
+    // in the tokenonly rate, but for intra blocks, tx_size is always coded
     // (prediction granularity), so we account for it in the full rate,
     // not the tokenonly rate.
     rd_stats_y->rate -= tx_size_cost(x, bsize, mbmi->tx_size);
@@ -1902,10 +1914,10 @@ int64_t av1_handle_intra_mode(IntraModeSearchState *intra_search_state,
   }
 
   // Intra block is always coded as non-skip
-  rd_stats->skip = 0;
+  rd_stats->skip_txfm = 0;
   rd_stats->dist = rd_stats_y->dist + rd_stats_uv->dist;
   // Add in the cost of the no skip flag.
-  rd_stats->rate += x->skip_cost[skip_ctx][0];
+  rd_stats->rate += x->skip_txfm_cost[skip_ctx][0];
   // Calculate the final RD estimate for this mode.
   const int64_t this_rd = RDCOST(x->rdmult, rd_stats->rate, rd_stats->dist);
   // Keep record of best intra rd
@@ -1947,7 +1959,8 @@ int64_t av1_rd_pick_intra_sby_mode(const AV1_COMP *const cpi, MACROBLOCK *x,
   PALETTE_MODE_INFO *const pmi = &mbmi->palette_mode_info;
   const int try_palette =
       cpi->oxcf.enable_palette &&
-      av1_allow_palette(cpi->common.allow_screen_content_tools, mbmi->sb_type);
+      av1_allow_palette(cpi->common.features.allow_screen_content_tools,
+                        mbmi->sb_type);
   uint8_t *best_palette_color_map =
       try_palette ? x->palette_buffer->best_palette_color_map : NULL;
   const MB_MODE_INFO *above_mi = xd->above_mbmi;
@@ -2002,19 +2015,19 @@ int64_t av1_rd_pick_intra_sby_mode(const AV1_COMP *const cpi, MACROBLOCK *x,
                               bmode_costs[mbmi->mode], best_rd, &best_model_rd,
                               1);
     } else {
-      av1_super_block_yrd(cpi, x, &this_rd_stats, bsize, best_rd);
+      av1_pick_uniform_tx_size_type_yrd(cpi, x, &this_rd_stats, bsize, best_rd);
     }
     this_rate_tokenonly = this_rd_stats.rate;
     this_distortion = this_rd_stats.dist;
-    s = this_rd_stats.skip;
+    s = this_rd_stats.skip_txfm;
 
     if (this_rate_tokenonly == INT_MAX) continue;
 
     if (!xd->lossless[mbmi->segment_id] &&
         block_signals_txsize(mbmi->sb_type)) {
-      // av1_super_block_yrd above includes the cost of the tx_size in the
-      // tokenonly rate, but for intra blocks, tx_size is always coded
-      // (prediction granularity), so we account for it in the full rate,
+      // av1_pick_uniform_tx_size_type_yrd above includes the cost of the
+      // tx_size in the tokenonly rate, but for intra blocks, tx_size is always
+      // coded (prediction granularity), so we account for it in the full rate,
       // not the tokenonly rate.
       this_rate_tokenonly -= tx_size_cost(x, bsize, mbmi->tx_size);
     }

@@ -507,18 +507,19 @@ void av1_decoder_model_init(const AV1_COMP *const cpi, AV1_LEVEL level,
   dfg_interval_queue->head = 0;
   dfg_interval_queue->size = 0;
 
-  if (cm->timing_info_present) {
+  if (seq_params->timing_info_present) {
     decoder_model->num_ticks_per_picture =
-        cm->timing_info.num_ticks_per_picture;
+        seq_params->timing_info.num_ticks_per_picture;
     decoder_model->display_clock_tick =
-        cm->timing_info.num_units_in_display_tick / cm->timing_info.time_scale;
+        seq_params->timing_info.num_units_in_display_tick /
+        seq_params->timing_info.time_scale;
   } else {
     decoder_model->num_ticks_per_picture = 1;
     decoder_model->display_clock_tick = 1.0 / cpi->framerate;
   }
 
   decoder_model->initial_display_delay =
-      cm->op_params[op_index].initial_display_delay;
+      seq_params->op_params[op_index].initial_display_delay;
   decoder_model->initial_presentation_delay = INVALID_TIME;
   decoder_model->decode_rate = av1_level_defs[level].max_decode_rate;
 }
@@ -688,7 +689,8 @@ void av1_decoder_model_process_frame(const AV1_COMP *const cpi,
 
 void av1_init_level_info(AV1_COMP *cpi) {
   for (int op_index = 0; op_index < MAX_NUM_OPERATING_POINTS; ++op_index) {
-    AV1LevelInfo *const this_level_info = cpi->level_info[op_index];
+    AV1LevelInfo *const this_level_info =
+        cpi->level_params.level_info[op_index];
     if (!this_level_info) continue;
     memset(this_level_info, 0, sizeof(*this_level_info));
     AV1LevelSpec *const level_spec = &this_level_info->level_spec;
@@ -903,14 +905,14 @@ static TARGET_LEVEL_FAIL_ID check_level_constraints(
   return fail_id;
 }
 
-static void get_tile_stats(const AV1_COMP *const cpi, int *max_tile_size,
-                           int *max_superres_tile_width,
+static void get_tile_stats(const AV1_COMMON *const cm,
+                           const TileDataEnc *const tile_data,
+                           int *max_tile_size, int *max_superres_tile_width,
                            int *min_cropped_tile_width,
                            int *min_cropped_tile_height,
                            int *tile_width_valid) {
-  const AV1_COMMON *const cm = &cpi->common;
-  const int tile_cols = cm->tile_cols;
-  const int tile_rows = cm->tile_rows;
+  const int tile_cols = cm->tiles.cols;
+  const int tile_rows = cm->tiles.rows;
   const int superres_scale_denominator = cm->superres_scale_denominator;
 
   *max_tile_size = 0;
@@ -922,7 +924,7 @@ static void get_tile_stats(const AV1_COMP *const cpi, int *max_tile_size,
   for (int tile_row = 0; tile_row < tile_rows; ++tile_row) {
     for (int tile_col = 0; tile_col < tile_cols; ++tile_col) {
       const TileInfo *const tile_info =
-          &cpi->tile_data[tile_row * cm->tile_cols + tile_col].tile_info;
+          &tile_data[tile_row * cm->tiles.cols + tile_col].tile_info;
       const int tile_width =
           (tile_info->mi_col_end - tile_info->mi_col_start) * MI_SIZE;
       const int tile_height =
@@ -944,7 +946,8 @@ static void get_tile_stats(const AV1_COMP *const cpi, int *max_tile_size,
       *min_cropped_tile_height =
           AOMMIN(*min_cropped_tile_height, cropped_tile_height);
 
-      const int is_right_most_tile = tile_info->mi_col_end == cm->mi_cols;
+      const int is_right_most_tile =
+          tile_info->mi_col_end == cm->mi_params.mi_cols;
       if (!is_right_most_tile) {
         if (av1_superres_scaled(cm))
           *tile_width_valid &= tile_width >= 128;
@@ -1045,14 +1048,16 @@ static void scan_past_frames(const FrameWindowBuffer *const buffer,
 void av1_update_level_info(AV1_COMP *cpi, size_t size, int64_t ts_start,
                            int64_t ts_end) {
   AV1_COMMON *const cm = &cpi->common;
+  const AV1LevelParams *const level_params = &cpi->level_params;
+
   const int upscaled_width = cm->superres_upscaled_width;
   const int width = cm->width;
   const int height = cm->height;
-  const int tile_cols = cm->tile_cols;
-  const int tile_rows = cm->tile_rows;
+  const int tile_cols = cm->tiles.cols;
+  const int tile_rows = cm->tiles.rows;
   const int tiles = tile_cols * tile_rows;
   const int luma_pic_size = upscaled_width * height;
-  const int frame_header_count = cpi->frame_header_count;
+  const int frame_header_count = level_params->frame_header_count;
   const int show_frame = cm->show_frame;
   const int show_existing_frame = cm->show_existing_frame;
 
@@ -1061,14 +1066,14 @@ void av1_update_level_info(AV1_COMP *cpi, size_t size, int64_t ts_start,
   int min_cropped_tile_height;
   int max_superres_tile_width;
   int tile_width_is_valid;
-  get_tile_stats(cpi, &max_tile_size, &max_superres_tile_width,
+  get_tile_stats(cm, cpi->tile_data, &max_tile_size, &max_superres_tile_width,
                  &min_cropped_tile_width, &min_cropped_tile_height,
                  &tile_width_is_valid);
 
   aom_clear_system_state();
   const double compression_ratio = av1_get_compression_ratio(cm, size);
   const double total_time_encoded =
-      (cpi->last_end_time_stamp_seen - cpi->first_time_stamp_ever) /
+      (cpi->time_stamps.prev_end_seen - cpi->time_stamps.first_ever) /
       (double)TICKS_PER_SEC;
 
   const int temporal_layer_id = cm->temporal_layer_id;
@@ -1081,11 +1086,11 @@ void av1_update_level_info(AV1_COMP *cpi, size_t size, int64_t ts_start,
   for (int i = 0; i < seq_params->operating_points_cnt_minus_1 + 1; ++i) {
     if (!is_in_operating_point(seq_params->operating_point_idc[i],
                                temporal_layer_id, spatial_layer_id) ||
-        !((cpi->keep_level_stats >> i) & 1)) {
+        !((level_params->keep_level_stats >> i) & 1)) {
       continue;
     }
 
-    AV1LevelInfo *const level_info = cpi->level_info[i];
+    AV1LevelInfo *const level_info = level_params->level_info[i];
     assert(level_info != NULL);
     AV1LevelStats *const level_stats = &level_info->level_stats;
 
@@ -1135,7 +1140,7 @@ void av1_update_level_info(AV1_COMP *cpi, size_t size, int64_t ts_start,
     }
 
     // Check whether target level is met.
-    const AV1_LEVEL target_level = cpi->target_seq_level_idx[i];
+    const AV1_LEVEL target_level = level_params->target_seq_level_idx[i];
     if (target_level < SEQ_LEVELS) {
       assert(is_valid_seq_level_idx(target_level));
       const int tier = seq_params->tier[i];
@@ -1153,15 +1158,16 @@ void av1_update_level_info(AV1_COMP *cpi, size_t size, int64_t ts_start,
   }
 }
 
-aom_codec_err_t av1_get_seq_level_idx(const AV1_COMP *cpi, int *seq_level_idx) {
-  const SequenceHeader *const seq_params = &cpi->common.seq_params;
+aom_codec_err_t av1_get_seq_level_idx(const SequenceHeader *seq_params,
+                                      const AV1LevelParams *level_params,
+                                      int *seq_level_idx) {
   const int is_still_picture = seq_params->still_picture;
   const BITSTREAM_PROFILE profile = seq_params->profile;
   for (int op = 0; op < seq_params->operating_points_cnt_minus_1 + 1; ++op) {
     seq_level_idx[op] = (int)SEQ_LEVEL_MAX;
-    if (!((cpi->keep_level_stats >> op) & 1)) continue;
+    if (!((level_params->keep_level_stats >> op) & 1)) continue;
     const int tier = seq_params->tier[op];
-    const AV1LevelInfo *const level_info = cpi->level_info[op];
+    const AV1LevelInfo *const level_info = level_params->level_info[op];
     assert(level_info != NULL);
     for (int level = 0; level < SEQ_LEVELS; ++level) {
       if (!is_valid_seq_level_idx(level)) continue;

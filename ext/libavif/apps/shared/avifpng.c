@@ -61,7 +61,11 @@ avifBool avifPNGRead(avifImage * avif, const char * inputFilename, avifPixelForm
     unsigned char * iccpData = NULL;
     png_uint_32 iccpDataLen = 0;
     if (png_get_iCCP(png, info, &iccpProfileName, &iccpCompression, &iccpData, &iccpDataLen) == PNG_INFO_iCCP) {
-        avifImageSetProfileICC(avif, iccpData, iccpDataLen);
+        if (avif->profileFormat == AVIF_PROFILE_FORMAT_NONE) {
+            avifImageSetProfileICC(avif, iccpData, iccpDataLen);
+        } else {
+            fprintf(stderr, "WARNING: PNG contains ICC profile which is being overridden with --nclx\n");
+        }
     }
 
     int rawWidth = png_get_image_width(png, info);
@@ -136,7 +140,7 @@ cleanup:
 
 avifBool avifPNGWrite(avifImage * avif, const char * outputFilename, int requestedDepth)
 {
-    avifBool writeResult = AVIF_FALSE;
+    avifBool volatile writeResult = AVIF_FALSE; // volatile avoids -Wclobbered due to libpng's setjmp
     png_structp png = NULL;
     png_infop info = NULL;
     png_bytep * volatile rowPointers = NULL; // volatile avoids -Wclobbered due to libpng's setjmp
@@ -201,6 +205,7 @@ avifBool avifPNGWrite(avifImage * avif, const char * outputFilename, int request
     png_write_end(png, NULL);
 
     writeResult = AVIF_TRUE;
+    printf("Wrote: %s\n", outputFilename);
 cleanup:
     if (f) {
         fclose(f);

@@ -28,6 +28,9 @@ struct avifCodecInternal
 
 static void dav1dCodecDestroyInternal(avifCodec * codec)
 {
+    if (codec->internal->dav1dData.sz) {
+        dav1d_data_unref(&codec->internal->dav1dData);
+    }
     if (codec->internal->hasPicture) {
         dav1d_picture_unref(&codec->internal->dav1dPicture);
     }
@@ -41,8 +44,6 @@ static void dav1dCodecDestroyInternal(avifCodec * codec)
 static avifBool dav1dFeedData(avifCodec * codec)
 {
     if (!codec->internal->dav1dData.sz) {
-        dav1d_data_unref(&codec->internal->dav1dData);
-
         if (codec->internal->inputSampleIndex < codec->decodeInput->samples.count) {
             avifSample * sample = &codec->decodeInput->samples.sample[codec->internal->inputSampleIndex];
             ++codec->internal->inputSampleIndex;
@@ -149,7 +150,7 @@ static avifBool dav1dCodecGetNextImage(avifCodec * codec, avifImage * image)
             nclx.colourPrimaries = (uint16_t)dav1dImage->seq_hdr->pri;
             nclx.transferCharacteristics = (uint16_t)dav1dImage->seq_hdr->trc;
             nclx.matrixCoefficients = (uint16_t)dav1dImage->seq_hdr->mtrx;
-            nclx.fullRangeFlag = (uint8_t)image->yuvRange;
+            nclx.range = image->yuvRange;
             avifImageSetProfileNCLX(image, &nclx);
         }
 
@@ -201,5 +202,7 @@ avifCodec * avifCodecCreateDav1d(void)
     codec->internal = (struct avifCodecInternal *)avifAlloc(sizeof(struct avifCodecInternal));
     memset(codec->internal, 0, sizeof(struct avifCodecInternal));
     dav1d_default_settings(&codec->internal->dav1dSettings);
+    // Set a maximum frame size limit to avoid OOM'ing fuzzers.
+    codec->internal->dav1dSettings.frame_size_limit = 16384 * 16384;
     return codec;
 }

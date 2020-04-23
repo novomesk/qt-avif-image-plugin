@@ -134,7 +134,7 @@ static INLINE int av1_encoder_get_relative_dist(const OrderHintInfo *oh, int a,
 
 // This function will return number of mi's in a superblock.
 static INLINE int av1_get_sb_mi_size(const AV1_COMMON *const cm) {
-  const int mi_alloc_size_1d = mi_size_wide[cm->mi_alloc_bsize];
+  const int mi_alloc_size_1d = mi_size_wide[cm->mi_params.mi_alloc_bsize];
   int sb_mi_rows =
       (mi_size_wide[cm->seq_params.sb_size] + mi_alloc_size_1d - 1) /
       mi_alloc_size_1d;
@@ -221,6 +221,22 @@ static INLINE int prune_ref_by_selective_ref_frame(
 
   return 0;
 }
+
+// This function will copy the best reference mode information from
+// MB_MODE_INFO_EXT to MB_MODE_INFO_EXT_FRAME.
+static INLINE void av1_copy_mbmi_ext_to_mbmi_ext_frame(
+    MB_MODE_INFO_EXT_FRAME *mbmi_ext_best,
+    const MB_MODE_INFO_EXT *const mbmi_ext, uint8_t ref_frame_type) {
+  memcpy(mbmi_ext_best->ref_mv_stack, mbmi_ext->ref_mv_stack[ref_frame_type],
+         sizeof(mbmi_ext->ref_mv_stack[USABLE_REF_MV_STACK_SIZE]));
+  memcpy(mbmi_ext_best->weight, mbmi_ext->weight[ref_frame_type],
+         sizeof(mbmi_ext->weight[USABLE_REF_MV_STACK_SIZE]));
+  mbmi_ext_best->mode_context = mbmi_ext->mode_context[ref_frame_type];
+  mbmi_ext_best->ref_mv_count = mbmi_ext->ref_mv_count[ref_frame_type];
+  memcpy(mbmi_ext_best->global_mvs, mbmi_ext->global_mvs,
+         sizeof(mbmi_ext->global_mvs));
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

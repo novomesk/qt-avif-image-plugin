@@ -3,6 +3,7 @@
 
 #include "avif/avif.h"
 
+#include "avifjpeg.h"
 #include "avifpng.h"
 #include "avifutil.h"
 #include "y4m.h"
@@ -20,17 +21,17 @@
 
 static void syntax(void)
 {
-    printf("Syntax: avifenc [options] input.[png|y4m] output.avif\n");
+    printf("Syntax: avifenc [options] input.[jpg|png|y4m] output.avif\n");
     printf("Options:\n");
     printf("    -h,--help                         : Show syntax help\n");
     printf("    -j,--jobs J                       : Number of jobs (worker threads, default: 1)\n");
-    printf("    -d,--depth D                      : Output depth [8,10,12]. (PNG only; For y4m, depth is retained)\n");
-    printf("    -y,--yuv FORMAT                   : Output format [default=444, 422, 420]. (PNG only; For y4m, format is retained)\n");
-    printf("    -n,--nclx P/T/M/R                 : Set nclx colr box values (4 raw numbers)\n");
+    printf("    -d,--depth D                      : Output depth [8,10,12]. (JPEG/PNG only; For y4m, depth is retained)\n");
+    printf("    -y,--yuv FORMAT                   : Output format [default=444, 422, 420]. (JPEG/PNG only; For y4m, format is retained)\n");
+    printf("    -n,--nclx P/T/M                   : Set nclx colr box values (3 raw numbers, use -r to set range flag)\n");
     printf("                                        P = enum avifNclxColourPrimaries\n");
     printf("                                        T = enum avifNclxTransferCharacteristics\n");
     printf("                                        M = enum avifNclxMatrixCoefficients\n");
-    printf("                                        R = avifNclxRangeFlag (any nonzero value becomes AVIF_NCLX_FULL_RANGE)\n");
+    printf("    -r,--range RANGE                  : YUV range [limited, full]. (JPEG/PNG only; For y4m, range is retained)\n");
     printf("    --min Q                           : Set min quantizer for color (%d-%d, where %d is lossless)\n",
            AVIF_QUANTIZER_BEST_QUALITY,
            AVIF_QUANTIZER_WORST_QUALITY,
@@ -47,7 +48,9 @@ static void syntax(void)
            AVIF_QUANTIZER_BEST_QUALITY,
            AVIF_QUANTIZER_WORST_QUALITY,
            AVIF_QUANTIZER_LOSSLESS);
-    printf("    -s,--speed S                      : Encoder speed (%d-%d, slowest to fastest)\n", AVIF_SPEED_SLOWEST, AVIF_SPEED_FASTEST);
+    printf("    -s,--speed S                      : Encoder speed (%d-%d, slowest-fastest, 'default' for codec internal defaults. default speed: 8)\n",
+           AVIF_SPEED_SLOWEST,
+           AVIF_SPEED_FASTEST);
     printf("    -c,--codec C                      : AV1 codec to use (choose from versions list below)\n");
     printf("    --pasp H,V                        : Add pasp property (aspect ratio). H=horizontal spacing, V=vertical spacing\n");
     printf("    --clap WN,WD,HN,HD,HON,HOD,VON,VOD: Add clap property (clean aperture). Width, Height, HOffset, VOffset (in num/denom pairs)\n");
@@ -81,24 +84,24 @@ static avifBool parseNCLX(avifNclxColorProfile * nclx, const char * arg)
     strncpy(buffer, arg, 127);
     buffer[127] = 0;
 
-    int values[4];
+    int values[3];
     int index = 0;
     char * token = strtok(buffer, "/");
     while (token != NULL) {
         values[index] = atoi(token);
         ++index;
-        if (index >= 4) {
+        if (index >= 3) {
             break;
         }
 
         token = strtok(NULL, "/");
     }
 
-    if (index == 4) {
+    if (index == 3) {
         nclx->colourPrimaries = (uint16_t)values[0];
         nclx->transferCharacteristics = (uint16_t)values[1];
         nclx->matrixCoefficients = (uint16_t)values[2];
-        nclx->fullRangeFlag = values[3] ? AVIF_NCLX_FULL_RANGE : AVIF_NCLX_LIMITED_RANGE;
+        nclx->range = AVIF_RANGE_FULL; // This will be set later
         return AVIF_TRUE;
     }
     return AVIF_FALSE;
@@ -139,10 +142,10 @@ int main(int argc, char * argv[])
     avifPixelFormat requestedFormat = AVIF_PIXEL_FORMAT_YUV444;
     int requestedDepth = 0;
     int minQuantizer = AVIF_QUANTIZER_BEST_QUALITY;
-    int maxQuantizer = AVIF_QUANTIZER_BEST_QUALITY;
+    int maxQuantizer = 10; // "High Quality", but not lossless
     int minQuantizerAlpha = AVIF_QUANTIZER_LOSSLESS;
     int maxQuantizerAlpha = AVIF_QUANTIZER_LOSSLESS;
-    int speed = AVIF_SPEED_DEFAULT;
+    int speed = 8;
     int paspCount = 0;
     uint32_t paspValues[8]; // only the first two are used
     int clapCount = 0;
@@ -150,6 +153,8 @@ int main(int argc, char * argv[])
     uint8_t irotAngle = 0xff; // sentinel value indicating "unused"
     uint8_t imirAxis = 0xff;  // sentinel value indicating "unused"
     avifCodecChoice codecChoice = AVIF_CODEC_CHOICE_AUTO;
+    avifRange requestedRange = AVIF_RANGE_FULL;
+    avifBool requestedRangeSet = AVIF_FALSE;
     avifBool nclxSet = AVIF_FALSE;
     avifEncoder * encoder = NULL;
 
@@ -230,14 +235,29 @@ int main(int argc, char * argv[])
                 return 1;
             }
             nclxSet = AVIF_TRUE;
+        } else if (!strcmp(arg, "-r") || !strcmp(arg, "--range")) {
+            NEXTARG();
+            if (!strcmp(arg, "limited") || !strcmp(arg, "l")) {
+                requestedRange = AVIF_RANGE_LIMITED;
+            } else if (!strcmp(arg, "full") || !strcmp(arg, "f")) {
+                requestedRange = AVIF_RANGE_FULL;
+            } else {
+                fprintf(stderr, "ERROR: Unknown range: %s\n", arg);
+                return 1;
+            }
+            requestedRangeSet = AVIF_TRUE;
         } else if (!strcmp(arg, "-s") || !strcmp(arg, "--speed")) {
             NEXTARG();
-            speed = atoi(arg);
-            if (speed > AVIF_SPEED_FASTEST) {
-                speed = AVIF_SPEED_FASTEST;
-            }
-            if (speed < AVIF_SPEED_SLOWEST) {
-                speed = AVIF_SPEED_SLOWEST;
+            if (!strcmp(arg, "default") || !strcmp(arg, "d")) {
+                speed = AVIF_SPEED_DEFAULT;
+            } else {
+                speed = atoi(arg);
+                if (speed > AVIF_SPEED_FASTEST) {
+                    speed = AVIF_SPEED_FASTEST;
+                }
+                if (speed < AVIF_SPEED_SLOWEST) {
+                    speed = AVIF_SPEED_SLOWEST;
+                }
             }
         } else if (!strcmp(arg, "-c") || !strcmp(arg, "--codec")) {
             NEXTARG();
@@ -305,24 +325,48 @@ int main(int argc, char * argv[])
     avifImage * avif = avifImageCreateEmpty();
     avifRWData raw = AVIF_DATA_EMPTY;
 
+    // Set range and nclx in advance so any upcoming RGB -> YUV use the proper coefficients
+    if (requestedRangeSet) {
+        avif->yuvRange = requestedRange;
+    }
+    if (nclxSet) {
+        nclx.range = avif->yuvRange;
+        avifImageSetProfileNCLX(avif, &nclx);
+    }
+
     const char * fileExt = strrchr(inputFilename, '.');
-    if (fileExt && (!strcmp(fileExt, ".y4m"))) {
+    if (!fileExt) {
+        fprintf(stderr, "Cannot determine input file extension: %s\n", inputFilename);
+        return 1;
+    }
+    if (!strcmp(fileExt, ".y4m")) {
+        if (requestedRangeSet) {
+            fprintf(stderr, "WARNING: Ignoring range (-r) value when encoding from y4m content.\n");
+        }
         if (!y4mRead(avif, inputFilename)) {
             returnCode = 1;
             goto cleanup;
         }
-    } else {
+        if (nclxSet && (nclx.range != avif->yuvRange)) {
+            // Update the NCLX profile based on the new range from the y4m file
+            nclx.range = avif->yuvRange;
+            avifImageSetProfileNCLX(avif, &nclx);
+        }
+    } else if (!strcmp(fileExt, ".jpg") || !strcmp(fileExt, ".jpeg")) {
+        if (!avifJPEGRead(avif, inputFilename, requestedFormat, requestedDepth)) {
+            returnCode = 1;
+            goto cleanup;
+        }
+    } else if (!strcmp(fileExt, ".png")) {
         if (!avifPNGRead(avif, inputFilename, requestedFormat, requestedDepth)) {
             returnCode = 1;
             goto cleanup;
         }
+    } else {
+        fprintf(stderr, "Unrecognized file extension: %s\n", fileExt + 1);
+        return 1;
     }
     printf("Successfully loaded: %s\n", inputFilename);
-
-    if (nclxSet) {
-        avif->profileFormat = AVIF_PROFILE_FORMAT_NCLX;
-        memcpy(&avif->nclx, &nclx, sizeof(nclx));
-    }
 
     if (paspCount == 2) {
         avif->transformFlags |= AVIF_TRANSFORM_PASP;
@@ -352,8 +396,9 @@ int main(int argc, char * argv[])
     printf("AVIF to be written:\n");
     avifImageDump(avif);
 
-    printf("Encoding with AV1 codec '%s', color QP [%d (%s) <-> %d (%s)], alpha QP [%d (%s) <-> %d (%s)], %d worker thread(s), please wait...\n",
+    printf("Encoding with AV1 codec '%s' speed [%d], color QP [%d (%s) <-> %d (%s)], alpha QP [%d (%s) <-> %d (%s)], %d worker thread(s), please wait...\n",
            avifCodecName(codecChoice, AVIF_CODEC_FLAG_CAN_ENCODE),
+           speed,
            minQuantizer,
            quantizerString(minQuantizer),
            maxQuantizer,

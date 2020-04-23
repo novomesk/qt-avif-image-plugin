@@ -1284,13 +1284,12 @@ typedef enum {
  *
  */
 typedef enum {
-  AOM_TUNE_PSNR,
-  AOM_TUNE_SSIM,
-  AOM_TUNE_CDEF_DIST,   // Unused
-  AOM_TUNE_DAALA_DIST,  // Unused
-  AOM_TUNE_VMAF_WITH_PREPROCESSING,
-  AOM_TUNE_VMAF_WITHOUT_PREPROCESSING,
-  AOM_TUNE_VMAF_MAX_GAIN
+  AOM_TUNE_PSNR = 0,
+  AOM_TUNE_SSIM = 1,
+  /* NOTE: enums 2 and 3 unused */
+  AOM_TUNE_VMAF_WITH_PREPROCESSING = 4,
+  AOM_TUNE_VMAF_WITHOUT_PREPROCESSING = 5,
+  AOM_TUNE_VMAF_MAX_GAIN = 6
 } aom_tune_metric;
 
 #define AOM_MAX_LAYERS 32   /**< Max number of layers */
@@ -1321,6 +1320,7 @@ typedef struct aom_svc_params {
 typedef struct aom_svc_ref_frame_config {
   // 7 references: LAST_FRAME (0), LAST2_FRAME(1), LAST3_FRAME(2),
   // GOLDEN_FRAME(3), BWDREF_FRAME(4), ALTREF2_FRAME(5), ALTREF_FRAME(6).
+  int reference[7]; /**< Reference flag for each of the 7 references. */
   /*! Buffer slot index for each of 7 references. */
   int ref_idx[7];
   int refresh[8]; /**< Refresh flag for each of the 8 slots. */
@@ -1625,10 +1625,10 @@ AOM_CTRL_USE_TYPE(AV1E_SET_FILM_GRAIN_TABLE, const char *)
 AOM_CTRL_USE_TYPE(AV1E_SET_CDF_UPDATE_MODE, unsigned int)
 #define AOM_CTRL_AV1E_SET_CDF_UPDATE_MODE
 
-AOM_CTRL_USE_TYPE(AV1E_SET_DENOISE_NOISE_LEVEL, int);
+AOM_CTRL_USE_TYPE(AV1E_SET_DENOISE_NOISE_LEVEL, int)
 #define AOM_CTRL_AV1E_SET_DENOISE_NOISE_LEVEL
 
-AOM_CTRL_USE_TYPE(AV1E_SET_DENOISE_BLOCK_SIZE, unsigned int);
+AOM_CTRL_USE_TYPE(AV1E_SET_DENOISE_BLOCK_SIZE, unsigned int)
 #define AOM_CTRL_AV1E_SET_DENOISE_BLOCK_SIZE
 
 AOM_CTRL_USE_TYPE(AV1E_SET_CHROMA_SUBSAMPLING_X, unsigned int)

@@ -27,8 +27,6 @@
 extern "C" {
 #endif
 
-// 1: use classic model 0: use count or saving stats
-#define USE_TPL_CLASSIC_MODEL 0
 #define MC_FLOW_BSIZE_1D 16
 #define MC_FLOW_NUM_PELS (MC_FLOW_BSIZE_1D * MC_FLOW_BSIZE_1D)
 #define MAX_MC_FLOW_BLK_IN_SB (MAX_SB_SIZE / MC_FLOW_BSIZE_1D)
@@ -50,8 +48,16 @@ typedef struct {
   unsigned int var;
 } DIFF;
 
+enum {
+  NO_TRELLIS_OPT,          // No trellis optimization
+  FULL_TRELLIS_OPT,        // Trellis optimization in all stages
+  FINAL_PASS_TRELLIS_OPT,  // Trellis optimization in only the final encode pass
+  NO_ESTIMATE_YRD_TRELLIS_OPT  // Disable trellis in estimate_yrd_for_sb
+} UENUM1BYTE(TRELLIS_OPT_TYPE);
+
 typedef struct macroblock_plane {
   DECLARE_ALIGNED(32, int16_t, src_diff[MAX_SB_SQUARE]);
+  tran_low_t *dqcoeff;
   tran_low_t *qcoeff;
   tran_low_t *coeff;
   uint16_t *eobs;
@@ -102,7 +108,7 @@ typedef struct {
   uint8_t ref_mv_count[MODE_CTX_REF_FRAMES];
 } MB_MODE_INFO_EXT;
 
-// Structure to store winner reference mode information at frame level. This
+// Structure to store best mode information at frame level. This
 // frame level information will be used during bitstream preparation stage.
 typedef struct {
   CANDIDATE_MV ref_mv_stack[USABLE_REF_MV_STACK_SIZE];
@@ -169,8 +175,8 @@ typedef struct {
   RD_STATS rd_stats_uv;
   uint8_t blk_skip[MAX_MIB_SIZE * MAX_MIB_SIZE];
   uint8_t tx_type_map[MAX_MIB_SIZE * MAX_MIB_SIZE];
-  uint8_t skip;
-  uint8_t disable_skip;
+  uint8_t skip_txfm;
+  uint8_t disable_skip_txfm;
   uint8_t early_skipped;
 } SimpleRDState;
 
@@ -204,13 +210,28 @@ typedef struct {
   uint8_t *tmp_best_mask_buf;  // backup of the best segmentation mask
 } CompoundTypeRdBuffers;
 
-enum {
-  MV_COST_ENTROPY,    // Use the entropy rate of the mv as the cost
-  MV_COST_L1_LOWRES,  // Use the l1 norm of the mv as the cost (<480p)
-  MV_COST_L1_MIDRES,  // Use the l1 norm of the mv as the cost (>=480p)
-  MV_COST_L1_HDRES,   // Use the l1 norm of the mv as the cost (>=720p)
-  MV_COST_NONE        // Use 0 as as cost irrespective of the current mv
-} UENUM1BYTE(MV_COST_TYPE);
+typedef struct {
+  // A multiplier that converts mv cost to l2 error.
+  int errorperbit;
+  // A multiplier that converts mv cost to l1 error.
+  int sadperbit;
+
+  int nmv_joint_cost[MV_JOINTS];
+
+  // Below are the entropy costs needed to encode a given mv.
+  // nmv_costs_(hp_)alloc are two arrays that holds the memory
+  // for holding the mv cost. But since the motion vectors can be negative, we
+  // shift them to the middle and store the resulting pointer in nmvcost(_hp)
+  // for easier referencing. Finally, nmv_cost_stack points to the nmvcost array
+  // with the mv precision we are currently working with. In essence, only
+  // mv_cost_stack is needed for motion search, the other can be considered
+  // private.
+  int nmv_cost_alloc[2][MV_VALS];
+  int nmv_cost_hp_alloc[2][MV_VALS];
+  int *nmv_cost[2];
+  int *nmv_cost_hp[2];
+  int **mv_cost_stack;
+} MvCostInfo;
 
 struct inter_modes_info;
 typedef struct macroblock MACROBLOCK;
@@ -247,15 +268,6 @@ struct macroblock {
   int skip_block;
   int qindex;
 
-  // The equivalent error at the current rdmult of one whole bit (not one
-  // bitcost unit).
-  int errorperbit;
-  // The equivalend SAD error of one (whole) bit at the current quantizer
-  // for large blocks.
-  int sadperbit16;
-  // The equivalent SAD error of one (whole) bit at the current quantizer
-  // for sub-8x8 blocks.
-  int sadperbit4;
   int rdmult;
   int mb_energy;
   int sb_energy_level;
@@ -276,13 +288,6 @@ struct macroblock {
   unsigned int pred_sse[REF_FRAMES];
   int pred_mv_sad[REF_FRAMES];
   int best_pred_mv_sad;
-
-  int nmv_vec_cost[MV_JOINTS];
-  int nmv_costs[2][MV_VALS];
-  int nmv_costs_hp[2][MV_VALS];
-  int *nmvcost[2];
-  int *nmvcost_hp[2];
-  int **mv_cost_stack;
 
   int32_t *wsrc_buf;
   int32_t *mask_buf;
@@ -305,29 +310,28 @@ struct macroblock {
 
   struct inter_modes_info *inter_modes_info;
 
-  // buffer for hash value calculation of a block
-  // used only in av1_get_block_hash_value()
-  // [first hash/second hash]
-  // [two buffers used ping-pong]
-  uint32_t *hash_value_buffer[2][2];
-
-  CRC_CALCULATOR crc_calculator1;
-  CRC_CALCULATOR crc_calculator2;
-  int g_crc_initialized;
+  // Contains the hash table, hash function, and buffer used for intrabc
+  IntraBCHashInfo intrabc_hash_info;
 
   // These define limits to motion vector components to prevent them
   // from extending outside the UMV borders
   FullMvLimits mv_limits;
 
+  // Stores the entropy cost needed to encode a motion vector.
+  MvCostInfo mv_cost_info;
+
   uint8_t blk_skip[MAX_MIB_SIZE * MAX_MIB_SIZE];
   uint8_t tx_type_map[MAX_MIB_SIZE * MAX_MIB_SIZE];
 
-  // Force the coding block to skip transform and quantization.
-  int force_skip;
-  int skip_cost[SKIP_CONTEXTS][2];
+  // Forces the coding block to skip transform and quantization.
+  int skip_txfm;
+  int skip_txfm_cost[SKIP_CONTEXTS][2];
 
+  // Skip mode tries to use the closest forward and backward references for
+  // inter prediction. Skip here means to skip transmitting the reference
+  // frames, not to be confused with skip_txfm.
   int skip_mode;  // 0: off; 1: on
-  int skip_mode_cost[SKIP_CONTEXTS][2];
+  int skip_mode_cost[SKIP_MODE_CONTEXTS][2];
 
   LV_MAP_COEFF_COST coeff_costs[TX_SIZES][PLANE_TYPES];
   LV_MAP_EOB_COST eob_costs[7][2];
@@ -391,12 +395,6 @@ struct macroblock {
 
   // Used to store sub partition's choices.
   MV pred_mv[REF_FRAMES];
-
-  // Store the best motion vector during motion search
-  int_mv best_mv;
-
-  // Store the fractional best motion vector during sub/Qpel-pixel motion search
-  int_mv fractional_best_mv[3];
 
   // Ref frames that are selected by square partition blocks within a super-
   // block, in MI resolution. They can be used to prune ref frames for
@@ -473,12 +471,11 @@ struct macroblock {
   int valid_cost_b;
   int64_t inter_cost_b[MAX_MC_FLOW_BLK_IN_SB * MAX_MC_FLOW_BLK_IN_SB];
   int64_t intra_cost_b[MAX_MC_FLOW_BLK_IN_SB * MAX_MC_FLOW_BLK_IN_SB];
+  int_mv mv_b[MAX_MC_FLOW_BLK_IN_SB * MAX_MC_FLOW_BLK_IN_SB]
+             [INTER_REFS_PER_FRAME];
   int cost_stride;
 
-  // The type of mv cost used during motion search
-  MV_COST_TYPE mv_cost_type;
-
-  int search_ref_frame[REF_FRAMES];
+  uint8_t search_ref_frame[REF_FRAMES];
 
 #if CONFIG_AV1_HIGHBITDEPTH
   void (*fwd_txfm4x4)(const int16_t *input, tran_low_t *output, int stride);

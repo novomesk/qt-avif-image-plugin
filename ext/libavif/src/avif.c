@@ -154,7 +154,7 @@ void avifImageCopy(avifImage * dstImage, avifImage * srcImage)
 
         avifPixelFormatInfo formatInfo;
         avifGetPixelFormatInfo(srcImage->yuvFormat, &formatInfo);
-        int uvHeight = dstImage->height >> formatInfo.chromaShiftY;
+        int uvHeight = (dstImage->height + formatInfo.chromaShiftY) >> formatInfo.chromaShiftY;
         for (int yuvPlane = 0; yuvPlane < 3; ++yuvPlane) {
             int aomPlaneIndex = yuvPlane;
             int planeHeight = dstImage->height;
@@ -243,14 +243,8 @@ void avifImageAllocatePlanes(avifImage * image, uint32_t planes)
         avifPixelFormatInfo info;
         avifGetPixelFormatInfo(image->yuvFormat, &info);
 
-        int shiftedW = image->width;
-        if (info.chromaShiftX) {
-            shiftedW = (image->width + 1) >> info.chromaShiftX;
-        }
-        int shiftedH = image->height;
-        if (info.chromaShiftY) {
-            shiftedH = (image->height + 1) >> info.chromaShiftY;
-        }
+        int shiftedW = (image->width + info.chromaShiftX) >> info.chromaShiftX;
+        int shiftedH = (image->height + info.chromaShiftY) >> info.chromaShiftY;
 
         int uvRowBytes = channelSize * shiftedW;
         int uvSize = uvRowBytes * shiftedH;
@@ -428,11 +422,11 @@ static struct AvailableCodec availableCodecs[] = {
 #if defined(AVIF_CODEC_LIBGAV1)
     { AVIF_CODEC_CHOICE_LIBGAV1, "libgav1", avifCodecVersionGav1, avifCodecCreateGav1, AVIF_CODEC_FLAG_CAN_DECODE },
 #endif
-#if defined(AVIF_CODEC_RAV1E)
-    { AVIF_CODEC_CHOICE_RAV1E, "rav1e", avifCodecVersionRav1e, avifCodecCreateRav1e, AVIF_CODEC_FLAG_CAN_ENCODE },
-#endif
 #if defined(AVIF_CODEC_AOM)
     { AVIF_CODEC_CHOICE_AOM, "aom", avifCodecVersionAOM, avifCodecCreateAOM, AVIF_CODEC_FLAG_CAN_DECODE | AVIF_CODEC_FLAG_CAN_ENCODE },
+#endif
+#if defined(AVIF_CODEC_RAV1E)
+    { AVIF_CODEC_CHOICE_RAV1E, "rav1e", avifCodecVersionRav1e, avifCodecCreateRav1e, AVIF_CODEC_FLAG_CAN_ENCODE },
 #endif
     { AVIF_CODEC_CHOICE_AUTO, NULL, NULL, NULL, 0 }
 };
@@ -481,15 +475,31 @@ avifCodec * avifCodecCreate(avifCodecChoice choice, uint32_t requiredFlags)
     return NULL;
 }
 
+static void append(char ** writePos, size_t * remainingLen, const char * appendStr)
+{
+    size_t appendLen = strlen(appendStr);
+    if (appendLen > *remainingLen) {
+        appendLen = *remainingLen;
+    }
+
+    memcpy(*writePos, appendStr, appendLen);
+    *remainingLen -= appendLen;
+    *writePos += appendLen;
+    *(*writePos) = 0;
+}
+
 void avifCodecVersions(char outBuffer[256])
 {
-    outBuffer[0] = 0;
+    size_t remainingLen = 255;
+    char * writePos = outBuffer;
+    *writePos = 0;
+
     for (int i = 0; i < availableCodecsCount; ++i) {
         if (i > 0) {
-            strcat(outBuffer, ", ");
+            append(&writePos, &remainingLen, ", ");
         }
-        strcat(outBuffer, availableCodecs[i].name);
-        strcat(outBuffer, ":");
-        strcat(outBuffer, availableCodecs[i].version());
+        append(&writePos, &remainingLen, availableCodecs[i].name);
+        append(&writePos, &remainingLen, ":");
+        append(&writePos, &remainingLen, availableCodecs[i].version());
     }
 }

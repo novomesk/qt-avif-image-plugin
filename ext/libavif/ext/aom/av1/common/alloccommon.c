@@ -15,10 +15,10 @@
 #include "aom_mem/aom_mem.h"
 
 #include "av1/common/alloccommon.h"
+#include "av1/common/av1_common_int.h"
 #include "av1/common/blockd.h"
 #include "av1/common/entropymode.h"
 #include "av1/common/entropymv.h"
-#include "av1/common/onyxc_int.h"
 
 int av1_get_MBs(int width, int height) {
   const int aligned_width = ALIGN_POWER_OF_TWO(width, 3);
@@ -73,7 +73,7 @@ void av1_alloc_restoration_buffers(AV1_COMMON *cm) {
   // able to quickly answer the question "Where is the <n>'th stripe for tile
   // row <m>?" To make that efficient, we generate the rst_last_stripe array.
   int num_stripes = 0;
-  for (int i = 0; i < cm->tile_rows; ++i) {
+  for (int i = 0; i < cm->tiles.rows; ++i) {
     TileInfo tile_info;
     av1_tile_set_row(&tile_info, cm, i);
     const int mi_h = tile_info.mi_row_end - tile_info.mi_row_start;
@@ -132,101 +132,131 @@ void av1_free_restoration_buffers(AV1_COMMON *cm) {
   aom_free_frame_buffer(&cm->rst_frame);
 }
 
-void av1_free_above_context_buffers(AV1_COMMON *cm,
-                                    int num_free_above_contexts) {
+void av1_free_above_context_buffers(CommonContexts *above_contexts) {
   int i;
-  const int num_planes = cm->num_allocated_above_context_planes;
+  const int num_planes = above_contexts->num_planes;
 
-  for (int tile_row = 0; tile_row < num_free_above_contexts; tile_row++) {
+  for (int tile_row = 0; tile_row < above_contexts->num_tile_rows; tile_row++) {
     for (i = 0; i < num_planes; i++) {
-      aom_free(cm->above_context[i][tile_row]);
-      cm->above_context[i][tile_row] = NULL;
+      aom_free(above_contexts->entropy[i][tile_row]);
+      above_contexts->entropy[i][tile_row] = NULL;
     }
-    aom_free(cm->above_seg_context[tile_row]);
-    cm->above_seg_context[tile_row] = NULL;
+    aom_free(above_contexts->partition[tile_row]);
+    above_contexts->partition[tile_row] = NULL;
 
-    aom_free(cm->above_txfm_context[tile_row]);
-    cm->above_txfm_context[tile_row] = NULL;
+    aom_free(above_contexts->txfm[tile_row]);
+    above_contexts->txfm[tile_row] = NULL;
   }
   for (i = 0; i < num_planes; i++) {
-    aom_free(cm->above_context[i]);
-    cm->above_context[i] = NULL;
+    aom_free(above_contexts->entropy[i]);
+    above_contexts->entropy[i] = NULL;
   }
-  aom_free(cm->above_seg_context);
-  cm->above_seg_context = NULL;
+  aom_free(above_contexts->partition);
+  above_contexts->partition = NULL;
 
-  aom_free(cm->above_txfm_context);
-  cm->above_txfm_context = NULL;
+  aom_free(above_contexts->txfm);
+  above_contexts->txfm = NULL;
 
-  cm->num_allocated_above_contexts = 0;
-  cm->num_allocated_above_context_mi_col = 0;
-  cm->num_allocated_above_context_planes = 0;
+  above_contexts->num_tile_rows = 0;
+  above_contexts->num_mi_cols = 0;
+  above_contexts->num_planes = 0;
 }
 
 void av1_free_context_buffers(AV1_COMMON *cm) {
-  cm->free_mi(cm);
+  cm->mi_params.free_mi(&cm->mi_params);
 
-  av1_free_above_context_buffers(cm, cm->num_allocated_above_contexts);
+  av1_free_above_context_buffers(&cm->above_contexts);
 
 #if CONFIG_LPF_MASK
   av1_free_loop_filter_mask(cm);
 #endif
 }
 
-int av1_alloc_above_context_buffers(AV1_COMMON *cm,
-                                    int num_alloc_above_contexts) {
-  const int num_planes = av1_num_planes(cm);
-  int plane_idx;
+int av1_alloc_above_context_buffers(CommonContexts *above_contexts,
+                                    int num_tile_rows, int num_mi_cols,
+                                    int num_planes) {
   const int aligned_mi_cols =
-      ALIGN_POWER_OF_TWO(cm->mi_cols, MAX_MIB_SIZE_LOG2);
+      ALIGN_POWER_OF_TWO(num_mi_cols, MAX_MIB_SIZE_LOG2);
 
   // Allocate above context buffers
-  cm->num_allocated_above_contexts = num_alloc_above_contexts;
-  cm->num_allocated_above_context_mi_col = aligned_mi_cols;
-  cm->num_allocated_above_context_planes = num_planes;
-  for (plane_idx = 0; plane_idx < num_planes; plane_idx++) {
-    cm->above_context[plane_idx] = (ENTROPY_CONTEXT **)aom_calloc(
-        num_alloc_above_contexts, sizeof(cm->above_context[0]));
-    if (!cm->above_context[plane_idx]) return 1;
+  above_contexts->num_tile_rows = num_tile_rows;
+  above_contexts->num_mi_cols = aligned_mi_cols;
+  above_contexts->num_planes = num_planes;
+  for (int plane_idx = 0; plane_idx < num_planes; plane_idx++) {
+    above_contexts->entropy[plane_idx] = (ENTROPY_CONTEXT **)aom_calloc(
+        num_tile_rows, sizeof(above_contexts->entropy[0]));
+    if (!above_contexts->entropy[plane_idx]) return 1;
   }
 
-  cm->above_seg_context = (PARTITION_CONTEXT **)aom_calloc(
-      num_alloc_above_contexts, sizeof(cm->above_seg_context));
-  if (!cm->above_seg_context) return 1;
+  above_contexts->partition = (PARTITION_CONTEXT **)aom_calloc(
+      num_tile_rows, sizeof(above_contexts->partition));
+  if (!above_contexts->partition) return 1;
 
-  cm->above_txfm_context = (TXFM_CONTEXT **)aom_calloc(
-      num_alloc_above_contexts, sizeof(cm->above_txfm_context));
-  if (!cm->above_txfm_context) return 1;
+  above_contexts->txfm =
+      (TXFM_CONTEXT **)aom_calloc(num_tile_rows, sizeof(above_contexts->txfm));
+  if (!above_contexts->txfm) return 1;
 
-  for (int tile_row = 0; tile_row < num_alloc_above_contexts; tile_row++) {
-    for (plane_idx = 0; plane_idx < num_planes; plane_idx++) {
-      cm->above_context[plane_idx][tile_row] = (ENTROPY_CONTEXT *)aom_calloc(
-          aligned_mi_cols, sizeof(*cm->above_context[0][tile_row]));
-      if (!cm->above_context[plane_idx][tile_row]) return 1;
+  for (int tile_row = 0; tile_row < num_tile_rows; tile_row++) {
+    for (int plane_idx = 0; plane_idx < num_planes; plane_idx++) {
+      above_contexts->entropy[plane_idx][tile_row] =
+          (ENTROPY_CONTEXT *)aom_calloc(
+              aligned_mi_cols, sizeof(*above_contexts->entropy[0][tile_row]));
+      if (!above_contexts->entropy[plane_idx][tile_row]) return 1;
     }
 
-    cm->above_seg_context[tile_row] = (PARTITION_CONTEXT *)aom_calloc(
-        aligned_mi_cols, sizeof(*cm->above_seg_context[tile_row]));
-    if (!cm->above_seg_context[tile_row]) return 1;
+    above_contexts->partition[tile_row] = (PARTITION_CONTEXT *)aom_calloc(
+        aligned_mi_cols, sizeof(*above_contexts->partition[tile_row]));
+    if (!above_contexts->partition[tile_row]) return 1;
 
-    cm->above_txfm_context[tile_row] = (TXFM_CONTEXT *)aom_calloc(
-        aligned_mi_cols, sizeof(*cm->above_txfm_context[tile_row]));
-    if (!cm->above_txfm_context[tile_row]) return 1;
+    above_contexts->txfm[tile_row] = (TXFM_CONTEXT *)aom_calloc(
+        aligned_mi_cols, sizeof(*above_contexts->txfm[tile_row]));
+    if (!above_contexts->txfm[tile_row]) return 1;
+  }
+
+  return 0;
+}
+
+// Allocate the dynamically allocated arrays in 'mi_params' assuming
+// 'mi_params->set_mb_mi()' was already called earlier to initialize the rest of
+// the struct members.
+static int alloc_mi(CommonModeInfoParams *mi_params) {
+  const int aligned_mi_rows = calc_mi_size(mi_params->mi_rows);
+  const int mi_grid_size = mi_params->mi_stride * aligned_mi_rows;
+  const int alloc_size_1d = mi_size_wide[mi_params->mi_alloc_bsize];
+  const int alloc_mi_size =
+      mi_params->mi_alloc_stride * (aligned_mi_rows / alloc_size_1d);
+
+  if (mi_params->mi_alloc_size < alloc_mi_size ||
+      mi_params->mi_grid_size < mi_grid_size) {
+    mi_params->free_mi(mi_params);
+
+    mi_params->mi_alloc =
+        aom_calloc(alloc_mi_size, sizeof(*mi_params->mi_alloc));
+    if (!mi_params->mi_alloc) return 1;
+    mi_params->mi_alloc_size = alloc_mi_size;
+
+    mi_params->mi_grid_base = (MB_MODE_INFO **)aom_calloc(
+        mi_grid_size, sizeof(*mi_params->mi_grid_base));
+    if (!mi_params->mi_grid_base) return 1;
+    mi_params->mi_grid_size = mi_grid_size;
+
+    mi_params->tx_type_map =
+        aom_calloc(mi_grid_size, sizeof(*mi_params->tx_type_map));
+    if (!mi_params->tx_type_map) return 1;
   }
 
   return 0;
 }
 
 int av1_alloc_context_buffers(AV1_COMMON *cm, int width, int height) {
-  cm->set_mb_mi(cm, width, height);
-
-  if (cm->alloc_mi(cm)) goto fail;
-
+  CommonModeInfoParams *const mi_params = &cm->mi_params;
+  mi_params->set_mb_mi(mi_params, width, height);
+  if (alloc_mi(mi_params)) goto fail;
   return 0;
 
 fail:
   // clear the mi_* values to force a realloc on resync
-  cm->set_mb_mi(cm, 0, 0);
+  mi_params->set_mb_mi(mi_params, 0, 0);
   av1_free_context_buffers(cm);
   return 1;
 }
@@ -240,7 +270,9 @@ void av1_remove_common(AV1_COMMON *cm) {
   cm->default_frame_context = NULL;
 }
 
-void av1_init_context_buffers(AV1_COMMON *cm) { cm->setup_mi(cm); }
+void av1_init_mi_buffers(CommonModeInfoParams *mi_params) {
+  mi_params->setup_mi(mi_params);
+}
 
 #if CONFIG_LPF_MASK
 int av1_alloc_loop_filter_mask(AV1_COMMON *cm) {
@@ -251,9 +283,11 @@ int av1_alloc_loop_filter_mask(AV1_COMMON *cm) {
   // 64x64 (128x128 for ext_partitions) region.  The stride
   // and rows are rounded up / truncated to a multiple of 16
   // (32 for ext_partition).
-  cm->lf.lfm_stride = (cm->mi_cols + (MI_SIZE_64X64 - 1)) >> MIN_MIB_SIZE_LOG2;
-  cm->lf.lfm_num = ((cm->mi_rows + (MI_SIZE_64X64 - 1)) >> MIN_MIB_SIZE_LOG2) *
-                   cm->lf.lfm_stride;
+  cm->lf.lfm_stride =
+      (cm->mi_params.mi_cols + (MI_SIZE_64X64 - 1)) >> MIN_MIB_SIZE_LOG2;
+  cm->lf.lfm_num =
+      ((cm->mi_params.mi_rows + (MI_SIZE_64X64 - 1)) >> MIN_MIB_SIZE_LOG2) *
+      cm->lf.lfm_stride;
   cm->lf.lfm =
       (LoopFilterMask *)aom_calloc(cm->lf.lfm_num, sizeof(*cm->lf.lfm));
   if (!cm->lf.lfm) return 1;
