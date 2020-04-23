@@ -469,7 +469,7 @@ bool AVIFHandler::write ( const QImage &image )
             nclx.colourPrimaries = primaries_to_save;
             nclx.transferCharacteristics = transfer_to_save;
             nclx.matrixCoefficients = AVIF_NCLX_MATRIX_COEFFICIENTS_UNSPECIFIED;
-            nclx.fullRangeFlag = AVIF_NCLX_FULL_RANGE;
+            nclx.range = AVIF_RANGE_FULL;
             avifImageSetProfileNCLX ( avif, &nclx );
         } else {
             QByteArray icc = tmpimage.colorSpace().iccProfile();
