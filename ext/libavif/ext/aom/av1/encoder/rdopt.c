@@ -341,6 +341,8 @@ typedef struct InterModeSearchState {
   int64_t modelled_rd[MB_MODE_COUNT][MAX_REF_MV_SEARCH][REF_FRAMES];
   // The rd of simple translation in single inter modes
   int64_t simple_rd[MB_MODE_COUNT][MAX_REF_MV_SEARCH][REF_FRAMES];
+  int64_t best_single_rd[REF_FRAMES];
+  PREDICTION_MODE best_single_mode[REF_FRAMES];
 
   // Single search results by [directions][modes][reference frames]
   SingleInterModeState single_state[2][SINGLE_INTER_MODE_NUM][FWD_REFS];
@@ -1424,29 +1426,7 @@ static int64_t motion_mode_rd(
 
     // If we are searching newmv and the mv is the same as refmv, skip the
     // current mode
-    if (this_mode == NEW_NEWMV) {
-      const int_mv ref_mv_0 = av1_get_ref_mv(x, 0);
-      const int_mv ref_mv_1 = av1_get_ref_mv(x, 1);
-      if (mbmi->mv[0].as_int == ref_mv_0.as_int ||
-          mbmi->mv[1].as_int == ref_mv_1.as_int) {
-        continue;
-      }
-    } else if (this_mode == NEAREST_NEWMV || this_mode == NEAR_NEWMV) {
-      const int_mv ref_mv_1 = av1_get_ref_mv(x, 1);
-      if (mbmi->mv[1].as_int == ref_mv_1.as_int) {
-        continue;
-      }
-    } else if (this_mode == NEW_NEARESTMV || this_mode == NEW_NEARMV) {
-      const int_mv ref_mv_0 = av1_get_ref_mv(x, 0);
-      if (mbmi->mv[0].as_int == ref_mv_0.as_int) {
-        continue;
-      }
-    } else if (this_mode == NEWMV) {
-      const int_mv ref_mv_0 = av1_get_ref_mv(x, 0);
-      if (mbmi->mv[0].as_int == ref_mv_0.as_int) {
-        continue;
-      }
-    }
+    if (!av1_check_newmv_joint_nonzero(cm, x)) continue;
 
     x->skip_txfm = 0;
     rd_stats->dist = 0;
@@ -1606,7 +1586,7 @@ static int64_t motion_mode_rd(
   }
   mbmi->ref_frame[1] = ref_frame_1;
   *rate_mv = best_rate_mv;
-  if (best_rd == INT64_MAX) {
+  if (best_rd == INT64_MAX || !av1_check_newmv_joint_nonzero(cm, x)) {
     av1_invalid_rd_stats(rd_stats);
     restore_dst_buf(xd, *orig_dst, num_planes);
     return INT64_MAX;
@@ -2580,6 +2560,8 @@ static int64_t handle_inter_mode(
 #if CONFIG_COLLECT_COMPONENT_TIMING
     end_timing(cpi, motion_mode_rd_time);
 #endif
+    assert(
+        IMPLIES(!av1_check_newmv_joint_nonzero(cm, x), ret_val == INT64_MAX));
 
     mode_info[ref_mv_idx].mv.as_int = mbmi->mv[0].as_int;
     mode_info[ref_mv_idx].rate_mv = rate_mv;
@@ -3647,6 +3629,10 @@ static AOM_INLINE void init_inter_mode_search_state(
       }
     }
   }
+  for (int ref_frame = 0; ref_frame < REF_FRAMES; ++ref_frame) {
+    search_state->best_single_rd[ref_frame] = INT64_MAX;
+    search_state->best_single_mode[ref_frame] = THR_INVALID;
+  }
   av1_zero(search_state->single_state_cnt);
   av1_zero(search_state->single_state_modelled_cnt);
 }
@@ -4090,6 +4076,44 @@ static INLINE int compound_skip_using_neighbor_refs(
   return 1;
 }
 
+// Update best single mode for the given reference frame based on simple rd.
+static INLINE void update_best_single_mode(InterModeSearchState *search_state,
+                                           const PREDICTION_MODE this_mode,
+                                           const MV_REFERENCE_FRAME ref_frame,
+                                           int64_t this_rd) {
+  if (this_rd < search_state->best_single_rd[ref_frame]) {
+    search_state->best_single_rd[ref_frame] = this_rd;
+    search_state->best_single_mode[ref_frame] = this_mode;
+  }
+}
+
+// Prune compound mode using best single mode for the same reference.
+static INLINE int skip_compound_using_best_single_mode_ref(
+    const PREDICTION_MODE this_mode, const MV_REFERENCE_FRAME *ref_frames,
+    const PREDICTION_MODE *best_single_mode) {
+  // Exclude non-extended compound modes from pruning
+  if (this_mode == NEAREST_NEARESTMV || this_mode == NEAR_NEARMV ||
+      this_mode == NEW_NEWMV || this_mode == GLOBAL_GLOBALMV)
+    return 0;
+
+  assert(this_mode >= NEAREST_NEWMV && this_mode <= NEW_NEARMV);
+  const PREDICTION_MODE comp_mode_ref0 = compound_ref0_mode(this_mode);
+  // Get ref frame direction corresponding to NEWMV
+  // 0 - NEWMV corresponding to forward direction
+  // 1 - NEWMV corresponding to backward direction
+  const int newmv_dir = comp_mode_ref0 != NEWMV;
+
+  // Avoid pruning the compound mode when ref frame corresponding to NEWMV have
+  // NEWMV as single mode winner.
+  // Example: For an extended-compound mode,
+  // {mode, {fwd_frame, bwd_frame}} = {NEAR_NEWMV, {LAST_FRAME, ALTREF_FRAME}}
+  // - Ref frame corresponding to NEWMV is ALTREF_FRAME
+  // - Avoid pruning this mode, if best single mode corresponding to ref frame
+  //   ALTREF_FRAME is NEWMV
+  if (best_single_mode[ref_frames[newmv_dir]] == NEWMV) return 0;
+  return 1;
+}
+
 static int compare_int64(const void *a, const void *b) {
   int64_t a64 = *((int64_t *)a);
   int64_t b64 = *((int64_t *)b);
@@ -4343,6 +4367,12 @@ static int skip_inter_mode(AV1_COMP *cpi, MACROBLOCK *x, const BLOCK_SIZE bsize,
     if (compound_skip_using_neighbor_refs(
             xd, this_mode, ref_frames,
             sf->inter_sf.prune_compound_using_neighbors))
+      return 1;
+  }
+
+  if (sf->inter_sf.prune_comp_using_best_single_mode_ref && comp_pred) {
+    if (skip_compound_using_best_single_mode_ref(
+            this_mode, ref_frames, args->search_state->best_single_mode))
       return 1;
   }
 
@@ -4694,6 +4724,10 @@ void av1_rd_pick_inter_mode_sb(AV1_COMP *cpi, TileDataEnc *tile_data,
         is_inter_singleref_mode(this_mode) && args.single_ref_first_pass) {
       collect_single_states(x, &search_state, mbmi);
     }
+
+    if (sf->inter_sf.prune_comp_using_best_single_mode_ref > 0 &&
+        is_inter_singleref_mode(this_mode))
+      update_best_single_mode(&search_state, this_mode, ref_frame, this_rd);
 
     if (this_rd == INT64_MAX) continue;
 
