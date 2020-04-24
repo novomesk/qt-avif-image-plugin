@@ -250,10 +250,12 @@ bool AVIFHandler::decode_one_frame()
         QPointF whitePoint ( prim[6],prim[7] );
 
         switch ( m_decoder->image->nclx.colourPrimaries ) {
-        case AVIF_NCLX_COLOUR_PRIMARIES_SRGB:
+        /* AVIF_NCLX_COLOUR_PRIMARIES_SRGB, AVIF_NCLX_COLOUR_PRIMARIES_BT709 */
+        case 1:
             tmpcolorspace.setPrimaries ( QColorSpace::Primaries::SRgb );
             break;
-        case AVIF_NCLX_COLOUR_PRIMARIES_P3:
+        /* AVIF_NCLX_COLOUR_PRIMARIES_P3, AVIF_NCLX_COLOUR_PRIMARIES_SMPTE432 */
+        case 12:
             tmpcolorspace.setPrimaries ( QColorSpace::Primaries::DciP3D65 );
             break;
         default:
@@ -262,16 +264,20 @@ bool AVIFHandler::decode_one_frame()
         }
 
         switch ( m_decoder->image->nclx.transferCharacteristics ) {
-        case AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA22:
+        /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA22, AVIF_NCLX_TRANSFER_CHARACTERISTICS_BT470M */
+        case 4:
             tmpcolorspace.setTransferFunction ( QColorSpace::TransferFunction::Gamma, 2.2f );
             break;
-        case AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA28:
+        /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA28, AVIF_NCLX_TRANSFER_CHARACTERISTICS_BT470BG */
+        case 5:
             tmpcolorspace.setTransferFunction ( QColorSpace::TransferFunction::Gamma, 2.8f );
             break;
-        case AVIF_NCLX_TRANSFER_CHARACTERISTICS_LINEAR:
+        /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_LINEAR */
+        case 8:
             tmpcolorspace.setTransferFunction ( QColorSpace::TransferFunction::Linear );
             break;
-        case AVIF_NCLX_TRANSFER_CHARACTERISTICS_SRGB:
+        /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_SRGB */
+        case 13:
             tmpcolorspace.setTransferFunction ( QColorSpace::TransferFunction::SRgb );
             break;
         default:
@@ -432,10 +438,12 @@ bool AVIFHandler::write ( const QImage &image )
 
         switch ( tmpimage.colorSpace().primaries() ) {
         case QColorSpace::Primaries::SRgb:
-            primaries_to_save = AVIF_NCLX_COLOUR_PRIMARIES_SRGB;
+            /* AVIF_NCLX_COLOUR_PRIMARIES_SRGB, AVIF_NCLX_COLOUR_PRIMARIES_BT709 */
+            primaries_to_save = (avifNclxColourPrimaries) 1;
             break;
         case QColorSpace::Primaries::DciP3D65:
-            primaries_to_save = AVIF_NCLX_COLOUR_PRIMARIES_P3;
+            /* AVIF_NCLX_COLOUR_PRIMARIES_P3, AVIF_NCLX_COLOUR_PRIMARIES_SMPTE432 */
+            primaries_to_save = (avifNclxColourPrimaries) 12;
             break;
         default:
             primaries_to_save = AVIF_NCLX_COLOUR_PRIMARIES_UNSPECIFIED;
@@ -444,19 +452,23 @@ bool AVIFHandler::write ( const QImage &image )
 
         switch ( tmpimage.colorSpace().transferFunction() ) {
         case QColorSpace::TransferFunction::Linear:
-            transfer_to_save = AVIF_NCLX_TRANSFER_CHARACTERISTICS_LINEAR;
+            /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_LINEAR */
+            transfer_to_save = (avifNclxTransferCharacteristics) 8;
             break;
         case QColorSpace::TransferFunction::Gamma:
             if ( qAbs ( tmpimage.colorSpace().gamma() - 2.2f ) < 0.1f ) {
-                transfer_to_save = AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA22;
+                /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA22, AVIF_NCLX_TRANSFER_CHARACTERISTICS_BT470M */
+                transfer_to_save = (avifNclxTransferCharacteristics) 4;
             } else if ( qAbs ( tmpimage.colorSpace().gamma() - 2.8f ) < 0.1f ) {
-                transfer_to_save = AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA28;
+                /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_GAMMA28, AVIF_NCLX_TRANSFER_CHARACTERISTICS_BT470BG */
+                transfer_to_save = (avifNclxTransferCharacteristics) 5;
             } else {
                 transfer_to_save = AVIF_NCLX_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
             }
             break;
         case QColorSpace::TransferFunction::SRgb:
-            transfer_to_save = AVIF_NCLX_TRANSFER_CHARACTERISTICS_SRGB;
+            /* AVIF_NCLX_TRANSFER_CHARACTERISTICS_SRGB */
+            transfer_to_save = (avifNclxTransferCharacteristics) 13;
             break;
         default:
             transfer_to_save = AVIF_NCLX_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
