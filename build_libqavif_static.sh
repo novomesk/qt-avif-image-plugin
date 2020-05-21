@@ -13,6 +13,13 @@ fi
 RELATIVE_PATH=`dirname "$BASH_SOURCE"`
 cd "$RELATIVE_PATH"
 
+cd ext
+if ! ./build_local_libaom_libavif.sh; then
+  echo 'Failed to build static local dependencies!' >&2
+  exit 1
+fi
+
+cd ..
 
 qmake qt-avif-image-plugin_local-libavif.pro
 
