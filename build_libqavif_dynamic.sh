@@ -13,25 +13,21 @@ fi
 RELATIVE_PATH=`dirname "$BASH_SOURCE"`
 cd "$RELATIVE_PATH"
 
-SRC_FOLDER="src-dynamic"
-cd $SRC_FOLDER
+
+qmake qt-avif-image-plugin.pro
 
 if ! [ -f Makefile ]; then
-
-  qmake
-
-  if ! [ -f Makefile ]; then
-    echo 'qmake failed to produce Makefile' >&2
-    exit 1
-  fi
+  echo 'qmake failed to produce Makefile' >&2
+  exit 1
 fi
 
 make
 
-if ! [ -f libqavif.so ]; then
+if [ $? -eq 0 ]; then
+  echo "SUCCESS! in order to install libqavif.so type as root:"
+  echo "make install"
+  exit 0
+else
   echo 'Failed to build libqavif.so' >&2
   exit 1
 fi
-
-echo "SUCCESS! libqavif is ready in $SRC_FOLDER"
-exit 0

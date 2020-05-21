@@ -13,32 +13,21 @@ fi
 RELATIVE_PATH=`dirname "$BASH_SOURCE"`
 cd "$RELATIVE_PATH"
 
-cd ext
-if ! ./build_local_libaom_libavif.sh; then
-  echo 'Failed to build static local dependencies!' >&2
-  exit 1
-fi
 
-cd ..
-SRC_FOLDER="src-static"
-cd $SRC_FOLDER
+qmake qt-avif-image-plugin_local-libavif.pro
 
 if ! [ -f Makefile ]; then
-
-  qmake
-
-  if ! [ -f Makefile ]; then
-    echo 'qmake failed to produce Makefile' >&2
-    exit 1
-  fi
+  echo 'qmake failed to produce Makefile' >&2
+  exit 1
 fi
 
 make
 
-if ! [ -f libqavif.so ]; then
+if [ $? -eq 0 ]; then
+  echo "SUCCESS! in order to install libqavif.so type as root:"
+  echo "make install"
+  exit 0
+else
   echo 'Failed to build libqavif.so' >&2
   exit 1
 fi
-
-echo "SUCCESS! libqavif is ready in $SRC_FOLDER"
-exit 0
