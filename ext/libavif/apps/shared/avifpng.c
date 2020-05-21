@@ -9,12 +9,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-avifBool avifPNGRead(avifImage * avif, const char * inputFilename, avifPixelFormat requestedFormat, int requestedDepth)
+// Note on setjmp() and volatile variables:
+//
+// K & R, The C Programming Language 2nd Ed, p. 254 says:
+//   ... Accessible objects have the values they had when longjmp was called,
+//   except that non-volatile automatic variables in the function calling setjmp
+//   become undefined if they were changed after the setjmp call.
+//
+// Therefore, 'rowPointers' is declared as volatile. 'rgb' should be declared as
+// volatile, but doing so would be inconvenient (try it) and since it is a
+// struct, the compiler is unlikely to put it in a register. 'readResult' and
+// 'writeResult' do not need to be declared as volatile because they are not
+// modified between setjmp and longjmp. But GCC's -Wclobbered warning may have
+// trouble figuring that out, so we preemptively declare them as volatile.
+
+avifBool avifPNGRead(avifImage * avif, const char * inputFilename, avifPixelFormat requestedFormat, uint32_t requestedDepth, uint32_t * outPNGDepth)
 {
-    avifBool readResult = AVIF_FALSE;
+    volatile avifBool readResult = AVIF_FALSE;
     png_structp png = NULL;
     png_infop info = NULL;
-    png_bytep * volatile rowPointers = NULL; // volatile avoids -Wclobbered due to libpng's setjmp
+    png_bytep * volatile rowPointers = NULL;
 
     avifRGBImage rgb;
     memset(&rgb, 0, sizeof(avifRGBImage));
@@ -61,11 +75,7 @@ avifBool avifPNGRead(avifImage * avif, const char * inputFilename, avifPixelForm
     unsigned char * iccpData = NULL;
     png_uint_32 iccpDataLen = 0;
     if (png_get_iCCP(png, info, &iccpProfileName, &iccpCompression, &iccpData, &iccpDataLen) == PNG_INFO_iCCP) {
-        if (avif->profileFormat == AVIF_PROFILE_FORMAT_NONE) {
-            avifImageSetProfileICC(avif, iccpData, iccpDataLen);
-        } else {
-            fprintf(stderr, "WARNING: PNG contains ICC profile which is being overridden with --nclx\n");
-        }
+        avifImageSetProfileICC(avif, iccpData, iccpDataLen);
     }
 
     int rawWidth = png_get_image_width(png, info);
@@ -97,6 +107,10 @@ avifBool avifPNGRead(avifImage * avif, const char * inputFilename, avifPixelForm
     if (rawBitDepth == 16) {
         png_set_swap(png);
         imgBitDepth = 16;
+    }
+
+    if (outPNGDepth) {
+        *outPNGDepth = imgBitDepth;
     }
 
     png_read_update_info(png, info);
@@ -138,12 +152,12 @@ cleanup:
     return readResult;
 }
 
-avifBool avifPNGWrite(avifImage * avif, const char * outputFilename, int requestedDepth)
+avifBool avifPNGWrite(avifImage * avif, const char * outputFilename, uint32_t requestedDepth)
 {
-    avifBool volatile writeResult = AVIF_FALSE; // volatile avoids -Wclobbered due to libpng's setjmp
+    volatile avifBool writeResult = AVIF_FALSE;
     png_structp png = NULL;
     png_infop info = NULL;
-    png_bytep * volatile rowPointers = NULL; // volatile avoids -Wclobbered due to libpng's setjmp
+    png_bytep * volatile rowPointers = NULL;
 
     avifRGBImage rgb;
     memset(&rgb, 0, sizeof(avifRGBImage));
@@ -183,7 +197,7 @@ avifBool avifPNGWrite(avifImage * avif, const char * outputFilename, int request
 
     png_set_IHDR(
         png, info, avif->width, avif->height, rgbDepth, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-    if (avif->profileFormat == AVIF_PROFILE_FORMAT_ICC) {
+    if (avif->icc.data && (avif->icc.size > 0)) {
         png_set_iCCP(png, info, "libavif", 0, avif->icc.data, (png_uint_32)avif->icc.size);
     }
     png_write_info(png, info);
@@ -205,7 +219,7 @@ avifBool avifPNGWrite(avifImage * avif, const char * outputFilename, int request
     png_write_end(png, NULL);
 
     writeResult = AVIF_TRUE;
-    printf("Wrote: %s\n", outputFilename);
+    printf("Wrote PNG: %s\n", outputFilename);
 cleanup:
     if (f) {
         fclose(f);

@@ -5,11 +5,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
 ### Changed
+* CICP Refactor (breaking change!)
+  * Remove most references to "NCLX", as it is mostly an implementation detail, and the values are really from MPEG-CICP
+  * Eliminate avifProfileFormat: having an ICC profile is not mutually exclusive with signaling CICP
+  * CICP is now always available in an avifImage, set to unspecified by default
+  * Added --cicp as an alias for --nclx (semi-deprecated)
+  * Setting CICP via avifenc no longer overrides ICC profiles, they co-exist
+  * Simplified avifenc argument parsing / warnings logic
+  * avifenc/avifdec/avifdump now all display CICP when dumping AVIF information
+  * nclx colr box contents are guaranteed to override AV1 bitstream CICP (as MIAF standard specifies)
+  * Added comments explaining various decisions and citing standards
+  * Removed ICC inspection code regarding chroma-derived mtxCoeffs; this was overdesigned. Now just honor the assoc. colorPrimaries enum
+  * Reworked all examples in the README to reflect the new state of things, and clean out some cruft
+* Update libaom.cmd to point at the v2.0.0 tag
+* Update dav1d.cmd to point at the 0.7.0 tag
+* Re-enable cpu-used=7+ in codec_aom when libaom major version > 1
+
+## [0.7.3] - 2020-05-04
+### Added
+- avifenc: Lossless (--lossless, -l) mode, which sets new defaults and warns when anything would cause the AVIF to not be lossless
+
+### Changed
+- Minor cleanup for -Wclobbered warnings
+- Minor fixes to README and code (fallout from enum rework)
+- Protect against oversized (out of bounds) samples in avif sample tables
+- Optimization: avoid AV1 sample copying when feeding data to dav1d
+
+## [0.7.2] - 2020-04-24
+### Added
+- Recognize extensions with capital letters / capslock
+- Proper support for AVIF_NCLX_MATRIX_COEFFICIENTS_IDENTITY
+
+### Changed
+- Large nclx enum refactor (breaking change), reworking all 3 enums to better match AV1 codec enums
+- Fixes to 'essential' item properties (marking av1C as essential, ignoring any items containing unsupported essential props)
 - avifenc - Allow --nclx to override embedded ICC profiles (with a warning), instead of --nclx being ignored
 - avifenc - Choose high-quality-but-lossy QP defaults, and a default speed of 8
 - avifdump - Fix format specifiers for 32bit
 - Now prioritizing libaom over rav1e when both are present
+- Remove `-Wclobbered` dodging (volatile) and instead just disable the warning in avifpng/avifjpeg
+- avifyuv: extra testing modes
+- Cleanup to avifCodecVersions()
+- Reorganize iccjpeg code back into its own files for licensing conveniences
 
 ## [0.7.1] - 2020-04-16
 ### Changed
@@ -384,7 +423,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/AOMediaCodec/libavif/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/AOMediaCodec/libavif/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/AOMediaCodec/libavif/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/AOMediaCodec/libavif/compare/v0.6.4...v0.7.0
 [0.6.4]: https://github.com/AOMediaCodec/libavif/compare/v0.6.3...v0.6.4

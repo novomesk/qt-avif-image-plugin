@@ -104,7 +104,7 @@ static INLINE void av1_init_rd_stats(RD_STATS *rd_stats) {
   rd_stats->dist = 0;
   rd_stats->rdcost = 0;
   rd_stats->sse = 0;
-  rd_stats->skip_txfm = 1;
+  rd_stats->skip = 1;
   rd_stats->zero_rate = 0;
 #if CONFIG_RD_DEBUG
   // This may run into problems when monochrome video is
@@ -129,7 +129,7 @@ static INLINE void av1_invalid_rd_stats(RD_STATS *rd_stats) {
   rd_stats->dist = INT64_MAX;
   rd_stats->rdcost = INT64_MAX;
   rd_stats->sse = INT64_MAX;
-  rd_stats->skip_txfm = 0;
+  rd_stats->skip = 0;
   rd_stats->zero_rate = 0;
 #if CONFIG_RD_DEBUG
   // This may run into problems when monochrome video is
@@ -155,7 +155,7 @@ static INLINE void av1_merge_rd_stats(RD_STATS *rd_stats_dst,
     rd_stats_dst->zero_rate = rd_stats_src->zero_rate;
   rd_stats_dst->dist += rd_stats_src->dist;
   rd_stats_dst->sse += rd_stats_src->sse;
-  rd_stats_dst->skip_txfm &= rd_stats_src->skip_txfm;
+  rd_stats_dst->skip &= rd_stats_src->skip;
 #if CONFIG_RD_DEBUG
   // This may run into problems when monochrome video is
   // encoded, as there will only be 1 plane
@@ -178,13 +178,13 @@ static INLINE void av1_merge_rd_stats(RD_STATS *rd_stats_dst,
 }
 
 static INLINE void av1_accumulate_rd_stats(RD_STATS *rd_stats, int64_t dist,
-                                           int rate, int skip_txfm, int64_t sse,
+                                           int rate, int skip, int64_t sse,
                                            int zero_rate) {
   assert(rd_stats->rate != INT_MAX && rate != INT_MAX);
   rd_stats->rate += rate;
   if (!rd_stats->zero_rate) rd_stats->zero_rate = zero_rate;
   rd_stats->dist += dist;
-  rd_stats->skip_txfm &= skip_txfm;
+  rd_stats->skip &= skip;
   rd_stats->sse += sse;
 }
 
@@ -231,9 +231,8 @@ int av1_compute_rd_mult(const struct AV1_COMP *cpi, int qindex);
 
 void av1_initialize_rd_consts(struct AV1_COMP *cpi);
 
-// Sets the multiplier to convert mv cost to l1 error during motion search.
-void av1_set_sad_per_bit(const struct AV1_COMP *cpi, MvCostInfo *mv_cost_info,
-                         int qindex);
+void av1_initialize_me_consts(const struct AV1_COMP *cpi, MACROBLOCK *x,
+                              int qindex);
 
 void av1_model_rd_from_var_lapndz(int64_t var, unsigned int n,
                                   unsigned int qstep, int *rate, int64_t *dist);
@@ -281,9 +280,9 @@ void av1_mv_pred(const struct AV1_COMP *cpi, MACROBLOCK *x,
                  uint8_t *ref_y_buffer, int ref_y_stride, int ref_frame,
                  BLOCK_SIZE block_size);
 
-// Sets the multiplier to convert mv cost to l2 error during motion search.
-static INLINE void av1_set_error_per_bit(MvCostInfo *mv_cost_info, int rdmult) {
-  mv_cost_info->errorperbit = AOMMAX(rdmult >> RD_EPB_SHIFT, 1);
+static INLINE void set_error_per_bit(MACROBLOCK *x, int rdmult) {
+  x->errorperbit = rdmult >> RD_EPB_SHIFT;
+  x->errorperbit += (x->errorperbit == 0);
 }
 
 // Get the threshold for R-D optimization of coefficients depending upon mode
@@ -358,7 +357,7 @@ void av1_fill_coeff_costs(MACROBLOCK *x, FRAME_CONTEXT *fc,
                           const int num_planes);
 
 void av1_fill_mv_costs(const FRAME_CONTEXT *fc, int integer_mv, int usehp,
-                       MvCostInfo *mv_cost_info);
+                       MACROBLOCK *x);
 
 int av1_get_adaptive_rdmult(const struct AV1_COMP *cpi, double beta);
 

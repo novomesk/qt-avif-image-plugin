@@ -37,13 +37,6 @@ static int compare_weight(const void *a, const void *b) {
   return 0;
 }
 
-// Allow more mesh searches for screen content type on the ARF.
-static int use_fine_search_interval(const AV1_COMP *const cpi) {
-  return cpi->is_screen_content_type &&
-         cpi->gf_group.update_type[cpi->gf_group.index] == ARF_UPDATE &&
-         cpi->oxcf.speed <= 2;
-}
-
 void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
                               BLOCK_SIZE bsize, int ref_idx, int *rate_mv,
                               int search_range, inter_mode_info *mode_info,
@@ -60,7 +53,6 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
       av1_get_scaled_ref_frame(cpi, ref);
   const int mi_row = xd->mi_row;
   const int mi_col = xd->mi_col;
-  const MvCostInfo *mv_cost_info = &x->mv_cost_info;
 
   if (scaled_ref_frame) {
     // Swap out the reference frame for a version that's been scaled to
@@ -198,15 +190,14 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
 
   // Further reduce the search range.
   if (search_range < INT_MAX) {
-    const search_site_config *search_site_cfg =
-        &mv_search_params->search_site_cfg[SS_CFG_SRC];
-    // Max step_param is search_site_cfg->num_search_steps.
+    const search_site_config *ss_cfg = &mv_search_params->ss_cfg[SS_CFG_SRC];
+    // MAx step_param is ss_cfg->ss_count.
     if (search_range < 1) {
-      step_param = search_site_cfg->num_search_steps;
+      step_param = ss_cfg->ss_count;
     } else {
-      while (search_site_cfg->radius[search_site_cfg->num_search_steps -
-                                     step_param - 1] > (search_range << 1) &&
-             search_site_cfg->num_search_steps - step_param - 1 > 0)
+      while (ss_cfg->radius[ss_cfg->ss_count - step_param - 1] >
+                 (search_range << 1) &&
+             ss_cfg->ss_count - step_param - 1 > 0)
         step_param++;
     }
   }
@@ -215,13 +206,11 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
   int_mv second_best_mv;
   best_mv->as_int = second_best_mv.as_int = INVALID_MV;
 
-  // Allow more mesh searches for screen content type on the ARF.
-  const int fine_search_interval = use_fine_search_interval(cpi);
   const search_site_config *src_search_sites =
-      &mv_search_params->search_site_cfg[SS_CFG_SRC];
+      &mv_search_params->ss_cfg[SS_CFG_SRC];
   FULLPEL_MOTION_SEARCH_PARAMS full_ms_params;
   av1_make_default_fullpel_ms_params(&full_ms_params, cpi, x, bsize, &ref_mv,
-                                     src_search_sites, fine_search_interval);
+                                     src_search_sites);
 
   switch (mbmi->motion_mode) {
     case SIMPLE_TRANSLATION: {
@@ -272,8 +261,8 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
     this_mv.as_mv = get_mv_from_fullmv(&best_mv->as_fullmv);
     const int ref_mv_idx = mbmi->ref_mv_idx;
     const int this_mv_rate =
-        av1_mv_bit_cost(&this_mv.as_mv, &ref_mv, mv_cost_info->nmv_joint_cost,
-                        mv_cost_info->mv_cost_stack, MV_COST_WEIGHT);
+        av1_mv_bit_cost(&this_mv.as_mv, &ref_mv, x->nmv_vec_cost,
+                        x->mv_cost_stack, MV_COST_WEIGHT);
     mode_info[ref_mv_idx].full_search_mv.as_int = this_mv.as_int;
     mode_info[ref_mv_idx].full_mv_rate = this_mv_rate;
 
@@ -349,9 +338,8 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
       default: assert(0 && "Invalid motion mode!\n");
     }
   }
-  *rate_mv =
-      av1_mv_bit_cost(&best_mv->as_mv, &ref_mv, mv_cost_info->nmv_joint_cost,
-                      mv_cost_info->mv_cost_stack, MV_COST_WEIGHT);
+  *rate_mv = av1_mv_bit_cost(&best_mv->as_mv, &ref_mv, x->nmv_vec_cost,
+                             x->mv_cost_stack, MV_COST_WEIGHT);
 
   if (cpi->sf.mv_sf.adaptive_motion_search &&
       mbmi->motion_mode == SIMPLE_TRANSLATION)
@@ -373,7 +361,6 @@ void av1_joint_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
   assert(has_second_ref(mbmi));
   const int_mv init_mv[2] = { cur_mv[0], cur_mv[1] };
   const int refs[2] = { mbmi->ref_frame[0], mbmi->ref_frame[1] };
-  const MvCostInfo *mv_cost_info = &x->mv_cost_info;
   int_mv ref_mv[2];
   int ite, ref;
 
@@ -455,14 +442,18 @@ void av1_joint_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
     av1_enc_build_one_inter_predictor(second_pred, pw, &cur_mv[!id].as_mv,
                                       &inter_pred_params);
 
+    const int order_idx = id != 0;
+    av1_dist_wtd_comp_weight_assign(
+        cm, mbmi, order_idx, &xd->jcp_param.fwd_offset,
+        &xd->jcp_param.bck_offset, &xd->jcp_param.use_dist_wtd_comp_avg, 1);
+
     // Do full-pixel compound motion search on the current reference frame.
     if (id) xd->plane[plane].pre[0] = ref_yv12[id];
 
     // Make motion search params
     FULLPEL_MOTION_SEARCH_PARAMS full_ms_params;
     av1_make_default_fullpel_ms_params(&full_ms_params, cpi, x, bsize,
-                                       &ref_mv[id].as_mv, NULL,
-                                       /*fine_search_interval=*/0);
+                                       &ref_mv[id].as_mv, NULL);
     av1_set_ms_compound_refs(&full_ms_params.ms_buffers, second_pred, mask,
                              mask_stride, id);
 
@@ -529,9 +520,9 @@ void av1_joint_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
 
   for (ref = 0; ref < 2; ++ref) {
     const int_mv curr_ref_mv = av1_get_ref_mv(x, ref);
-    *rate_mv += av1_mv_bit_cost(&cur_mv[ref].as_mv, &curr_ref_mv.as_mv,
-                                mv_cost_info->nmv_joint_cost,
-                                mv_cost_info->mv_cost_stack, MV_COST_WEIGHT);
+    *rate_mv +=
+        av1_mv_bit_cost(&cur_mv[ref].as_mv, &curr_ref_mv.as_mv, x->nmv_vec_cost,
+                        x->mv_cost_stack, MV_COST_WEIGHT);
   }
 }
 
@@ -549,7 +540,6 @@ void av1_compound_single_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
   const int ref = mbmi->ref_frame[ref_idx];
   const int_mv ref_mv = av1_get_ref_mv(x, ref_idx);
   struct macroblockd_plane *const pd = &xd->plane[0];
-  const MvCostInfo *mv_cost_info = &x->mv_cost_info;
 
   struct buf_2d backup_yv12[MAX_MB_PLANE];
   const YV12_BUFFER_CONFIG *const scaled_ref_frame =
@@ -586,8 +576,7 @@ void av1_compound_single_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
   // Make motion search params
   FULLPEL_MOTION_SEARCH_PARAMS full_ms_params;
   av1_make_default_fullpel_ms_params(&full_ms_params, cpi, x, bsize,
-                                     &ref_mv.as_mv, NULL,
-                                     /*fine_search_interval=*/0);
+                                     &ref_mv.as_mv, NULL);
   av1_set_ms_compound_refs(&full_ms_params.ms_buffers, second_pred, mask,
                            mask_stride, ref_idx);
 
@@ -637,9 +626,8 @@ void av1_compound_single_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
 
   *rate_mv = 0;
 
-  *rate_mv +=
-      av1_mv_bit_cost(this_mv, &ref_mv.as_mv, mv_cost_info->nmv_joint_cost,
-                      mv_cost_info->mv_cost_stack, MV_COST_WEIGHT);
+  *rate_mv += av1_mv_bit_cost(this_mv, &ref_mv.as_mv, x->nmv_vec_cost,
+                              x->mv_cost_stack, MV_COST_WEIGHT);
 }
 
 static AOM_INLINE void build_second_inter_pred(const AV1_COMP *cpi,
@@ -678,6 +666,10 @@ static AOM_INLINE void build_second_inter_pred(const AV1_COMP *cpi,
   // Get the prediction block from the 'other' reference frame.
   av1_enc_build_one_inter_predictor(second_pred, pw, other_mv,
                                     &inter_pred_params);
+
+  av1_dist_wtd_comp_weight_assign(cm, mbmi, 0, &xd->jcp_param.fwd_offset,
+                                  &xd->jcp_param.bck_offset,
+                                  &xd->jcp_param.use_dist_wtd_comp_avg, 1);
 }
 
 // Wrapper for av1_compound_single_motion_search, for the common case
@@ -783,7 +775,7 @@ int_mv av1_simple_motion_search(AV1_COMP *const cpi, MACROBLOCK *x, int mi_row,
   const MV ref_mv = kZeroMv;
   const int step_param = cpi->mv_search_params.mv_step_param;
   const search_site_config *src_search_sites =
-      &cpi->mv_search_params.search_site_cfg[SS_CFG_SRC];
+      &cpi->mv_search_params.ss_cfg[SS_CFG_SRC];
   int cost_list[5];
   const int ref_idx = 0;
   int var;
@@ -798,11 +790,9 @@ int_mv av1_simple_motion_search(AV1_COMP *const cpi, MACROBLOCK *x, int mi_row,
                          num_planes);
   }
 
-  // Allow more mesh searches for screen content type on the ARF.
-  const int fine_search_interval = use_fine_search_interval(cpi);
   FULLPEL_MOTION_SEARCH_PARAMS full_ms_params;
   av1_make_default_fullpel_ms_params(&full_ms_params, cpi, x, bsize, &ref_mv,
-                                     src_search_sites, fine_search_interval);
+                                     src_search_sites);
 
   var = av1_full_pixel_search(start_mv, &full_ms_params, step_param,
                               cond_cost_list(cpi, cost_list),

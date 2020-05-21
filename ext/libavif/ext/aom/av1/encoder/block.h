@@ -57,7 +57,6 @@ enum {
 
 typedef struct macroblock_plane {
   DECLARE_ALIGNED(32, int16_t, src_diff[MAX_SB_SQUARE]);
-  tran_low_t *dqcoeff;
   tran_low_t *qcoeff;
   tran_low_t *coeff;
   uint16_t *eobs;
@@ -175,8 +174,8 @@ typedef struct {
   RD_STATS rd_stats_uv;
   uint8_t blk_skip[MAX_MIB_SIZE * MAX_MIB_SIZE];
   uint8_t tx_type_map[MAX_MIB_SIZE * MAX_MIB_SIZE];
-  uint8_t skip_txfm;
-  uint8_t disable_skip_txfm;
+  uint8_t skip;
+  uint8_t disable_skip;
   uint8_t early_skipped;
 } SimpleRDState;
 
@@ -210,28 +209,13 @@ typedef struct {
   uint8_t *tmp_best_mask_buf;  // backup of the best segmentation mask
 } CompoundTypeRdBuffers;
 
-typedef struct {
-  // A multiplier that converts mv cost to l2 error.
-  int errorperbit;
-  // A multiplier that converts mv cost to l1 error.
-  int sadperbit;
-
-  int nmv_joint_cost[MV_JOINTS];
-
-  // Below are the entropy costs needed to encode a given mv.
-  // nmv_costs_(hp_)alloc are two arrays that holds the memory
-  // for holding the mv cost. But since the motion vectors can be negative, we
-  // shift them to the middle and store the resulting pointer in nmvcost(_hp)
-  // for easier referencing. Finally, nmv_cost_stack points to the nmvcost array
-  // with the mv precision we are currently working with. In essence, only
-  // mv_cost_stack is needed for motion search, the other can be considered
-  // private.
-  int nmv_cost_alloc[2][MV_VALS];
-  int nmv_cost_hp_alloc[2][MV_VALS];
-  int *nmv_cost[2];
-  int *nmv_cost_hp[2];
-  int **mv_cost_stack;
-} MvCostInfo;
+enum {
+  MV_COST_ENTROPY,    // Use the entropy rate of the mv as the cost
+  MV_COST_L1_LOWRES,  // Use the l1 norm of the mv as the cost (<480p)
+  MV_COST_L1_MIDRES,  // Use the l1 norm of the mv as the cost (>=480p)
+  MV_COST_L1_HDRES,   // Use the l1 norm of the mv as the cost (>=720p)
+  MV_COST_NONE        // Use 0 as as cost irrespective of the current mv
+} UENUM1BYTE(MV_COST_TYPE);
 
 struct inter_modes_info;
 typedef struct macroblock MACROBLOCK;
@@ -268,6 +252,12 @@ struct macroblock {
   int skip_block;
   int qindex;
 
+  // The equivalent error at the current rdmult of one whole bit (not one
+  // bitcost unit).
+  int errorperbit;
+  // The equivalend SAD error of one (whole) bit at the current quantizer
+  // for large blocks.
+  int sadperbit;
   int rdmult;
   int mb_energy;
   int sb_energy_level;
@@ -288,6 +278,13 @@ struct macroblock {
   unsigned int pred_sse[REF_FRAMES];
   int pred_mv_sad[REF_FRAMES];
   int best_pred_mv_sad;
+
+  int nmv_vec_cost[MV_JOINTS];
+  int nmv_costs[2][MV_VALS];
+  int nmv_costs_hp[2][MV_VALS];
+  int *nmvcost[2];
+  int *nmvcost_hp[2];
+  int **mv_cost_stack;
 
   int32_t *wsrc_buf;
   int32_t *mask_buf;
@@ -317,21 +314,15 @@ struct macroblock {
   // from extending outside the UMV borders
   FullMvLimits mv_limits;
 
-  // Stores the entropy cost needed to encode a motion vector.
-  MvCostInfo mv_cost_info;
-
   uint8_t blk_skip[MAX_MIB_SIZE * MAX_MIB_SIZE];
   uint8_t tx_type_map[MAX_MIB_SIZE * MAX_MIB_SIZE];
 
-  // Forces the coding block to skip transform and quantization.
-  int skip_txfm;
-  int skip_txfm_cost[SKIP_CONTEXTS][2];
+  // Force the coding block to skip transform and quantization.
+  int force_skip;
+  int skip_cost[SKIP_CONTEXTS][2];
 
-  // Skip mode tries to use the closest forward and backward references for
-  // inter prediction. Skip here means to skip transmitting the reference
-  // frames, not to be confused with skip_txfm.
   int skip_mode;  // 0: off; 1: on
-  int skip_mode_cost[SKIP_MODE_CONTEXTS][2];
+  int skip_mode_cost[SKIP_CONTEXTS][2];
 
   LV_MAP_COEFF_COST coeff_costs[TX_SIZES][PLANE_TYPES];
   LV_MAP_EOB_COST eob_costs[7][2];
@@ -474,6 +465,9 @@ struct macroblock {
   int_mv mv_b[MAX_MC_FLOW_BLK_IN_SB * MAX_MC_FLOW_BLK_IN_SB]
              [INTER_REFS_PER_FRAME];
   int cost_stride;
+
+  // The type of mv cost used during motion search
+  MV_COST_TYPE mv_cost_type;
 
   uint8_t search_ref_frame[REF_FRAMES];
 

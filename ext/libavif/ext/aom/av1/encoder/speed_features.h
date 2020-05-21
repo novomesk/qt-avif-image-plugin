@@ -193,15 +193,6 @@ enum {
   PRUNE_2D_AGGRESSIVE = 4,
 } UENUM1BYTE(TX_TYPE_PRUNE_MODE);
 
-enum {
-  // No reaction to rate control on a detected slide/scene change.
-  NO_DETECTION = 0,
-
-  // Set to larger Q based only on the detected slide/scene change and
-  // current/past Q.
-  FAST_DETECTION_MAXQ = 1,
-} UENUM1BYTE(OVERSHOOT_DETECTION_CBR);
-
 typedef struct {
   TX_TYPE_PRUNE_MODE prune_mode;
   int fast_intra_tx_type_search;
@@ -310,9 +301,6 @@ typedef struct TPL_SPEED_FEATURES {
 
   // When to stop subpel search.
   SUBPEL_FORCE_STOP subpel_force_stop;
-
-  // Prune starting mvs in TPL based on sad scores.
-  int prune_starting_mv;
 } TPL_SPEED_FEATURES;
 
 typedef struct GLOBAL_MOTION_SPEED_FEATURES {
@@ -599,10 +587,6 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // 1 : prune extended compound mode (less aggressiveness)
   // 2 : prune extended compound mode (high aggressiveness)
   int prune_compound_using_neighbors;
-
-  // Skip extended compound mode when ref frame corresponding to NEWMV does not
-  // have NEWMV as single mode winner.
-  int prune_comp_using_best_single_mode_ref;
 
   // Based on previous ref_mv_idx search result, prune the following search.
   int prune_ref_mv_idx_search;
@@ -966,13 +950,6 @@ typedef struct REAL_TIME_SPEED_FEATURES {
 
   // Compute variance/sse on source difference, prior to encoding superblock.
   int source_metrics_sb_nonrd;
-
-  // Flag to indicate process for handling overshoot on slide/scene change,
-  // for real-time CBR mode.
-  OVERSHOOT_DETECTION_CBR overshoot_detection_cbr;
-
-  // Check for scene/content change detection on every frame before encoding.
-  int check_scene_detection;
 } REAL_TIME_SPEED_FEATURES;
 
 typedef struct SPEED_FEATURES {

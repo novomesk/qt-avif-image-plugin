@@ -136,15 +136,9 @@ static avifBool aomCodecGetNextImage(avifCodec * codec, avifImage * image)
         image->yuvFormat = yuvFormat;
         image->yuvRange = (codec->internal->image->range == AOM_CR_STUDIO_RANGE) ? AVIF_RANGE_LIMITED : AVIF_RANGE_FULL;
 
-        if (image->profileFormat == AVIF_PROFILE_FORMAT_NONE) {
-            // If the AVIF container doesn't provide a color profile, allow the AV1 OBU to provide one as a fallback
-            avifNclxColorProfile nclx;
-            nclx.colourPrimaries = (avifNclxColourPrimaries)codec->internal->image->cp;
-            nclx.transferCharacteristics = (avifNclxTransferCharacteristics)codec->internal->image->tc;
-            nclx.matrixCoefficients = (avifNclxMatrixCoefficients)codec->internal->image->mc;
-            nclx.range = image->yuvRange;
-            avifImageSetProfileNCLX(image, &nclx);
-        }
+        image->colorPrimaries = (avifColorPrimaries)codec->internal->image->cp;
+        image->transferCharacteristics = (avifTransferCharacteristics)codec->internal->image->tc;
+        image->matrixCoefficients = (avifMatrixCoefficients)codec->internal->image->mc;
 
         avifPixelFormatInfo formatInfo;
         avifGetPixelFormatInfo(yuvFormat, &formatInfo);
@@ -161,7 +155,7 @@ static avifBool aomCodecGetNextImage(avifCodec * codec, avifImage * image)
             image->yuvPlanes[yuvPlane] = codec->internal->image->planes[aomPlaneIndex];
             image->yuvRowBytes[yuvPlane] = codec->internal->image->stride[aomPlaneIndex];
         }
-        image->decoderOwnsYUVPlanes = AVIF_TRUE;
+        image->imageOwnsYUVPlanes = AVIF_FALSE;
     } else {
         // Alpha plane - ensure image is correct size, fill color
 
@@ -180,13 +174,13 @@ static avifBool aomCodecGetNextImage(avifCodec * codec, avifImage * image)
         image->alphaPlane = codec->internal->image->planes[0];
         image->alphaRowBytes = codec->internal->image->stride[0];
         image->alphaRange = (codec->internal->image->range == AOM_CR_STUDIO_RANGE) ? AVIF_RANGE_LIMITED : AVIF_RANGE_FULL;
-        image->decoderOwnsAlphaPlane = AVIF_TRUE;
+        image->imageOwnsAlphaPlane = AVIF_FALSE;
     }
 
     return AVIF_TRUE;
 }
 
-static aom_img_fmt_t avifImageCalcAOMFmt(avifImage * image, avifBool alpha, int * yShift)
+static aom_img_fmt_t avifImageCalcAOMFmt(const avifImage * image, avifBool alpha, int * yShift)
 {
     *yShift = 0;
 
@@ -224,7 +218,7 @@ static aom_img_fmt_t avifImageCalcAOMFmt(avifImage * image, avifBool alpha, int 
     return fmt;
 }
 
-static avifBool aomCodecEncodeImage(avifCodec * codec, avifImage * image, avifEncoder * encoder, avifRWData * obu, avifBool alpha)
+static avifBool aomCodecEncodeImage(avifCodec * codec, const avifImage * image, avifEncoder * encoder, avifRWData * obu, avifBool alpha)
 {
     avifBool success = AVIF_FALSE;
     aom_codec_iface_t * encoder_interface = aom_codec_av1_cx();
@@ -254,7 +248,8 @@ static avifBool aomCodecEncodeImage(avifCodec * codec, avifImage * image, avifEn
         }
     }
 
-    if (image->depth > 8) {
+    int aomMajorVersion = aom_codec_version_major();
+    if ((aomMajorVersion < 2) && (image->depth > 8)) {
         // Due to a known issue with libavif v1.0.0-errata1-avif, 10bpc and
         // 12bpc image encodes will call the wrong variant of
         // aom_subtract_block when cpu-used is 7 or 8, and crash. Until we get
@@ -366,14 +361,12 @@ static avifBool aomCodecEncodeImage(avifCodec * codec, avifImage * image, avifEn
             }
         }
 
-        if (image->profileFormat == AVIF_PROFILE_FORMAT_NCLX) {
-            aomImage->cp = (aom_color_primaries_t)image->nclx.colourPrimaries;
-            aomImage->tc = (aom_transfer_characteristics_t)image->nclx.transferCharacteristics;
-            aomImage->mc = (aom_matrix_coefficients_t)image->nclx.matrixCoefficients;
-            aom_codec_control(&aomEncoder, AV1E_SET_COLOR_PRIMARIES, aomImage->cp);
-            aom_codec_control(&aomEncoder, AV1E_SET_TRANSFER_CHARACTERISTICS, aomImage->tc);
-            aom_codec_control(&aomEncoder, AV1E_SET_MATRIX_COEFFICIENTS, aomImage->mc);
-        }
+        aomImage->cp = (aom_color_primaries_t)image->colorPrimaries;
+        aomImage->tc = (aom_transfer_characteristics_t)image->transferCharacteristics;
+        aomImage->mc = (aom_matrix_coefficients_t)image->matrixCoefficients;
+        aom_codec_control(&aomEncoder, AV1E_SET_COLOR_PRIMARIES, aomImage->cp);
+        aom_codec_control(&aomEncoder, AV1E_SET_TRANSFER_CHARACTERISTICS, aomImage->tc);
+        aom_codec_control(&aomEncoder, AV1E_SET_MATRIX_COEFFICIENTS, aomImage->mc);
     }
 
     aom_codec_encode(&aomEncoder, aomImage, 0, 1, 0);

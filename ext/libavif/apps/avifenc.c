@@ -25,12 +25,14 @@ static void syntax(void)
     printf("Options:\n");
     printf("    -h,--help                         : Show syntax help\n");
     printf("    -j,--jobs J                       : Number of jobs (worker threads, default: 1)\n");
+    printf("    -l,--lossless                     : Set all defaults to encode losslessly, and emit warnings when settings/input don't allow for it\n");
     printf("    -d,--depth D                      : Output depth [8,10,12]. (JPEG/PNG only; For y4m, depth is retained)\n");
     printf("    -y,--yuv FORMAT                   : Output format [default=444, 422, 420]. (JPEG/PNG only; For y4m, format is retained)\n");
-    printf("    -n,--nclx P/T/M                   : Set nclx colr box values (3 raw numbers, use -r to set range flag)\n");
-    printf("                                        P = enum avifNclxColourPrimaries\n");
-    printf("                                        T = enum avifNclxTransferCharacteristics\n");
-    printf("                                        M = enum avifNclxMatrixCoefficients\n");
+    printf("    --cicp,--nclx P/T/M               : Set CICP values (nclx colr box) (3 raw numbers, use -r to set range flag)\n");
+    printf("                                        P = enum avifColorPrimaries\n");
+    printf("                                        T = enum avifTransferCharacteristics\n");
+    printf("                                        M = enum avifMatrixCoefficients\n");
+    printf("                                        (use 2 for any you wish to leave unspecified)\n");
     printf("    -r,--range RANGE                  : YUV range [limited or l, full or f]. (JPEG/PNG only, default: full; For y4m, range is retained)\n");
     printf("    --min Q                           : Set min quantizer for color (%d-%d, where %d is lossless)\n",
            AVIF_QUANTIZER_BEST_QUALITY,
@@ -48,10 +50,11 @@ static void syntax(void)
            AVIF_QUANTIZER_BEST_QUALITY,
            AVIF_QUANTIZER_WORST_QUALITY,
            AVIF_QUANTIZER_LOSSLESS);
-    printf("    -s,--speed S                      : Encoder speed (%d-%d, slowest-fastest, 'default' for codec internal defaults. default speed: 8)\n",
+    printf("    -s,--speed S                      : Encoder speed (%d-%d, slowest-fastest, 'default' or 'd' for codec internal defaults. default speed: 8)\n",
            AVIF_SPEED_SLOWEST,
            AVIF_SPEED_FASTEST);
     printf("    -c,--codec C                      : AV1 codec to use (choose from versions list below)\n");
+    printf("    --ignore-icc                      : If the input file contains an embedded ICC profile, ignore it (no-op if absent)\n");
     printf("    --pasp H,V                        : Add pasp property (aspect ratio). H=horizontal spacing, V=vertical spacing\n");
     printf("    --clap WN,WD,HN,HD,HON,HOD,VON,VOD: Add clap property (clean aperture). Width, Height, HOffset, VOffset (in num/denom pairs)\n");
     printf("    --irot ANGLE                      : Add irot property (rotation). [0-3], makes (90 * ANGLE) degree rotation anti-clockwise\n");
@@ -78,17 +81,16 @@ static const char * quantizerString(int quantizer)
     return "Low";
 }
 
-static avifBool parseNCLX(avifNclxColorProfile * nclx, const char * arg)
+static avifBool parseCICP(int cicp[3], const char * arg)
 {
     char buffer[128];
     strncpy(buffer, arg, 127);
     buffer[127] = 0;
 
-    int values[3];
     int index = 0;
     char * token = strtok(buffer, "/");
     while (token != NULL) {
-        values[index] = atoi(token);
+        cicp[index] = atoi(token);
         ++index;
         if (index >= 3) {
             break;
@@ -98,10 +100,6 @@ static avifBool parseNCLX(avifNclxColorProfile * nclx, const char * arg)
     }
 
     if (index == 3) {
-        nclx->colourPrimaries = (uint16_t)values[0];
-        nclx->transferCharacteristics = (uint16_t)values[1];
-        nclx->matrixCoefficients = (uint16_t)values[2];
-        nclx->range = AVIF_RANGE_FULL; // This will be set later
         return AVIF_TRUE;
     }
     return AVIF_FALSE;
@@ -154,12 +152,16 @@ int main(int argc, char * argv[])
     uint8_t imirAxis = 0xff;  // sentinel value indicating "unused"
     avifCodecChoice codecChoice = AVIF_CODEC_CHOICE_AUTO;
     avifRange requestedRange = AVIF_RANGE_FULL;
-    avifBool requestedRangeSet = AVIF_FALSE;
-    avifBool nclxSet = AVIF_FALSE;
+    avifBool lossless = AVIF_FALSE;
+    avifBool ignoreICC = AVIF_FALSE;
     avifEncoder * encoder = NULL;
 
-    avifNclxColorProfile nclx;
-    memset(&nclx, 0, sizeof(avifNclxColorProfile));
+    // By default, the color profile itself is unspecified, so CP/TC are set (to 2) accordingly.
+    // However, if the end-user doesn't specify any CICP, we will convert to YUV using BT709
+    // coefficients anyway (as MC:2 falls back to MC:1), so we might as well signal it explicitly.
+    avifColorPrimaries colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
+    avifTransferCharacteristics transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
+    avifMatrixCoefficients matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT709;
 
     int argIndex = 1;
     while (argIndex < argc) {
@@ -229,12 +231,15 @@ int main(int argc, char * argv[])
             if (maxQuantizerAlpha > AVIF_QUANTIZER_WORST_QUALITY) {
                 maxQuantizerAlpha = AVIF_QUANTIZER_WORST_QUALITY;
             }
-        } else if (!strcmp(arg, "-n") || !strcmp(arg, "--nclx")) {
+        } else if (!strcmp(arg, "--cicp") || !strcmp(arg, "--nclx")) {
             NEXTARG();
-            if (!parseNCLX(&nclx, arg)) {
+            int cicp[3];
+            if (!parseCICP(cicp, arg)) {
                 return 1;
             }
-            nclxSet = AVIF_TRUE;
+            colorPrimaries = (avifColorPrimaries)cicp[0];
+            transferCharacteristics = (avifTransferCharacteristics)cicp[1];
+            matrixCoefficients = (avifMatrixCoefficients)cicp[2];
         } else if (!strcmp(arg, "-r") || !strcmp(arg, "--range")) {
             NEXTARG();
             if (!strcmp(arg, "limited") || !strcmp(arg, "l")) {
@@ -245,7 +250,6 @@ int main(int argc, char * argv[])
                 fprintf(stderr, "ERROR: Unknown range: %s\n", arg);
                 return 1;
             }
-            requestedRangeSet = AVIF_TRUE;
         } else if (!strcmp(arg, "-s") || !strcmp(arg, "--speed")) {
             NEXTARG();
             if (!strcmp(arg, "default") || !strcmp(arg, "d")) {
@@ -272,6 +276,8 @@ int main(int argc, char * argv[])
                     return 1;
                 }
             }
+        } else if (!strcmp(arg, "--ignore-icc")) {
+            ignoreICC = AVIF_TRUE;
         } else if (!strcmp(arg, "--pasp")) {
             NEXTARG();
             paspCount = parseU32List(paspValues, arg);
@@ -300,6 +306,19 @@ int main(int argc, char * argv[])
                 fprintf(stderr, "ERROR: Invalid imir axis: %s\n", arg);
                 return 1;
             }
+        } else if (!strcmp(arg, "-l") || !strcmp(arg, "--lossless")) {
+            lossless = AVIF_TRUE;
+
+            // Set defaults, and warn later on if anything looks incorrect
+            requestedFormat = AVIF_PIXEL_FORMAT_YUV444;  // don't subsample when using AVIF_MATRIX_COEFFICIENTS_IDENTITY
+            minQuantizer = AVIF_QUANTIZER_LOSSLESS;      // lossless
+            maxQuantizer = AVIF_QUANTIZER_LOSSLESS;      // lossless
+            minQuantizerAlpha = AVIF_QUANTIZER_LOSSLESS; // lossless
+            maxQuantizerAlpha = AVIF_QUANTIZER_LOSSLESS; // lossless
+            codecChoice = AVIF_CODEC_CHOICE_AOM;         // rav1e doesn't support lossless transform yet:
+                                                         // https://github.com/xiph/rav1e/issues/151
+            requestedRange = AVIF_RANGE_FULL;            // avoid limited range
+            matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_IDENTITY; // this is key for lossless
         } else {
             // Positional argument
             if (!inputFilename) {
@@ -325,50 +344,49 @@ int main(int argc, char * argv[])
     avifImage * avif = avifImageCreateEmpty();
     avifRWData raw = AVIF_DATA_EMPTY;
 
-    // Set range and nclx in advance so any upcoming RGB -> YUV use the proper coefficients
-    if (requestedRangeSet) {
-        avif->yuvRange = requestedRange;
-    }
-    if (nclxSet) {
-        nclx.range = avif->yuvRange;
-        avifImageSetProfileNCLX(avif, &nclx);
-    }
-
-    const char * fileExt = strrchr(inputFilename, '.');
-    if (!fileExt) {
+    uint32_t sourceDepth = 0;
+    avifBool sourceWasRGB = AVIF_TRUE;
+    avifAppFileFormat inputFormat = avifGuessFileFormat(inputFilename);
+    if (inputFormat == AVIF_APP_FILE_FORMAT_UNKNOWN) {
         fprintf(stderr, "Cannot determine input file extension: %s\n", inputFilename);
         returnCode = 1;
         goto cleanup;
     }
-    if (!strcmp(fileExt, ".y4m")) {
-        if (requestedRangeSet) {
-            fprintf(stderr, "WARNING: Ignoring range (-r) value when encoding from y4m content.\n");
-        }
+
+    // Set these in advance so any upcoming RGB -> YUV use the proper coefficients
+    avif->colorPrimaries = colorPrimaries;
+    avif->transferCharacteristics = transferCharacteristics;
+    avif->matrixCoefficients = matrixCoefficients;
+    avif->yuvRange = requestedRange;
+
+    if (inputFormat == AVIF_APP_FILE_FORMAT_Y4M) {
         if (!y4mRead(avif, inputFilename)) {
             returnCode = 1;
             goto cleanup;
         }
-        if (nclxSet && (nclx.range != avif->yuvRange)) {
-            // Update the NCLX profile based on the new range from the y4m file
-            nclx.range = avif->yuvRange;
-            avifImageSetProfileNCLX(avif, &nclx);
-        }
-    } else if (!strcmp(fileExt, ".jpg") || !strcmp(fileExt, ".jpeg")) {
+        sourceDepth = avif->depth;
+        sourceWasRGB = AVIF_FALSE;
+    } else if (inputFormat == AVIF_APP_FILE_FORMAT_JPEG) {
         if (!avifJPEGRead(avif, inputFilename, requestedFormat, requestedDepth)) {
             returnCode = 1;
             goto cleanup;
         }
-    } else if (!strcmp(fileExt, ".png")) {
-        if (!avifPNGRead(avif, inputFilename, requestedFormat, requestedDepth)) {
+        sourceDepth = 8;
+    } else if (inputFormat == AVIF_APP_FILE_FORMAT_PNG) {
+        if (!avifPNGRead(avif, inputFilename, requestedFormat, requestedDepth, &sourceDepth)) {
             returnCode = 1;
             goto cleanup;
         }
     } else {
-        fprintf(stderr, "Unrecognized file extension: %s\n", fileExt + 1);
+        fprintf(stderr, "Unrecognized file extension: %s\n", inputFilename);
         returnCode = 1;
         goto cleanup;
     }
     printf("Successfully loaded: %s\n", inputFilename);
+
+    if (ignoreICC) {
+        avifImageSetProfileICC(avif, NULL, 0);
+    }
 
     if (paspCount == 2) {
         avif->transformFlags |= AVIF_TRANSFORM_PASP;
@@ -395,7 +413,78 @@ int main(int argc, char * argv[])
         avif->imir.axis = imirAxis;
     }
 
-    printf("AVIF to be written:\n");
+    avifBool usingAOM = AVIF_FALSE;
+    const char * codecName = avifCodecName(codecChoice, AVIF_CODEC_FLAG_CAN_ENCODE);
+    if (codecName && !strcmp(codecName, "aom")) {
+        usingAOM = AVIF_TRUE;
+    }
+    avifBool hasAlpha = (avif->alphaPlane && avif->alphaRowBytes);
+    avifBool losslessColorQP = (minQuantizer == AVIF_QUANTIZER_LOSSLESS) && (maxQuantizer == AVIF_QUANTIZER_LOSSLESS);
+    avifBool losslessAlphaQP = (minQuantizerAlpha == AVIF_QUANTIZER_LOSSLESS) && (maxQuantizerAlpha == AVIF_QUANTIZER_LOSSLESS);
+    avifBool depthMatches = (sourceDepth == avif->depth);
+    avifBool using444 = (avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV444);
+    avifBool usingFullRange = (avif->yuvRange == AVIF_RANGE_FULL);
+    avifBool usingIdentityMatrix = (avif->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_IDENTITY);
+
+    // Guess if the enduser is asking for lossless and enable it so that warnings can be emitted
+    if (!lossless && losslessColorQP && (!hasAlpha || losslessAlphaQP)) {
+        // The enduser is probably expecting lossless. Turn it on and emit warnings
+        printf("Min/max QPs set to %d, assuming --lossless to enable warnings on potential lossless issues.\n", AVIF_QUANTIZER_LOSSLESS);
+        lossless = AVIF_TRUE;
+    }
+
+    // Check for any reasons lossless will fail, and complain loudly
+    if (lossless) {
+        if (!usingAOM) {
+            fprintf(stderr, "WARNING: [--lossless] Only aom (-c) supports lossless transforms. Output might not be lossless.\n");
+            lossless = AVIF_FALSE;
+        }
+
+        if (!losslessColorQP) {
+            fprintf(stderr,
+                    "WARNING: [--lossless] Color quantizer range (--min, --max) not set to %d. Color output might not be lossless.\n",
+                    AVIF_QUANTIZER_LOSSLESS);
+            lossless = AVIF_FALSE;
+        }
+
+        if (hasAlpha && !losslessAlphaQP) {
+            fprintf(stderr,
+                    "WARNING: [--lossless] Alpha present and alpha quantizer range (--minalpha, --maxalpha) not set to %d. Alpha output might not be lossless.\n",
+                    AVIF_QUANTIZER_LOSSLESS);
+            lossless = AVIF_FALSE;
+        }
+
+        if (!depthMatches) {
+            fprintf(stderr,
+                    "WARNING: [--lossless] Input depth (%d) does not match output depth (%d). Output might not be lossless.\n",
+                    sourceDepth,
+                    avif->depth);
+            lossless = AVIF_FALSE;
+        }
+
+        if (sourceWasRGB) {
+            if (!using444) {
+                fprintf(stderr, "WARNING: [--lossless] Input data was RGB and YUV subsampling (-y) isn't YUV444. Output might not be lossless.\n");
+                lossless = AVIF_FALSE;
+            }
+
+            if (!usingFullRange) {
+                fprintf(stderr, "WARNING: [--lossless] Input data was RGB and output range (-r) isn't full. Output might not be lossless.\n");
+                lossless = AVIF_FALSE;
+            }
+
+            if (!usingIdentityMatrix) {
+                fprintf(stderr, "WARNING: [--lossless] Input data was RGB and matrixCoefficients isn't set to identity (--cicp x/x/0); Output might not be lossless.\n");
+                lossless = AVIF_FALSE;
+            }
+        }
+    }
+
+    const char * lossyHint = " (Lossy)";
+    if (lossless) {
+        lossyHint = " (Lossless)";
+    }
+    printf("AVIF to be written:%s\n", lossyHint);
     avifImageDump(avif);
 
     printf("Encoding with AV1 codec '%s' speed [%d], color QP [%d (%s) <-> %d (%s)], alpha QP [%d (%s) <-> %d (%s)], %d worker thread(s), please wait...\n",
@@ -436,7 +525,7 @@ int main(int argc, char * argv[])
         fprintf(stderr, "Failed to write %zu bytes: %s\n", raw.size, outputFilename);
         returnCode = 1;
     } else {
-        printf("Wrote: %s\n", outputFilename);
+        printf("Wrote AVIF: %s\n", outputFilename);
     }
     fclose(f);
 

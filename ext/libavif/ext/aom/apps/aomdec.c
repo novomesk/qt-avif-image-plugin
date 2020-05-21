@@ -76,8 +76,6 @@ static const arg_def_t limitarg =
     ARG_DEF(NULL, "limit", 1, "Stop decoding after n frames");
 static const arg_def_t skiparg =
     ARG_DEF(NULL, "skip", 1, "Skip the first n input frames");
-static const arg_def_t postprocarg =
-    ARG_DEF(NULL, "postproc", 0, "Postprocess decoded frames");
 static const arg_def_t summaryarg =
     ARG_DEF(NULL, "summary", 0, "Show timing summary");
 static const arg_def_t outputfile =
@@ -108,13 +106,11 @@ static const arg_def_t skipfilmgrain =
     ARG_DEF(NULL, "skip-film-grain", 0, "Skip film grain application");
 
 static const arg_def_t *all_args[] = {
-  &help,           &codecarg,   &use_yv12,      &use_i420,
-  &flipuvarg,      &rawvideo,   &noblitarg,     &progressarg,
-  &limitarg,       &skiparg,    &postprocarg,   &summaryarg,
-  &outputfile,     &threadsarg, &verbosearg,    &scalearg,
-  &fb_arg,         &md5arg,     &framestatsarg, &continuearg,
-  &outbitdeptharg, &isannexb,   &oppointarg,    &outallarg,
-  &skipfilmgrain,  NULL
+  &help,       &codecarg,   &use_yv12,      &use_i420,      &flipuvarg,
+  &rawvideo,   &noblitarg,  &progressarg,   &limitarg,      &skiparg,
+  &summaryarg, &outputfile, &threadsarg,    &verbosearg,    &scalearg,
+  &fb_arg,     &md5arg,     &framestatsarg, &continuearg,   &outbitdeptharg,
+  &isannexb,   &oppointarg, &outallarg,     &skipfilmgrain, NULL
 };
 
 #if CONFIG_LIBYUV
@@ -437,7 +433,7 @@ static int main_loop(int argc, const char **argv_) {
   FILE *infile;
   int frame_in = 0, frame_out = 0, flipuv = 0, noblit = 0;
   int do_md5 = 0, progress = 0;
-  int stop_after = 0, postproc = 0, summary = 0, quiet = 1;
+  int stop_after = 0, summary = 0, quiet = 1;
   int arg_skip = 0;
   int keep_going = 0;
   const AvxInterface *interface = NULL;
@@ -536,8 +532,6 @@ static int main_loop(int argc, const char **argv_) {
       stop_after = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &skiparg, argi)) {
       arg_skip = arg_parse_uint(&arg);
-    } else if (arg_match(&arg, &postprocarg, argi)) {
-      postproc = 1;
     } else if (arg_match(&arg, &md5arg, argi)) {
       do_md5 = 1;
     } else if (arg_match(&arg, &framestatsarg, argi)) {
@@ -676,7 +670,7 @@ static int main_loop(int argc, const char **argv_) {
 
   if (!interface) interface = get_aom_decoder_by_index(0);
 
-  dec_flags = (postproc ? AOM_CODEC_USE_POSTPROC : 0);
+  dec_flags = 0;
   if (aom_codec_dec_init(&decoder, interface->codec_interface(), &cfg,
                          dec_flags)) {
     fprintf(stderr, "Failed to initialize decoder: %s\n",
@@ -686,25 +680,27 @@ static int main_loop(int argc, const char **argv_) {
 
   if (!quiet) fprintf(stderr, "%s\n", decoder.name);
 
-  if (aom_codec_control(&decoder, AV1D_SET_IS_ANNEXB, is_annexb)) {
+  if (AOM_CODEC_CONTROL_TYPECHECKED(&decoder, AV1D_SET_IS_ANNEXB, is_annexb)) {
     fprintf(stderr, "Failed to set is_annexb: %s\n", aom_codec_error(&decoder));
     goto fail;
   }
 
-  if (aom_codec_control(&decoder, AV1D_SET_OPERATING_POINT, operating_point)) {
+  if (AOM_CODEC_CONTROL_TYPECHECKED(&decoder, AV1D_SET_OPERATING_POINT,
+                                    operating_point)) {
     fprintf(stderr, "Failed to set operating_point: %s\n",
             aom_codec_error(&decoder));
     goto fail;
   }
 
-  if (aom_codec_control(&decoder, AV1D_SET_OUTPUT_ALL_LAYERS,
-                        output_all_layers)) {
+  if (AOM_CODEC_CONTROL_TYPECHECKED(&decoder, AV1D_SET_OUTPUT_ALL_LAYERS,
+                                    output_all_layers)) {
     fprintf(stderr, "Failed to set output_all_layers: %s\n",
             aom_codec_error(&decoder));
     goto fail;
   }
 
-  if (aom_codec_control(&decoder, AV1D_SET_SKIP_FILM_GRAIN, skip_film_grain)) {
+  if (AOM_CODEC_CONTROL_TYPECHECKED(&decoder, AV1D_SET_SKIP_FILM_GRAIN,
+                                    skip_film_grain)) {
     fprintf(stderr, "Failed to set skip_film_grain: %s\n",
             aom_codec_error(&decoder));
     goto fail;
@@ -760,7 +756,8 @@ static int main_loop(int argc, const char **argv_) {
 
         if (framestats_file) {
           int qp;
-          if (aom_codec_control(&decoder, AOMD_GET_LAST_QUANTIZER, &qp)) {
+          if (AOM_CODEC_CONTROL_TYPECHECKED(&decoder, AOMD_GET_LAST_QUANTIZER,
+                                            &qp)) {
             warn("Failed AOMD_GET_LAST_QUANTIZER: %s",
                  aom_codec_error(&decoder));
             if (!keep_going) goto fail;
@@ -794,7 +791,8 @@ static int main_loop(int argc, const char **argv_) {
       ++frame_out;
       got_data = 1;
 
-      if (aom_codec_control(&decoder, AOMD_GET_FRAME_CORRUPTED, &corrupted)) {
+      if (AOM_CODEC_CONTROL_TYPECHECKED(&decoder, AOMD_GET_FRAME_CORRUPTED,
+                                        &corrupted)) {
         warn("Failed AOM_GET_FRAME_CORRUPTED: %s", aom_codec_error(&decoder));
         if (!keep_going) goto fail;
       }
@@ -818,8 +816,8 @@ static int main_loop(int argc, const char **argv_) {
             int render_height = aom_input_ctx.height;
             if (!render_width || !render_height) {
               int render_size[2];
-              if (aom_codec_control(&decoder, AV1D_GET_DISPLAY_SIZE,
-                                    render_size)) {
+              if (AOM_CODEC_CONTROL_TYPECHECKED(&decoder, AV1D_GET_DISPLAY_SIZE,
+                                                render_size)) {
                 // As last resort use size of first frame as display size.
                 render_width = img->d_w;
                 render_height = img->d_h;

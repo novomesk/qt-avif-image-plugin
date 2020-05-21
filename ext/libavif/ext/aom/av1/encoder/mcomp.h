@@ -42,9 +42,8 @@ typedef struct search_site {
 } search_site;
 
 typedef struct search_site_config {
-  search_site site[MAX_MVSEARCH_STEPS * 2][16 + 1];
-  // Number of search steps.
-  int num_search_steps;
+  search_site ss[MAX_MVSEARCH_STEPS * 2][16 + 1];
+  int ss_count;
   int searches_per_step[MAX_MVSEARCH_STEPS * 2];
   int radius[MAX_MVSEARCH_STEPS * 2];
   int stride;
@@ -61,34 +60,21 @@ struct SPEED_FEATURES;
 // =============================================================================
 //  Cost functions
 // =============================================================================
-
-enum {
-  MV_COST_ENTROPY,    // Use the entropy rate of the mv as the cost
-  MV_COST_L1_LOWRES,  // Use the l1 norm of the mv as the cost (<480p)
-  MV_COST_L1_MIDRES,  // Use the l1 norm of the mv as the cost (>=480p)
-  MV_COST_L1_HDRES,   // Use the l1 norm of the mv as the cost (>=720p)
-  MV_COST_NONE        // Use 0 as as cost irrespective of the current mv
-} UENUM1BYTE(MV_COST_TYPE);
-
 typedef struct {
-  // The reference mv used to compute the mv cost
   const MV *ref_mv;
   FULLPEL_MV full_ref_mv;
-  MV_COST_TYPE mv_cost_type;
   const int *mvjcost;
   const int *mvcost[2];
   int error_per_bit;
-  // A multiplier used to convert rate to sad cost
   int sad_per_bit;
+  MV_COST_TYPE mv_cost_type;
 } MV_COST_PARAMS;
 
 int av1_mv_bit_cost(const MV *mv, const MV *ref_mv, const int *mvjcost,
                     int *mvcost[2], int weight);
 
-int av1_get_mvpred_sse(const MV_COST_PARAMS *mv_cost_params,
-                       const FULLPEL_MV best_mv,
-                       const aom_variance_fn_ptr_t *vfp,
-                       const struct buf_2d *src, const struct buf_2d *pre);
+int av1_get_mvpred_sse(const MACROBLOCK *x, const FULLPEL_MV *best_mv,
+                       const MV *ref_mv, const aom_variance_fn_ptr_t *vfp);
 int av1_get_mvpred_compound_var(const MV_COST_PARAMS *ms_params,
                                 const FULLPEL_MV best_mv,
                                 const uint8_t *second_pred, const uint8_t *mask,
@@ -143,7 +129,6 @@ enum {
 // during the search
 typedef struct {
   BLOCK_SIZE bsize;
-  // A function pointer to the simd function for fast computation
   const aom_variance_fn_ptr_t *vfp;
 
   MSBuffers ms_buffers;
@@ -160,10 +145,6 @@ typedef struct {
                           // higher than the threshold.
   const struct MESH_PATTERN *mesh_patterns[2];
 
-  // Use maximum search interval of 4 if true. This helps motion search to find
-  // the best motion vector for screen content types.
-  int fine_search_interval;
-
   int is_intra_mode;
 
   int fast_obmc_search;
@@ -176,8 +157,7 @@ void av1_make_default_fullpel_ms_params(FULLPEL_MOTION_SEARCH_PARAMS *ms_params,
                                         const struct AV1_COMP *cpi,
                                         const MACROBLOCK *x, BLOCK_SIZE bsize,
                                         const MV *ref_mv,
-                                        const search_site_config *search_sites,
-                                        int fine_search_interval);
+                                        const search_site_config *search_sites);
 
 // Sets up configs for fullpixel diamond search
 void av1_init_dsmotion_compensation(search_site_config *cfg, int stride);

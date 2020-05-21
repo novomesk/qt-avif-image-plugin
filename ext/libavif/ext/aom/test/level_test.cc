@@ -93,12 +93,12 @@ TEST_P(LevelTest, TestTargetLevelApi) {
            level != 21 && level != 22 && level != 23) ||
           level == 31 || operating_point > 31) {
         EXPECT_EQ(AOM_CODEC_OK,
-                  aom_codec_control(&enc, AV1E_SET_TARGET_SEQ_LEVEL_IDX,
-                                    target_level));
+                  AOM_CODEC_CONTROL_TYPECHECKED(
+                      &enc, AV1E_SET_TARGET_SEQ_LEVEL_IDX, target_level));
       } else {
         EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
-                  aom_codec_control(&enc, AV1E_SET_TARGET_SEQ_LEVEL_IDX,
-                                    target_level));
+                  AOM_CODEC_CONTROL_TYPECHECKED(
+                      &enc, AV1E_SET_TARGET_SEQ_LEVEL_IDX, target_level));
       }
     }
   }

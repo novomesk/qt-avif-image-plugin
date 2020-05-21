@@ -24,7 +24,7 @@ static avifBool rav1eCodecOpen(struct avifCodec * codec, uint32_t firstSampleInd
     return AVIF_TRUE;
 }
 
-static avifBool rav1eCodecEncodeImage(avifCodec * codec, avifImage * image, avifEncoder * encoder, avifRWData * obu, avifBool alpha)
+static avifBool rav1eCodecEncodeImage(avifCodec * codec, const avifImage * image, avifEncoder * encoder, avifRWData * obu, avifBool alpha)
 {
     (void)codec; // unused
 
@@ -113,12 +113,10 @@ static avifBool rav1eCodecEncodeImage(avifCodec * codec, avifImage * image, avif
         }
     }
 
-    if (image->profileFormat == AVIF_PROFILE_FORMAT_NCLX) {
-        rav1e_config_set_color_description(rav1eConfig,
-                                           (RaMatrixCoefficients)image->nclx.matrixCoefficients,
-                                           (RaColorPrimaries)image->nclx.colourPrimaries,
-                                           (RaTransferCharacteristics)image->nclx.transferCharacteristics);
-    }
+    rav1e_config_set_color_description(rav1eConfig,
+                                       (RaMatrixCoefficients)image->matrixCoefficients,
+                                       (RaColorPrimaries)image->colorPrimaries,
+                                       (RaTransferCharacteristics)image->transferCharacteristics);
 
     rav1eContext = rav1e_context_new(rav1eConfig);
     if (!rav1eContext) {

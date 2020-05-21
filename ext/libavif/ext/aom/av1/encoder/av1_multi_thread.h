@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2018, Alliance for Open Media. All rights reserved
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -9,18 +9,13 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AOM_AOM_DSP_POSTPROC_H_
-#define AOM_AOM_DSP_POSTPROC_H_
+#ifndef AV1_ENCODER_AV1_MULTI_THREAD_H
+#define AV1_ENCODER_AV1_MULTI_THREAD_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "av1/encoder/encoder.h"
 
-// Fills a noise buffer with gaussian noise strength determined by sigma.
-int aom_setup_noise(double sigma, int size, char *noise);
+void av1_row_mt_mem_alloc(AV1_COMP *cpi, int max_sb_rows);
 
-#ifdef __cplusplus
-}
-#endif
+void av1_row_mt_mem_dealloc(AV1_COMP *cpi);
 
-#endif  // AOM_AOM_DSP_POSTPROC_H_
+#endif  // AV1_ENCODER_AV1_MULTI_THREAD_H

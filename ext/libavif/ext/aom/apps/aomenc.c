@@ -1896,14 +1896,10 @@ static void initialize_encoder(struct stream_state *stream,
                      &stream->config.cfg, flags);
   ctx_exit_on_error(&stream->encoder, "Failed to initialize encoder");
 
-  /* Note that we bypass the aom_codec_control wrapper macro because
-   * we're being clever to store the control IDs in an array. Real
-   * applications will want to make use of the enumerations directly
-   */
   for (i = 0; i < stream->config.arg_ctrl_cnt; i++) {
     int ctrl = stream->config.arg_ctrls[i][0];
     int value = stream->config.arg_ctrls[i][1];
-    if (aom_codec_control_(&stream->encoder, ctrl, value))
+    if (aom_codec_control(&stream->encoder, ctrl, value))
       fprintf(stderr, "Error: Tried to set control %d = %d\n", ctrl, value);
 
     ctx_exit_on_error(&stream->encoder, "Failed to control codec");
@@ -1911,14 +1907,14 @@ static void initialize_encoder(struct stream_state *stream,
 
 #if CONFIG_TUNE_VMAF
   if (stream->config.vmaf_model_path) {
-    aom_codec_control_(&stream->encoder, AV1E_SET_VMAF_MODEL_PATH,
-                       stream->config.vmaf_model_path);
+    AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder, AV1E_SET_VMAF_MODEL_PATH,
+                                  stream->config.vmaf_model_path);
   }
 #endif
 
   if (stream->config.film_grain_filename) {
-    aom_codec_control_(&stream->encoder, AV1E_SET_FILM_GRAIN_TABLE,
-                       stream->config.film_grain_filename);
+    AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder, AV1E_SET_FILM_GRAIN_TABLE,
+                                  stream->config.film_grain_filename);
   }
 
 #if CONFIG_AV1_DECODER
@@ -1928,18 +1924,20 @@ static void initialize_encoder(struct stream_state *stream,
     aom_codec_dec_init(&stream->decoder, decoder->codec_interface(), &cfg, 0);
 
     if (strcmp(global->codec->name, "av1") == 0) {
-      aom_codec_control(&stream->decoder, AV1_SET_TILE_MODE,
-                        stream->config.cfg.large_scale_tile);
+      AOM_CODEC_CONTROL_TYPECHECKED(&stream->decoder, AV1_SET_TILE_MODE,
+                                    stream->config.cfg.large_scale_tile);
       ctx_exit_on_error(&stream->decoder, "Failed to set decode_tile_mode");
 
-      aom_codec_control(&stream->decoder, AV1D_SET_IS_ANNEXB,
-                        stream->config.cfg.save_as_annexb);
+      AOM_CODEC_CONTROL_TYPECHECKED(&stream->decoder, AV1D_SET_IS_ANNEXB,
+                                    stream->config.cfg.save_as_annexb);
       ctx_exit_on_error(&stream->decoder, "Failed to set is_annexb");
 
-      aom_codec_control(&stream->decoder, AV1_SET_DECODE_TILE_ROW, -1);
+      AOM_CODEC_CONTROL_TYPECHECKED(&stream->decoder, AV1_SET_DECODE_TILE_ROW,
+                                    -1);
       ctx_exit_on_error(&stream->decoder, "Failed to set decode_tile_row");
 
-      aom_codec_control(&stream->decoder, AV1_SET_DECODE_TILE_COL, -1);
+      AOM_CODEC_CONTROL_TYPECHECKED(&stream->decoder, AV1_SET_DECODE_TILE_COL,
+                                    -1);
       ctx_exit_on_error(&stream->decoder, "Failed to set decode_tile_col");
     }
   }
@@ -2038,7 +2036,8 @@ static void update_quantizer_histogram(struct stream_state *stream) {
   if (stream->config.cfg.g_pass != AOM_RC_FIRST_PASS) {
     int q;
 
-    aom_codec_control(&stream->encoder, AOME_GET_LAST_QUANTIZER_64, &q);
+    AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder, AOME_GET_LAST_QUANTIZER_64,
+                                  &q);
     ctx_exit_on_error(&stream->encoder, "Failed to read quantizer");
     stream->counts[q]++;
   }
@@ -2165,8 +2164,10 @@ static void test_decode(struct stream_state *stream,
   if (stream->mismatch_seen) return;
 
   /* Get the internal reference frame */
-  aom_codec_control(&stream->encoder, AV1_GET_NEW_FRAME_IMAGE, &enc_img);
-  aom_codec_control(&stream->decoder, AV1_GET_NEW_FRAME_IMAGE, &dec_img);
+  AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder, AV1_GET_NEW_FRAME_IMAGE,
+                                &enc_img);
+  AOM_CODEC_CONTROL_TYPECHECKED(&stream->decoder, AV1_GET_NEW_FRAME_IMAGE,
+                                &dec_img);
 
   if ((enc_img.fmt & AOM_IMG_FMT_HIGHBITDEPTH) !=
       (dec_img.fmt & AOM_IMG_FMT_HIGHBITDEPTH)) {
@@ -2403,16 +2404,20 @@ int main(int argc, const char **argv_) {
                        input.file_type == FILE_TYPE_Y4M) {
               // Note that here the input file values for chroma subsampling
               // are used instead of those from the command line.
-              aom_codec_control(&stream->encoder, AV1E_SET_CHROMA_SUBSAMPLING_X,
-                                input.y4m.dst_c_dec_h >> 1);
-              aom_codec_control(&stream->encoder, AV1E_SET_CHROMA_SUBSAMPLING_Y,
-                                input.y4m.dst_c_dec_v >> 1);
+              AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                            AV1E_SET_CHROMA_SUBSAMPLING_X,
+                                            input.y4m.dst_c_dec_h >> 1);
+              AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                            AV1E_SET_CHROMA_SUBSAMPLING_Y,
+                                            input.y4m.dst_c_dec_v >> 1);
             } else if (input.bit_depth == 12 &&
                        input.file_type == FILE_TYPE_RAW) {
-              aom_codec_control(&stream->encoder, AV1E_SET_CHROMA_SUBSAMPLING_X,
-                                stream->chroma_subsampling_x);
-              aom_codec_control(&stream->encoder, AV1E_SET_CHROMA_SUBSAMPLING_Y,
-                                stream->chroma_subsampling_y);
+              AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                            AV1E_SET_CHROMA_SUBSAMPLING_X,
+                                            stream->chroma_subsampling_x);
+              AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                            AV1E_SET_CHROMA_SUBSAMPLING_Y,
+                                            stream->chroma_subsampling_y);
             }
             break;
           default: break;

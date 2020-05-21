@@ -121,6 +121,8 @@ list(APPEND AOM_AV1_ENCODER_SOURCES
             "${AOM_ROOT}/av1/encoder/av1_fwd_txfm1d.h"
             "${AOM_ROOT}/av1/encoder/av1_fwd_txfm1d_cfg.h"
             "${AOM_ROOT}/av1/encoder/av1_fwd_txfm2d.c"
+            "${AOM_ROOT}/av1/encoder/av1_multi_thread.c"
+            "${AOM_ROOT}/av1/encoder/av1_multi_thread.h"
             "${AOM_ROOT}/av1/encoder/av1_quantize.c"
             "${AOM_ROOT}/av1/encoder/av1_quantize.h"
             "${AOM_ROOT}/av1/encoder/bitstream.c"
@@ -244,6 +246,7 @@ list(APPEND AOM_AV1_COMMON_INTRIN_SSE2
             "${AOM_ROOT}/av1/common/x86/cfl_sse2.c"
             "${AOM_ROOT}/av1/common/x86/convolve_2d_sse2.c"
             "${AOM_ROOT}/av1/common/x86/convolve_sse2.c"
+            "${AOM_ROOT}/av1/common/x86/highbd_convolve_2d_sse2.c"
             "${AOM_ROOT}/av1/common/x86/jnt_convolve_sse2.c"
             "${AOM_ROOT}/av1/common/x86/wiener_convolve_sse2.c"
             "${AOM_ROOT}/av1/common/x86/av1_txfm_sse2.h"
@@ -344,6 +347,8 @@ list(APPEND AOM_AV1_ENCODER_INTRIN_SSE4_1
             "${AOM_ROOT}/av1/encoder/x86/encodetxb_sse4.c"
             "${AOM_ROOT}/av1/encoder/x86/highbd_fwd_txfm_sse4.c"
             "${AOM_ROOT}/av1/encoder/x86/rdopt_sse4.c"
+            "${AOM_ROOT}/av1/encoder/x86/temporal_filter_constants.h"
+            "${AOM_ROOT}/av1/encoder/x86/temporal_filter_sse4.c"
             "${AOM_ROOT}/av1/encoder/x86/pickrst_sse4.c")
 
 list(APPEND AOM_AV1_ENCODER_INTRIN_AVX2
@@ -427,8 +432,10 @@ if(CONFIG_REALTIME_ONLY)
                    "${AOM_ROOT}/av1/encoder/pass2_strategy.c"
                    "${AOM_ROOT}/av1/encoder/temporal_filter.c"
                    "${AOM_ROOT}/av1/encoder/temporal_filter.h"
+                   "${AOM_ROOT}/av1/encoder/temporal_filter_constants.h"
                    "${AOM_ROOT}/av1/encoder/tpl_model.c"
-                   "${AOM_ROOT}/av1/encoder/tpl_model.h")
+                   "${AOM_ROOT}/av1/encoder/tpl_model.h"
+                   "${AOM_ROOT}/av1/encoder/x86/temporal_filter_sse4.c")
 endif()
 
 # Setup AV1 common/decoder/encoder targets. The libaom target must exist before

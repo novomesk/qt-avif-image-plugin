@@ -19,7 +19,8 @@
 void av1_dist_wtd_convolve_x_sse2(const uint8_t *src, int src_stride,
                                   uint8_t *dst0, int dst_stride0, int w, int h,
                                   const InterpFilterParams *filter_params_x,
-                                  const int subpel_x_qn,
+                                  const InterpFilterParams *filter_params_y,
+                                  const int subpel_x_qn, const int subpel_y_qn,
                                   ConvolveParams *conv_params) {
   const int bd = 8;
   CONV_BUF_TYPE *dst = conv_params->dst;
@@ -45,6 +46,9 @@ void av1_dist_wtd_convolve_x_sse2(const uint8_t *src, int src_stride,
       2 * FILTER_BITS - conv_params->round_0 - conv_params->round_1;
   const __m128i rounding_const = _mm_set1_epi16((1 << rounding_shift) >> 1);
   __m128i coeffs[4];
+
+  (void)filter_params_y;
+  (void)subpel_y_qn;
 
   prepare_coeffs(filter_params_x, subpel_x_qn, coeffs);
 
@@ -148,8 +152,9 @@ void av1_dist_wtd_convolve_x_sse2(const uint8_t *src, int src_stride,
 
 void av1_dist_wtd_convolve_y_sse2(const uint8_t *src, int src_stride,
                                   uint8_t *dst0, int dst_stride0, int w, int h,
+                                  const InterpFilterParams *filter_params_x,
                                   const InterpFilterParams *filter_params_y,
-                                  const int subpel_y_qn,
+                                  const int subpel_x_qn, const int subpel_y_qn,
                                   ConvolveParams *conv_params) {
   const int bd = 8;
   CONV_BUF_TYPE *dst = conv_params->dst;
@@ -173,6 +178,9 @@ void av1_dist_wtd_convolve_y_sse2(const uint8_t *src, int src_stride,
   const __m128i round_const = _mm_set1_epi32((1 << conv_params->round_1) >> 1);
   const __m128i round_shift = _mm_cvtsi32_si128(conv_params->round_1);
   __m128i coeffs[4];
+
+  (void)filter_params_x;
+  (void)subpel_x_qn;
 
   prepare_coeffs(filter_params_y, subpel_y_qn, coeffs);
 

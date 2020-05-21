@@ -25,8 +25,8 @@ static const size_t alphaURNSize = sizeof(alphaURN);
 static const char xmpContentType[] = CONTENT_TYPE_XMP;
 static const size_t xmpContentTypeSize = sizeof(xmpContentType);
 
-static avifBool avifImageIsOpaque(avifImage * image);
-static void fillConfigBox(avifCodec * codec, avifImage * image, avifBool alpha);
+static avifBool avifImageIsOpaque(const avifImage * image);
+static void fillConfigBox(avifCodec * codec, const avifImage * image, avifBool alpha);
 static void writeConfigBox(avifRWStream * s, avifCodecConfigurationBox * cfg);
 
 // ---------------------------------------------------------------------------
@@ -37,9 +37,9 @@ typedef struct avifEncoderItem
 {
     uint16_t id;
     uint8_t type[4];
-    avifImage * image;  // avifImage* to use when encoding or populating ipma for this item (unowned)
-    avifCodec * codec;  // only present on type==av01
-    avifRWData content; // OBU data on av01, metadata payload for Exif/XMP
+    const avifImage * image; // avifImage* to use when encoding or populating ipma for this item (unowned)
+    avifCodec * codec;       // only present on type==av01
+    avifRWData content;      // OBU data on av01, metadata payload for Exif/XMP
     avifBool alpha;
 
     const char * infeName;
@@ -121,7 +121,7 @@ void avifEncoderDestroy(avifEncoder * encoder)
     avifFree(encoder);
 }
 
-avifResult avifEncoderWrite(avifEncoder * encoder, avifImage * image, avifRWData * output)
+avifResult avifEncoderWrite(avifEncoder * encoder, const avifImage * image, avifRWData * output)
 {
     if ((image->depth != 8) && (image->depth != 10) && (image->depth != 12)) {
         return AVIF_RESULT_UNSUPPORTED_DEPTH;
@@ -397,20 +397,20 @@ avifResult avifEncoderWrite(avifEncoder * encoder, avifImage * image, avifRWData
         } else {
             // Color specific properties
 
-            if (item->image->profileFormat == AVIF_PROFILE_FORMAT_NCLX) {
-                avifBoxMarker colr = avifRWStreamWriteBox(&s, "colr", -1, 0);
-                avifRWStreamWriteChars(&s, "nclx", 4);                               // unsigned int(32) colour_type;
-                avifRWStreamWriteU16(&s, item->image->nclx.colourPrimaries);         // unsigned int(16) colour_primaries;
-                avifRWStreamWriteU16(&s, item->image->nclx.transferCharacteristics); // unsigned int(16) transfer_characteristics;
-                avifRWStreamWriteU16(&s, item->image->nclx.matrixCoefficients);      // unsigned int(16) matrix_coefficients;
-                avifRWStreamWriteU8(&s, item->image->nclx.range & 0x80);             // unsigned int(1) full_range_flag;
-                                                                                     // unsigned int(7) reserved = 0;
-                avifRWStreamFinishBox(&s, colr);
-                ipmaPush(&item->ipma, ++itemPropertyIndex, AVIF_FALSE);
-            } else if ((item->image->profileFormat == AVIF_PROFILE_FORMAT_ICC) && item->image->icc.data && (item->image->icc.size > 0)) {
+            if (item->image->icc.data && (item->image->icc.size > 0)) {
                 avifBoxMarker colr = avifRWStreamWriteBox(&s, "colr", -1, 0);
                 avifRWStreamWriteChars(&s, "prof", 4); // unsigned int(32) colour_type;
                 avifRWStreamWrite(&s, item->image->icc.data, item->image->icc.size);
+                avifRWStreamFinishBox(&s, colr);
+                ipmaPush(&item->ipma, ++itemPropertyIndex, AVIF_FALSE);
+            } else {
+                avifBoxMarker colr = avifRWStreamWriteBox(&s, "colr", -1, 0);
+                avifRWStreamWriteChars(&s, "nclx", 4);                                    // unsigned int(32) colour_type;
+                avifRWStreamWriteU16(&s, (uint16_t)item->image->colorPrimaries);          // unsigned int(16) colour_primaries;
+                avifRWStreamWriteU16(&s, (uint16_t)item->image->transferCharacteristics); // unsigned int(16) transfer_characteristics;
+                avifRWStreamWriteU16(&s, (uint16_t)item->image->matrixCoefficients);      // unsigned int(16) matrix_coefficients;
+                avifRWStreamWriteU8(&s, (item->image->yuvRange == AVIF_RANGE_FULL) ? 0x80 : 0); // unsigned int(1) full_range_flag;
+                                                                                                // unsigned int(7) reserved = 0;
                 avifRWStreamFinishBox(&s, colr);
                 ipmaPush(&item->ipma, ++itemPropertyIndex, AVIF_FALSE);
             }
@@ -527,7 +527,7 @@ writeCleanup:
     return result;
 }
 
-static avifBool avifImageIsOpaque(avifImage * image)
+static avifBool avifImageIsOpaque(const avifImage * image)
 {
     if (!image->alphaPlane) {
         return AVIF_TRUE;
@@ -555,7 +555,7 @@ static avifBool avifImageIsOpaque(avifImage * image)
     return AVIF_TRUE;
 }
 
-static void fillConfigBox(avifCodec * codec, avifImage * image, avifBool alpha)
+static void fillConfigBox(avifCodec * codec, const avifImage * image, avifBool alpha)
 {
     avifPixelFormatInfo formatInfo;
     avifGetPixelFormatInfo(image->yuvFormat, &formatInfo);

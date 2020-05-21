@@ -109,8 +109,8 @@ void av1_twopass_zero_stats(FIRSTPASS_STATS *section) {
   section->duration = 1.0;
 }
 
-void av1_accumulate_stats(FIRSTPASS_STATS *section,
-                          const FIRSTPASS_STATS *frame) {
+static AOM_INLINE void accumulate_stats(FIRSTPASS_STATS *section,
+                                        const FIRSTPASS_STATS *frame) {
   section->frame += frame->frame;
   section->weight += frame->weight;
   section->intra_error += frame->intra_error;
@@ -203,9 +203,9 @@ static unsigned int highbd_get_prediction_error(BLOCK_SIZE bsize,
 
 // Refine the motion search range according to the frame dimension
 // for first pass test.
-static int get_search_range(const InitialDimensions *initial_dimensions) {
+static int get_search_range(const AV1_COMP *cpi) {
   int sr = 0;
-  const int dim = AOMMIN(initial_dimensions->width, initial_dimensions->height);
+  const int dim = AOMMIN(cpi->initial_width, cpi->initial_height);
 
   while ((dim << sr) < MAX_FULL_PEL_VAL) ++sr;
   return sr;
@@ -219,16 +219,16 @@ static AOM_INLINE void first_pass_motion_search(AV1_COMP *cpi, MACROBLOCK *x,
   FULLPEL_MV start_mv = get_fullmv_from_mv(ref_mv);
   int tmp_err;
   const BLOCK_SIZE bsize = xd->mi[0]->sb_type;
+  aom_variance_fn_ptr_t v_fn_ptr = cpi->fn_ptr[bsize];
   const int new_mv_mode_penalty = NEW_MV_MODE_PENALTY;
-  const int sr = get_search_range(&cpi->initial_dimensions);
+  const int sr = get_search_range(cpi);
   const int step_param = 3 + sr;
 
   const search_site_config *first_pass_search_sites =
-      &cpi->mv_search_params.search_site_cfg[SS_CFG_FPF];
+      &cpi->mv_search_params.ss_cfg[SS_CFG_FPF];
   FULLPEL_MOTION_SEARCH_PARAMS ms_params;
   av1_make_default_fullpel_ms_params(&ms_params, cpi, x, bsize, ref_mv,
-                                     first_pass_search_sites,
-                                     /*fine_search_interval=*/0);
+                                     first_pass_search_sites);
   ms_params.search_method = NSTEP;
 
   FULLPEL_MV this_best_mv;
@@ -236,10 +236,7 @@ static AOM_INLINE void first_pass_motion_search(AV1_COMP *cpi, MACROBLOCK *x,
                                   &this_best_mv, NULL);
 
   if (tmp_err < INT_MAX) {
-    aom_variance_fn_ptr_t v_fn_ptr = cpi->fn_ptr[bsize];
-    const MSBuffers *ms_buffers = &ms_params.ms_buffers;
-    tmp_err = av1_get_mvpred_sse(&ms_params.mv_cost_params, this_best_mv,
-                                 &v_fn_ptr, ms_buffers->src, ms_buffers->ref) +
+    tmp_err = av1_get_mvpred_sse(x, &this_best_mv, ref_mv, &v_fn_ptr) +
               new_mv_mode_penalty;
   }
 
@@ -817,7 +814,7 @@ static void update_firstpass_stats(AV1_COMP *cpi,
   *this_frame_stats = fps;
   output_stats(this_frame_stats, cpi->output_pkt_list);
   if (cpi->twopass.stats_buf_ctx->total_stats != NULL) {
-    av1_accumulate_stats(cpi->twopass.stats_buf_ctx->total_stats, &fps);
+    accumulate_stats(cpi->twopass.stats_buf_ctx->total_stats, &fps);
   }
   /*In the case of two pass, first pass uses it as a circular buffer,
    * when LAP is enabled it is used as a linear buffer*/
@@ -857,8 +854,7 @@ void av1_first_pass(AV1_COMP *cpi, const int64_t ts_duration) {
   const SequenceHeader *const seq_params = &cm->seq_params;
   const int num_planes = av1_num_planes(cm);
   MACROBLOCKD *const xd = &x->e_mbd;
-  PICK_MODE_CONTEXT *ctx =
-      av1_alloc_pmc(cm, BLOCK_16X16, &cpi->td.shared_coeff_buf);
+  const PICK_MODE_CONTEXT *ctx = &cpi->td.pc_root->none;
   MV last_mv = kZeroMv;
   const int qindex = find_fp_qindex(seq_params->bit_depth);
   // Detect if the key frame is screen content type.
@@ -936,7 +932,7 @@ void av1_first_pass(AV1_COMP *cpi, const int64_t ts_duration) {
     x->plane[i].qcoeff = ctx->qcoeff[i];
     x->plane[i].eobs = ctx->eobs[i];
     x->plane[i].txb_entropy_ctx = ctx->txb_entropy_ctx[i];
-    x->plane[i].dqcoeff = ctx->dqcoeff[i];
+    xd->plane[i].dqcoeff = ctx->dqcoeff[i];
   }
 
   av1_init_mv_probs(cm);
@@ -1004,7 +1000,6 @@ void av1_first_pass(AV1_COMP *cpi, const int64_t ts_duration) {
     x->plane[2].src.buf += uv_mb_height * x->plane[1].src.stride -
                            uv_mb_height * mi_params->mb_cols;
   }
-  av1_free_pmc(ctx, num_planes);
   const double raw_err_stdev =
       raw_motion_error_stdev(raw_motion_err_list, raw_motion_err_counts);
   aom_free(raw_motion_err_list);

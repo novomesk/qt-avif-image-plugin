@@ -218,11 +218,11 @@ static int write_skip(const AV1_COMMON *cm, const MACROBLOCKD *xd,
   if (segfeature_active(&cm->seg, segment_id, SEG_LVL_SKIP)) {
     return 1;
   } else {
-    const int skip_txfm = mi->skip_txfm;
-    const int ctx = av1_get_skip_txfm_context(xd);
+    const int skip = mi->skip;
+    const int ctx = av1_get_skip_context(xd);
     FRAME_CONTEXT *ec_ctx = xd->tile_ctx;
-    aom_write_symbol(w, skip_txfm, ec_ctx->skip_txfm_cdfs[ctx], 2);
-    return skip_txfm;
+    aom_write_symbol(w, skip, ec_ctx->skip_cdfs[ctx], 2);
+    return skip;
   }
 }
 
@@ -339,9 +339,9 @@ static AOM_INLINE void write_delta_lflevel(const AV1_COMMON *cm,
   }
 }
 
-static AOM_INLINE void pack_map_tokens(aom_writer *w, const TokenExtra **tp,
+static AOM_INLINE void pack_map_tokens(aom_writer *w, const TOKENEXTRA **tp,
                                        int n, int num) {
-  const TokenExtra *p = *tp;
+  const TOKENEXTRA *p = *tp;
   write_uniform(w, n, p->token);  // The first color index.
   ++p;
   --num;
@@ -353,8 +353,8 @@ static AOM_INLINE void pack_map_tokens(aom_writer *w, const TokenExtra **tp,
 }
 
 static AOM_INLINE void pack_txb_tokens(
-    aom_writer *w, AV1_COMMON *cm, MACROBLOCK *const x, const TokenExtra **tp,
-    const TokenExtra *const tok_end, MACROBLOCKD *xd, MB_MODE_INFO *mbmi,
+    aom_writer *w, AV1_COMMON *cm, MACROBLOCK *const x, const TOKENEXTRA **tp,
+    const TOKENEXTRA *const tok_end, MACROBLOCKD *xd, MB_MODE_INFO *mbmi,
     int plane, BLOCK_SIZE plane_bsize, aom_bit_depth_t bit_depth, int block,
     int blk_row, int blk_col, TX_SIZE tx_size, TOKEN_STATS *token_stats) {
   const int max_blocks_high = max_block_high(xd, plane_bsize, plane);
@@ -439,12 +439,9 @@ int av1_neg_interleave(int x, int ref, int max) {
   }
 }
 
-static AOM_INLINE void write_segment_id(AV1_COMP *cpi,
-                                        const MB_MODE_INFO *const mbmi,
-                                        aom_writer *w,
-                                        const struct segmentation *seg,
-                                        struct segmentation_probs *segp,
-                                        int skip_txfm) {
+static AOM_INLINE void write_segment_id(
+    AV1_COMP *cpi, const MB_MODE_INFO *const mbmi, aom_writer *w,
+    const struct segmentation *seg, struct segmentation_probs *segp, int skip) {
   if (!seg->enabled || !seg->update_map) return;
 
   AV1_COMMON *const cm = &cpi->common;
@@ -454,8 +451,8 @@ static AOM_INLINE void write_segment_id(AV1_COMP *cpi,
   const int mi_row = xd->mi_row;
   const int mi_col = xd->mi_col;
 
-  if (skip_txfm) {
-    // Still need to transmit tx size for intra blocks even if skip_txfm is
+  if (skip) {
+    // Still need to transmit tx size for intra blocks even if skip is
     // true. Changing segment_id may make the tx size become invalid, e.g
     // changing from lossless to lossy.
     assert(is_inter_block(mbmi) || !cpi->enc_seg.has_lossless_segment);
@@ -799,7 +796,7 @@ void av1_write_tx_type(const AV1_COMMON *const cm, const MACROBLOCKD *xd,
   if (get_ext_tx_types(tx_size, is_inter, features->reduced_tx_set_used) > 1 &&
       ((!cm->seg.enabled && cm->quant_params.base_qindex > 0) ||
        (cm->seg.enabled && xd->qindex[mbmi->segment_id] > 0)) &&
-      !mbmi->skip_txfm &&
+      !mbmi->skip &&
       !segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP)) {
     FRAME_CONTEXT *ec_ctx = xd->tile_ctx;
     const TX_SIZE square_tx_size = txsize_sqr_map[tx_size];
@@ -1097,7 +1094,7 @@ static AOM_INLINE void pack_inter_mode_mvs(AV1_COMP *cpi, aom_writer *w) {
 
   write_skip_mode(cm, xd, segment_id, mbmi, w);
 
-  assert(IMPLIES(mbmi->skip_mode, mbmi->skip_txfm));
+  assert(IMPLIES(mbmi->skip_mode, mbmi->skip));
   const int skip =
       mbmi->skip_mode ? 1 : write_skip(cm, xd, segment_id, mbmi, w);
 
@@ -1393,7 +1390,7 @@ static AOM_INLINE void write_mbmi_b(AV1_COMP *cpi, aom_writer *w) {
 
 static AOM_INLINE void write_inter_txb_coeff(
     AV1_COMMON *const cm, MACROBLOCK *const x, MB_MODE_INFO *const mbmi,
-    aom_writer *w, const TokenExtra **tok, const TokenExtra *const tok_end,
+    aom_writer *w, const TOKENEXTRA **tok, const TOKENEXTRA *const tok_end,
     TOKEN_STATS *token_stats, const int row, const int col, int *block,
     const int plane) {
   MACROBLOCKD *const xd = &x->e_mbd;
@@ -1428,15 +1425,15 @@ static AOM_INLINE void write_inter_txb_coeff(
 }
 
 static AOM_INLINE void write_tokens_b(AV1_COMP *cpi, aom_writer *w,
-                                      const TokenExtra **tok,
-                                      const TokenExtra *const tok_end) {
+                                      const TOKENEXTRA **tok,
+                                      const TOKENEXTRA *const tok_end) {
   AV1_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
   const BLOCK_SIZE bsize = mbmi->sb_type;
 
-  assert(!mbmi->skip_txfm);
+  assert(!mbmi->skip);
 
   const int is_inter = is_inter_block(mbmi);
   if (!is_inter) {
@@ -1482,8 +1479,8 @@ static AOM_INLINE void write_tokens_b(AV1_COMP *cpi, aom_writer *w,
 }
 
 static AOM_INLINE void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
-                                     aom_writer *w, const TokenExtra **tok,
-                                     const TokenExtra *const tok_end,
+                                     aom_writer *w, const TOKENEXTRA **tok,
+                                     const TOKENEXTRA *const tok_end,
                                      int mi_row, int mi_col) {
   const AV1_COMMON *cm = &cpi->common;
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
@@ -1531,10 +1528,10 @@ static AOM_INLINE void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
   }
 
   const int is_inter_tx = is_inter_block(mbmi);
-  const int skip_txfm = mbmi->skip_txfm;
+  const int skip = mbmi->skip;
   const int segment_id = mbmi->segment_id;
   if (cm->features.tx_mode == TX_MODE_SELECT && block_signals_txsize(bsize) &&
-      !(is_inter_tx && skip_txfm) && !xd->lossless[segment_id]) {
+      !(is_inter_tx && skip) && !xd->lossless[segment_id]) {
     if (is_inter_tx) {  // This implies skip flag is 0.
       const TX_SIZE max_tx_size = get_vartx_max_txsize(xd, bsize, 0);
       const int txbh = tx_size_high_unit[max_tx_size];
@@ -1551,11 +1548,11 @@ static AOM_INLINE void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
       set_txfm_ctxs(mbmi->tx_size, xd->width, xd->height, 0, xd);
     }
   } else {
-    set_txfm_ctxs(mbmi->tx_size, xd->width, xd->height,
-                  skip_txfm && is_inter_tx, xd);
+    set_txfm_ctxs(mbmi->tx_size, xd->width, xd->height, skip && is_inter_tx,
+                  xd);
   }
 
-  if (!mbmi->skip_txfm) {
+  if (!mbmi->skip) {
     write_tokens_b(cpi, w, tok, tok_end);
   }
 }
@@ -1599,7 +1596,7 @@ static AOM_INLINE void write_partition(const AV1_COMMON *const cm,
 
 static AOM_INLINE void write_modes_sb(
     AV1_COMP *const cpi, const TileInfo *const tile, aom_writer *const w,
-    const TokenExtra **tok, const TokenExtra *const tok_end, int mi_row,
+    const TOKENEXTRA **tok, const TOKENEXTRA *const tok_end, int mi_row,
     int mi_col, BLOCK_SIZE bsize) {
   const AV1_COMMON *const cm = &cpi->common;
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
@@ -1722,10 +1719,10 @@ static AOM_INLINE void write_modes(AV1_COMP *const cpi,
        mi_row += cm->seq_params.mib_size) {
     const int sb_row_in_tile =
         (mi_row - tile->mi_row_start) >> cm->seq_params.mib_size_log2;
-    const TokenExtra *tok =
-        cpi->token_info.tplist[tile_row][tile_col][sb_row_in_tile].start;
-    const TokenExtra *tok_end =
-        tok + cpi->token_info.tplist[tile_row][tile_col][sb_row_in_tile].count;
+    const TOKENEXTRA *tok =
+        cpi->tplist[tile_row][tile_col][sb_row_in_tile].start;
+    const TOKENEXTRA *tok_end =
+        tok + cpi->tplist[tile_row][tile_col][sb_row_in_tile].count;
 
     av1_zero_left_context(xd);
 
@@ -1735,7 +1732,7 @@ static AOM_INLINE void write_modes(AV1_COMP *const cpi,
       write_modes_sb(cpi, tile, w, &tok, tok_end, mi_row, mi_col,
                      cm->seq_params.sb_size);
     }
-    assert(tok == tok_end);
+    assert(tok == cpi->tplist[tile_row][tile_col][sb_row_in_tile].stop);
   }
 }
 

@@ -61,8 +61,8 @@ const TestVideoParam kTestVideoVectors[] = {
 };
 
 // Modes with extra params have their own tests.
-const aom_superres_mode kSuperresModesWithoutParams[] = { AOM_SUPERRES_RANDOM,
-                                                          AOM_SUPERRES_AUTO };
+const SUPERRES_MODE kSuperresModesWithoutParams[] = { SUPERRES_RANDOM,
+                                                      SUPERRES_AUTO };
 
 // Superres denominators and superres kf denominators to be tested
 typedef tuple<int, int> SuperresDenominatorPair;
@@ -84,8 +84,7 @@ const SuperresQThresholdPair kSuperresQThresholds[] = {
 
 // Test parameter list:
 //  <[needed for EncoderTest], test_video_param_, superres_mode_>
-typedef tuple<const libaom_test::CodecFactory *, TestVideoParam,
-              aom_superres_mode>
+typedef tuple<const libaom_test::CodecFactory *, TestVideoParam, SUPERRES_MODE>
     HorzSuperresTestParam;
 
 class HorzSuperresEndToEndTest
@@ -167,7 +166,7 @@ class HorzSuperresEndToEndTest
   }
 
   TestVideoParam test_video_param_;
-  aom_superres_mode superres_mode_;
+  SUPERRES_MODE superres_mode_;
 
  private:
   double psnr_;
@@ -193,7 +192,7 @@ class HorzSuperresFixedEndToEndTest
  protected:
   HorzSuperresFixedEndToEndTest()
       : EncoderTest(GET_PARAM(0)), test_video_param_(GET_PARAM(1)),
-        superres_mode_(AOM_SUPERRES_FIXED), psnr_(0.0), frame_count_(0) {
+        superres_mode_(SUPERRES_FIXED), psnr_(0.0), frame_count_(0) {
     SuperresDenominatorPair denoms = GET_PARAM(2);
     superres_denom_ = std::get<0>(denoms);
     superres_kf_denom_ = std::get<1>(denoms);
@@ -276,7 +275,7 @@ class HorzSuperresFixedEndToEndTest
   }
 
   TestVideoParam test_video_param_;
-  aom_superres_mode superres_mode_;
+  SUPERRES_MODE superres_mode_;
   int superres_denom_;
   int superres_kf_denom_;
 
@@ -304,7 +303,7 @@ class HorzSuperresQThreshEndToEndTest
  protected:
   HorzSuperresQThreshEndToEndTest()
       : EncoderTest(GET_PARAM(0)), test_video_param_(GET_PARAM(1)),
-        superres_mode_(AOM_SUPERRES_QTHRESH), psnr_(0.0), frame_count_(0) {
+        superres_mode_(SUPERRES_QTHRESH), psnr_(0.0), frame_count_(0) {
     SuperresQThresholdPair qthresholds = GET_PARAM(2);
     superres_qthresh_ = std::get<0>(qthresholds);
     superres_kf_qthresh_ = std::get<1>(qthresholds);
@@ -387,7 +386,7 @@ class HorzSuperresQThreshEndToEndTest
   }
 
   TestVideoParam test_video_param_;
-  aom_superres_mode superres_mode_;
+  SUPERRES_MODE superres_mode_;
   int superres_qthresh_;
   int superres_kf_qthresh_;
 

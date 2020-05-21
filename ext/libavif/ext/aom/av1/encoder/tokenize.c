@@ -27,7 +27,7 @@
 #include "av1/encoder/rdopt.h"
 #include "av1/encoder/tokenize.h"
 
-static int cost_and_tokenize_map(Av1ColorMapParam *param, TokenExtra **t,
+static int cost_and_tokenize_map(Av1ColorMapParam *param, TOKENEXTRA **t,
                                  int plane, int calc_rate, int allow_update_cdf,
                                  FRAME_COUNTS *counts, MapCdf map_pb_cdf) {
   const uint8_t *const color_map = param->color_map;
@@ -39,6 +39,7 @@ static int cost_and_tokenize_map(Av1ColorMapParam *param, TokenExtra **t,
   const int n = param->n_colors;
   const int palette_size_idx = n - PALETTE_MIN_SIZE;
   int this_rate = 0;
+  uint8_t color_order[PALETTE_MAX_SIZE];
 
   (void)plane;
   (void)counts;
@@ -47,8 +48,8 @@ static int cost_and_tokenize_map(Av1ColorMapParam *param, TokenExtra **t,
     for (int j = AOMMIN(k, cols - 1); j >= AOMMAX(0, k - rows + 1); --j) {
       int i = k - j;
       int color_new_idx;
-      const int color_ctx = av1_fast_palette_color_index_context(
-          color_map, plane_block_width, i, j, &color_new_idx);
+      const int color_ctx = av1_get_palette_color_index_context(
+          color_map, plane_block_width, i, j, n, color_order, &color_new_idx);
       assert(color_new_idx >= 0 && color_new_idx < n);
       if (calc_rate) {
         this_rate += (*color_cost)[palette_size_idx][color_ctx][color_new_idx];
@@ -113,7 +114,7 @@ int av1_cost_color_map(const MACROBLOCK *const x, int plane, BLOCK_SIZE bsize,
 }
 
 void av1_tokenize_color_map(const MACROBLOCK *const x, int plane,
-                            TokenExtra **t, BLOCK_SIZE bsize, TX_SIZE tx_size,
+                            TOKENEXTRA **t, BLOCK_SIZE bsize, TX_SIZE tx_size,
                             COLOR_MAP_TYPE type, int allow_update_cdf,
                             FRAME_COUNTS *counts) {
   assert(plane == 0 || plane == 1);
@@ -193,7 +194,7 @@ void av1_tokenize_sb_vartx(const AV1_COMP *cpi, ThreadData *td,
   MB_MODE_INFO *const mbmi = xd->mi[0];
   struct tokenize_b_args arg = { cpi, td, 0, allow_update_cdf, dry_run };
 
-  if (mbmi->skip_txfm) {
+  if (mbmi->skip) {
     av1_reset_entropy_context(xd, bsize, num_planes);
     return;
   }

@@ -131,10 +131,12 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/segment_binarization_sync.cc"
                 "${AOM_ROOT}/test/superframe_test.cc"
                 "${AOM_ROOT}/test/tile_independence_test.cc"
-                "${AOM_ROOT}/test/temporal_filter_test.cc")
+                "${AOM_ROOT}/test/temporal_filter_planewise_test.cc"
+                "${AOM_ROOT}/test/temporal_filter_yuv_test.cc")
     if(CONFIG_REALTIME_ONLY)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
-                       "${AOM_ROOT}/test/cnn_test.cc")
+                       "${AOM_ROOT}/test/cnn_test.cc"
+                       "${AOM_ROOT}/test/temporal_filter_yuv_test.cc")
     endif()
     if(NOT CONFIG_AV1_HIGHBITDEPTH)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
@@ -182,7 +184,9 @@ if(NOT BUILD_SHARED_LIBS)
 
   list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
               "${AOM_ROOT}/test/arf_freq_test.cc"
-              "${AOM_ROOT}/test/av1_convolve_test.cc"
+              "${AOM_ROOT}/test/av1_convolve_2d_test.cc"
+              "${AOM_ROOT}/test/av1_convolve_2d_test_util.cc"
+              "${AOM_ROOT}/test/av1_convolve_2d_test_util.h"
               "${AOM_ROOT}/test/av1_fwd_txfm1d_test.cc"
               "${AOM_ROOT}/test/av1_fwd_txfm2d_test.cc"
               "${AOM_ROOT}/test/av1_inv_txfm1d_test.cc"

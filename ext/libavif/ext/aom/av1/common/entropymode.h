@@ -121,8 +121,8 @@ typedef struct frame_contexts {
   aom_cdf_prob txfm_partition_cdf[TXFM_PARTITION_CONTEXTS][CDF_SIZE(2)];
   aom_cdf_prob compound_index_cdf[COMP_INDEX_CONTEXTS][CDF_SIZE(2)];
   aom_cdf_prob comp_group_idx_cdf[COMP_GROUP_IDX_CONTEXTS][CDF_SIZE(2)];
-  aom_cdf_prob skip_mode_cdfs[SKIP_MODE_CONTEXTS][CDF_SIZE(2)];
-  aom_cdf_prob skip_txfm_cdfs[SKIP_CONTEXTS][CDF_SIZE(2)];
+  aom_cdf_prob skip_mode_cdfs[SKIP_CONTEXTS][CDF_SIZE(2)];
+  aom_cdf_prob skip_cdfs[SKIP_CONTEXTS][CDF_SIZE(2)];
   aom_cdf_prob intra_inter_cdf[INTRA_INTER_CONTEXTS][CDF_SIZE(2)];
   nmv_context nmvc;
   nmv_context ndvc;
@@ -204,11 +204,6 @@ static INLINE int av1_ceil_log2(int n) {
 int av1_get_palette_color_index_context(const uint8_t *color_map, int stride,
                                         int r, int c, int palette_size,
                                         uint8_t *color_order, int *color_idx);
-
-// A faster version of av1_get_palette_color_index_context used by the encoder
-// exploiting the fact that the encoder does not need to maintain a color order.
-int av1_fast_palette_color_index_context(const uint8_t *color_map, int stride,
-                                         int r, int c, int *color_idx);
 
 #ifdef __cplusplus
 }  // extern "C"

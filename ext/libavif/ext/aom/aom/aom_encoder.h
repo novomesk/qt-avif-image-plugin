@@ -41,7 +41,7 @@ extern "C" {
  * fields to structures
  */
 #define AOM_ENCODER_ABI_VERSION \
-  (7 + AOM_CODEC_ABI_VERSION) /**<\hideinitializer*/
+  (8 + AOM_CODEC_ABI_VERSION) /**<\hideinitializer*/
 
 /*! \brief Encoder capabilities bitfield
  *
@@ -201,22 +201,6 @@ enum aom_kf_mode {
   AOM_KF_AUTO,        /**< Encoder determines optimal placement automatically */
   AOM_KF_DISABLED = 0 /**< Encoder does not place keyframes. */
 };
-
-/*!\brief Frame super-resolution mode. */
-typedef enum {
-  /**< Frame super-resolution is disabled for all frames. */
-  AOM_SUPERRES_NONE,
-  /**< All frames are coded at the specified scale and super-resolved. */
-  AOM_SUPERRES_FIXED,
-  /**< All frames are coded at a random scale and super-resolved. */
-  AOM_SUPERRES_RANDOM,
-  /**< Super-resolution scale for each frame is determined based on the q index
-     of that frame. */
-  AOM_SUPERRES_QTHRESH,
-  /**< Full-resolution or super-resolution and the scale (in case of
-     super-resolution) are automatically selected for each frame. */
-  AOM_SUPERRES_AUTO,
-} aom_superres_mode;
 
 /*!\brief Encoder Config Options
  *
@@ -562,8 +546,10 @@ typedef struct aom_codec_enc_cfg {
    * Similar to spatial resampling, frame super-resolution integrates
    * upscaling after the encode/decode process. Taking control of upscaling and
    * using restoration filters should allow it to outperform normal resizing.
+   *
+   * Valid values are 0 to 4 as defined in enum SUPERRES_MODE.
    */
-  aom_superres_mode rc_superres_mode;
+  unsigned int rc_superres_mode;
 
   /*!\brief Frame super-resolution denominator.
    *
@@ -573,7 +559,7 @@ typedef struct aom_codec_enc_cfg {
    *
    * Valid denominators are 8 to 16.
    *
-   * Used only by AOM_SUPERRES_FIXED.
+   * Used only by SUPERRES_FIXED.
    */
   unsigned int rc_superres_denominator;
 
@@ -592,7 +578,7 @@ typedef struct aom_codec_enc_cfg {
    * The q level threshold after which superres is used.
    * Valid values are 1 to 63.
    *
-   * Used only by AOM_SUPERRES_QTHRESH
+   * Used only by SUPERRES_QTHRESH
    */
   unsigned int rc_superres_qthresh;
 
@@ -601,7 +587,7 @@ typedef struct aom_codec_enc_cfg {
    * The q level threshold after which superres is used for key frames.
    * Valid values are 1 to 63.
    *
-   * Used only by AOM_SUPERRES_QTHRESH
+   * Used only by SUPERRES_QTHRESH
    */
   unsigned int rc_superres_kf_qthresh;
 
@@ -954,38 +940,6 @@ aom_codec_err_t aom_codec_enc_init_ver(aom_codec_ctx_t *ctx,
  */
 #define aom_codec_enc_init(ctx, iface, cfg, flags) \
   aom_codec_enc_init_ver(ctx, iface, cfg, flags, AOM_ENCODER_ABI_VERSION)
-
-/*!\brief Initialize multi-encoder instance
- *
- * Initializes multi-encoder context using the given interface.
- * Applications should call the aom_codec_enc_init_multi convenience macro
- * instead of this function directly, to ensure that the ABI version number
- * parameter is properly initialized.
- *
- * \param[in]    ctx     Pointer to this instance's context.
- * \param[in]    iface   Pointer to the algorithm interface to use.
- * \param[in]    cfg     Configuration to use, if known.
- * \param[in]    num_enc Total number of encoders.
- * \param[in]    flags   Bitfield of AOM_CODEC_USE_* flags
- * \param[in]    dsf     Pointer to down-sampling factors.
- * \param[in]    ver     ABI version number. Must be set to
- *                       AOM_ENCODER_ABI_VERSION
- * \retval #AOM_CODEC_OK
- *     The decoder algorithm initialized.
- * \retval #AOM_CODEC_MEM_ERROR
- *     Memory allocation failed.
- */
-aom_codec_err_t aom_codec_enc_init_multi_ver(
-    aom_codec_ctx_t *ctx, aom_codec_iface_t *iface, aom_codec_enc_cfg_t *cfg,
-    int num_enc, aom_codec_flags_t flags, aom_rational_t *dsf, int ver);
-
-/*!\brief Convenience macro for aom_codec_enc_init_multi_ver()
- *
- * Ensures the ABI version parameter is properly set.
- */
-#define aom_codec_enc_init_multi(ctx, iface, cfg, num_enc, flags, dsf) \
-  aom_codec_enc_init_multi_ver(ctx, iface, cfg, num_enc, flags, dsf,   \
-                               AOM_ENCODER_ABI_VERSION)
 
 /*!\brief Get the default configuration for a usage.
  *

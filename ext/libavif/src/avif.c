@@ -103,6 +103,9 @@ static void avifImageSetDefaults(avifImage * image)
     memset(image, 0, sizeof(avifImage));
     image->yuvRange = AVIF_RANGE_FULL;
     image->alphaRange = AVIF_RANGE_FULL;
+    image->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
+    image->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
+    image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_UNSPECIFIED;
 }
 
 avifImage * avifImageCreate(int width, int height, int depth, avifPixelFormat yuvFormat)
@@ -121,7 +124,7 @@ avifImage * avifImageCreateEmpty(void)
     return avifImageCreate(0, 0, 0, AVIF_PIXEL_FORMAT_NONE);
 }
 
-void avifImageCopy(avifImage * dstImage, avifImage * srcImage)
+void avifImageCopy(avifImage * dstImage, const avifImage * srcImage)
 {
     avifImageFreePlanes(dstImage, AVIF_PLANES_ALL);
 
@@ -132,19 +135,17 @@ void avifImageCopy(avifImage * dstImage, avifImage * srcImage)
     dstImage->yuvRange = srcImage->yuvRange;
     dstImage->alphaRange = srcImage->alphaRange;
 
+    dstImage->colorPrimaries = srcImage->colorPrimaries;
+    dstImage->transferCharacteristics = srcImage->transferCharacteristics;
+    dstImage->matrixCoefficients = srcImage->matrixCoefficients;
+
     dstImage->transformFlags = srcImage->transformFlags;
     memcpy(&dstImage->pasp, &srcImage->pasp, sizeof(dstImage->pasp));
     memcpy(&dstImage->clap, &srcImage->clap, sizeof(dstImage->clap));
     memcpy(&dstImage->irot, &srcImage->irot, sizeof(dstImage->irot));
     memcpy(&dstImage->imir, &srcImage->imir, sizeof(dstImage->pasp));
 
-    if (srcImage->profileFormat == AVIF_PROFILE_FORMAT_ICC) {
-        avifImageSetProfileICC(dstImage, srcImage->icc.data, srcImage->icc.size);
-    } else if (srcImage->profileFormat == AVIF_PROFILE_FORMAT_NCLX) {
-        avifImageSetProfileNCLX(dstImage, &srcImage->nclx);
-    } else {
-        avifImageSetProfileNone(dstImage);
-    }
+    avifImageSetProfileICC(dstImage, srcImage->icc.data, srcImage->icc.size);
 
     avifImageSetMetadataExif(dstImage, srcImage->exif.data, srcImage->exif.size);
     avifImageSetMetadataXMP(dstImage, srcImage->xmp.data, srcImage->xmp.size);
@@ -202,26 +203,9 @@ void avifImageDestroy(avifImage * image)
     avifFree(image);
 }
 
-void avifImageSetProfileNone(avifImage * image)
-{
-    image->profileFormat = AVIF_PROFILE_FORMAT_NONE;
-    avifRWDataFree(&image->icc);
-}
-
 void avifImageSetProfileICC(avifImage * image, const uint8_t * icc, size_t iccSize)
 {
-    avifImageSetProfileNone(image);
-    if (iccSize) {
-        image->profileFormat = AVIF_PROFILE_FORMAT_ICC;
-        avifRWDataSet(&image->icc, icc, iccSize);
-    }
-}
-
-void avifImageSetProfileNCLX(avifImage * image, avifNclxColorProfile * nclx)
-{
-    avifImageSetProfileNone(image);
-    image->profileFormat = AVIF_PROFILE_FORMAT_NCLX;
-    memcpy(&image->nclx, nclx, sizeof(avifNclxColorProfile));
+    avifRWDataSet(&image->icc, icc, iccSize);
 }
 
 void avifImageSetMetadataExif(avifImage * image, const uint8_t * exif, size_t exifSize)
@@ -261,19 +245,21 @@ void avifImageAllocatePlanes(avifImage * image, uint32_t planes)
             image->yuvRowBytes[AVIF_CHAN_V] = uvRowBytes;
             image->yuvPlanes[AVIF_CHAN_V] = avifAlloc(uvSize);
         }
+        image->imageOwnsYUVPlanes = AVIF_TRUE;
     }
     if (planes & AVIF_PLANES_A) {
         if (!image->alphaPlane) {
             image->alphaRowBytes = fullRowBytes;
             image->alphaPlane = avifAlloc(fullRowBytes * image->height);
         }
+        image->imageOwnsAlphaPlane = AVIF_TRUE;
     }
 }
 
 void avifImageFreePlanes(avifImage * image, uint32_t planes)
 {
     if ((planes & AVIF_PLANES_YUV) && (image->yuvFormat != AVIF_PIXEL_FORMAT_NONE)) {
-        if (!image->decoderOwnsYUVPlanes) {
+        if (image->imageOwnsYUVPlanes) {
             avifFree(image->yuvPlanes[AVIF_CHAN_Y]);
             avifFree(image->yuvPlanes[AVIF_CHAN_U]);
             avifFree(image->yuvPlanes[AVIF_CHAN_V]);
@@ -284,15 +270,15 @@ void avifImageFreePlanes(avifImage * image, uint32_t planes)
         image->yuvRowBytes[AVIF_CHAN_U] = 0;
         image->yuvPlanes[AVIF_CHAN_V] = NULL;
         image->yuvRowBytes[AVIF_CHAN_V] = 0;
-        image->decoderOwnsYUVPlanes = AVIF_FALSE;
+        image->imageOwnsYUVPlanes = AVIF_FALSE;
     }
     if (planes & AVIF_PLANES_A) {
-        if (!image->decoderOwnsAlphaPlane) {
+        if (image->imageOwnsAlphaPlane) {
             avifFree(image->alphaPlane);
         }
         image->alphaPlane = NULL;
         image->alphaRowBytes = 0;
-        image->decoderOwnsAlphaPlane = AVIF_FALSE;
+        image->imageOwnsAlphaPlane = AVIF_FALSE;
     }
 }
 
@@ -317,8 +303,8 @@ void avifImageStealPlanes(avifImage * dstImage, avifImage * srcImage, uint32_t p
 
         dstImage->yuvFormat = srcImage->yuvFormat;
         dstImage->yuvRange = srcImage->yuvRange;
-        dstImage->decoderOwnsYUVPlanes = srcImage->decoderOwnsYUVPlanes;
-        srcImage->decoderOwnsYUVPlanes = AVIF_FALSE;
+        dstImage->imageOwnsYUVPlanes = srcImage->imageOwnsYUVPlanes;
+        srcImage->imageOwnsYUVPlanes = AVIF_FALSE;
     }
     if (planes & AVIF_PLANES_A) {
         dstImage->alphaPlane = srcImage->alphaPlane;
@@ -328,12 +314,12 @@ void avifImageStealPlanes(avifImage * dstImage, avifImage * srcImage, uint32_t p
         srcImage->alphaPlane = NULL;
         srcImage->alphaRowBytes = 0;
 
-        dstImage->decoderOwnsAlphaPlane = srcImage->decoderOwnsAlphaPlane;
-        srcImage->decoderOwnsAlphaPlane = AVIF_FALSE;
+        dstImage->imageOwnsAlphaPlane = srcImage->imageOwnsAlphaPlane;
+        srcImage->imageOwnsAlphaPlane = AVIF_FALSE;
     }
 }
 
-avifBool avifImageUsesU16(avifImage * image)
+avifBool avifImageUsesU16(const avifImage * image)
 {
     return (image->depth > 8);
 }
@@ -361,12 +347,12 @@ uint32_t avifRGBFormatChannelCount(avifRGBFormat format)
     return avifRGBFormatHasAlpha(format) ? 4 : 3;
 }
 
-uint32_t avifRGBImagePixelSize(avifRGBImage * rgb)
+uint32_t avifRGBImagePixelSize(const avifRGBImage * rgb)
 {
     return avifRGBFormatChannelCount(rgb->format) * ((rgb->depth > 8) ? 2 : 1);
 }
 
-void avifRGBImageSetDefaults(avifRGBImage * rgb, avifImage * image)
+void avifRGBImageSetDefaults(avifRGBImage * rgb, const avifImage * image)
 {
     rgb->width = image->width;
     rgb->height = image->height;

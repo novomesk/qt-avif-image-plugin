@@ -188,7 +188,7 @@ typedef struct RD_STATS {
   // rate/dist.
   int64_t rdcost;
   int64_t sse;
-  int skip_txfm;  // sse should equal to dist when skip_txfm == 1
+  int skip;  // sse should equal to dist when skip == 1
   int zero_rate;
 #if CONFIG_RD_DEBUG
   int txb_coeff_cost[MAX_MB_PLANE];
@@ -242,7 +242,7 @@ typedef struct MB_MODE_INFO {
   PARTITION_TYPE partition;
   MV_REFERENCE_FRAME ref_frame[2];
   FILTER_INTRA_MODE_INFO filter_intra_mode_info;
-  int8_t skip_txfm;
+  int8_t skip;
   uint8_t inter_tx_size[INTER_TX_SIZE_BUF_LEN];
   TX_SIZE tx_size;
   int8_t delta_lf_from_base;
@@ -390,6 +390,9 @@ typedef struct {
 } CB_BUFFER;
 
 typedef struct macroblockd_plane {
+  tran_low_t *dqcoeff;
+  tran_low_t *dqcoeff_block;
+  eob_info *eob_data;
   PLANE_TYPE plane_type;
   int subsampling_x;
   int subsampling_y;
@@ -402,9 +405,6 @@ typedef struct macroblockd_plane {
   // dequantization process.  They have the same coefficient
   // shift/scale as TX.
   int16_t seg_dequant_QTX[MAX_SEGMENTS][2];
-  // Pointer to color index map of:
-  // - Current coding block, on encoder side.
-  // - Current superblock, on decoder side.
   uint8_t *color_index_map;
 
   // block size in pixels
@@ -613,6 +613,8 @@ typedef struct macroblockd {
 
   int qindex[MAX_SEGMENTS];
   int lossless[MAX_SEGMENTS];
+  // TODO(urvang): Move to decoder.
+  int corrupted;
   // Same as cm->features.cur_frame_force_integer_mv.
   int cur_frame_force_integer_mv;
   // Pointer to cm->error.
@@ -657,33 +659,17 @@ typedef struct macroblockd {
   // cm->mi_params.mi_grid_base).
   bool cdef_transmitted[4];
 
-  // Mask for this block used for compound prediction.
   DECLARE_ALIGNED(16, uint8_t, seg_mask[2 * MAX_SB_SQUARE]);
-
-  // CFL (chroma from luma) related parameters.
+  uint8_t *mc_buf[2];
   CFL_CTX cfl;
 
-  // Offset to plane[p].color_index_map.
-  // Currently:
-  // - On encoder side, this is always 0 as 'color_index_map' is allocated per
-  // *coding block* there.
-  // - On decoder side, this may be non-zero, as 'color_index_map' is a (static)
-  // memory pointing to the base of a *superblock* there, and we need an offset
-  // to it to get the color index map for current coding block.
+  DIST_WTD_COMP_PARAMS jcp_param;
+
+  uint16_t cb_offset[MAX_MB_PLANE];
+  uint16_t txb_offset[MAX_MB_PLANE];
   uint16_t color_index_map_offset[2];
 
-  // Temporary buffer used for convolution in case of compound reference only
-  // for (weighted or uniform) averaging operation.
-  // There are pointers to actual buffers allocated elsewhere: e.g. In dec,
-  // 'pbi->td.tmp_conv_dst' or 'pbi->thread_data[t].td->xd.tmp_conv_dst' and in
-  // enc, 'x->tmp_conv_dst' or 'cpi->tile_thr_data[t].td->mb.tmp_conv_dst'.
   CONV_BUF_TYPE *tmp_conv_dst;
-  // Temporary buffers used to build OBMC prediction by above (index 0) and left
-  // (index 1) predictors respectively.
-  // tmp_obmc_bufs[i][p * MAX_SB_SQUARE] is the buffer used for plane 'p'.
-  // There are pointers to actual buffers allocated elsewhere: e.g. In dec,
-  // 'pbi->td.tmp_obmc_bufs' or 'pbi->thread_data[t].td->xd.tmp_conv_dst' and in
-  // enc, 'x->tmp_obmc_bufs' or 'cpi->tile_thr_data[t].td->mb.tmp_obmc_bufs'.
   uint8_t *tmp_obmc_bufs[2];
 } MACROBLOCKD;
 
