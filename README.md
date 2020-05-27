@@ -42,6 +42,17 @@ If you don't have libavif installed, run:
 `./build_libqavif_static.sh` 
 ![](img/build_libqavif_static.png)
 
+### Alternative way of building using cmake
+
+This alternative requires *extra-cmake-modules*
+
+```
+mkdir build
+cd build
+cmake ..
+make
+```
+
 ## 4) Install libqavif.so
 
 Copy **libqavif.so** to a folder where _qt5-image-formats-plugins_ and/or _kimageformats_ are installed. It could be one of these locations:
