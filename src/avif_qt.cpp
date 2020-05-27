@@ -225,7 +225,7 @@ bool AVIFHandler::decode_one_frame()
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     if (m_decoder->image->icc.data && (m_decoder->image->icc.size > 0)) {
-        result.setColorSpace(QColorSpace::fromIccProfile(QByteArray::fromRawData((const char *) m_decoder->image->icc.data, m_decoder->image->icc.size)));
+        result.setColorSpace(QColorSpace::fromIccProfile(QByteArray::fromRawData((const char *) m_decoder->image->icc.data, (int) m_decoder->image->icc.size)));
         if (! result.colorSpace().isValid()) {
             qWarning("Invalid QColorSpace created from ICC!\n");
         }
