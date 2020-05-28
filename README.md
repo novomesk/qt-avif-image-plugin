@@ -61,7 +61,42 @@ Use same steps like building under Linux.
 
 #### Microsoft Visual Studio + Qt Creator
 
+You need to prepare **libaom.a** and **libavif.a** before opening qt-avif-image-plugin_local-libavif.pro in Qt Creator.
+
+##### Prepare libaom.a
+
+Create folder `ext\libavif\ext\aom\build.libavif\` and change to this folder.
+
+Run `C:\Qt\Tools\CMake_64\bin\cmake.exe -G "Visual Studio 16 2019" -DCMAKE_BUILD_TYPE=Release -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTDATA=0 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 -DCONFIG_PIC=1 ..`
+
+cmake should create project files for Visual Studio. Now you can open *AOM.sln*
+
+Go to *Configuration Manager...* and change (if necessary) *Active solution configuration* from Debug to Release.
+
+Build Solution
+
+Copy and rename `ext\libavif\ext\aom\build.libavif\Release\aom.lib` to `ext\libavif\ext\aom\build.libavif\libaom.a`
+
+##### Prepare libavif.a
+
+Create folder `ext\libavif\build\` and change to this folder.
+
+Run `C:\Qt\Tools\CMake_64\bin\cmake.exe -G "Visual Studio 16 2019" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON ..`
+
+cmake should create project files for Visual Studio. Now you can open *libavif.sln*
+
+Go to *Configuration Manager...* and change (if necessary) *Active solution configuration* from Debug to Release.
+
+Build Solution
+
+Copy and rename `ext\libavif\build\Release\avif.lib` to `ext\libavif\build\libavif.a`
+
+##### Open qt-avif-image-plugin_local-libavif.pro in Qt Creator
+
+Build Project qt-avif-image-plugin_local-libavif
 ![qt-avif-image-plugin in Qt Creator](img/qt_creator.png)
+
+Plug-in is ready in `plugins\imageformats\qavif.dll`
 
 ## 4) Install libqavif.so
 
