@@ -53,6 +53,16 @@ cmake ..
 make
 ```
 
+### Windows builds
+
+#### MSYS2 platform
+
+Use same steps like building under Linux.
+
+#### Microsoft Visual Studio + Qt Creator
+
+![qt-avif-image-plugin in Qt Creator](img/qt_creator.png)
+
 ## 4) Install libqavif.so
 
 Copy **libqavif.so** to a folder where _qt5-image-formats-plugins_ and/or _kimageformats_ are installed. It could be one of these locations:
