@@ -1,0 +1,49 @@
+version: 0.2.0.{build}
+configuration: Release
+platform: x64
+install:
+- cmd: >-
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
+
+    appveyor DownloadFile "https://github.com/joedrago/nasm_mirror/raw/master/nasm-2.14.02-win64.zip" -FileName "nasm.zip"
+
+    7z x "nasm.zip"
+
+    move nasm-* NASM
+
+    set PATH=%PATH%;%CD%\NASM;
+
+    nasm -v
+
+    cd ext\libavif\ext\aom
+
+    mkdir build.libavif
+
+    cd build.libavif
+
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTDATA=0 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 -DCONFIG_PIC=1 ..
+
+    ninja
+
+    copy aom.lib libaom.a
+
+    cd ..\..\..\..\libavif
+
+    mkdir build
+
+    cd build
+
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON ..
+
+    ninja
+
+    copy avif.lib libavif.a
+
+    cd ..\..\..
+build_script:
+- cmd: >-
+    C:\Qt\5.14.2\msvc2017_64\bin\qmake.exe qt-avif-image-plugin_local-libavif.pro
+
+    nmake.exe
+artifacts:
+- path: plugins\imageformats\qavif.dll
