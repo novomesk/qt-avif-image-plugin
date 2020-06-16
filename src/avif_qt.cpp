@@ -426,6 +426,7 @@ bool AVIFHandler::write(const QImage &image)
     QImage tmpimage = image.convertToFormat(image.hasAlphaChannel() ? QImage::Format_RGBA8888 : QImage::Format_RGB888);
 
     int maxQuantizer = AVIF_QUANTIZER_WORST_QUALITY * (100 - qBound(0, m_quality, 100)) / 100;
+    int minQuantizer = 0;
     int maxQuantizerAlpha = 0;
 
     avifPixelFormat pixel_format = AVIF_PIXEL_FORMAT_YUV420;
@@ -436,8 +437,11 @@ bool AVIFHandler::write(const QImage &image)
         } else {
             pixel_format = AVIF_PIXEL_FORMAT_YUV422;
         }
-    } else if (maxQuantizer > 40) {   //we decrease quality of aplha channel here
+    } else {
+      minQuantizer = maxQuantizer - 20;
+      if (maxQuantizer > 40) {   //we decrease quality of alpha channel here
         maxQuantizerAlpha = maxQuantizer - 40;
+      }
     }
 
     avifImage *avif = avifImageCreate(tmpimage.width(), tmpimage.height(), 8, pixel_format);
@@ -565,7 +569,7 @@ bool AVIFHandler::write(const QImage &image)
     avifRWData raw = AVIF_DATA_EMPTY;
     avifEncoder *encoder = avifEncoderCreate();
     encoder->maxThreads = QThread::idealThreadCount();
-    encoder->minQuantizer = AVIF_QUANTIZER_BEST_QUALITY;
+    encoder->minQuantizer = minQuantizer;
     encoder->maxQuantizer = maxQuantizer;
 
     if (tmpimage.hasAlphaChannel()) {
