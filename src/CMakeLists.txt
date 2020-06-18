@@ -24,7 +24,7 @@ endfunction()
 
 ##################################
 
-kimageformats_add_plugin(libqavif JSON "avif.json" SOURCES avif_qt.cpp)
+kimageformats_add_plugin(libqavif JSON "avif.json" SOURCES "main.cpp" "qavifhandler.cpp")
 
 if(BUILD_QAVIF_DYNAMIC)
   target_link_libraries(libqavif "avif")

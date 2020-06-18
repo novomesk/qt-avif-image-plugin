@@ -1,13 +1,15 @@
 TARGET = qavif
 
-HEADERS = src/avif_qt_p.h
-SOURCES = src/avif_qt.cpp
+HEADERS = src/qavifhandler_p.h
+SOURCES = src/qavifhandler.cpp
 OTHER_FILES = src/avif.json
+
+SOURCES += src/main.cpp
 
 LIBS += -lavif
 
 PLUGIN_TYPE = imageformats
-PLUGIN_CLASS_NAME = AVIFPlugin
+PLUGIN_CLASS_NAME = QAVIFPlugin
 load(qt_plugin)
 
 CONFIG += release skip_target_version_ext strict_c++ warn_on

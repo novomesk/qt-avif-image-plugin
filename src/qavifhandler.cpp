@@ -38,36 +38,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QColorSpace>
 #endif
 
-#include "avif_qt_p.h"
+#include "qavifhandler_p.h"
 
-QImageIOPlugin::Capabilities AVIFPlugin::capabilities(QIODevice *device, const QByteArray &format) const
-{
-    if (format == "avif") {
-        return Capabilities(CanRead | CanWrite);
-    }
 
-    if (format == "avifs") {
-        return Capabilities(CanRead);
-    }
-
-    if (!format.isEmpty()) {
-        return {};
-    }
-    if (!device->isOpen()) {
-        return {};
-    }
-
-    Capabilities cap;
-    if (device->isReadable() && AVIFHandler::canRead(device)) {
-        cap |= CanRead;
-    }
-    if (device->isWritable()) {
-        cap |= CanWrite;
-    }
-    return cap;
-}
-
-AVIFHandler::AVIFHandler() :
+QAVIFHandler::QAVIFHandler() :
     m_parseState(ParseAvifNotParsed),
     m_quality(52),
     m_container_width(0),
@@ -78,22 +52,14 @@ AVIFHandler::AVIFHandler() :
 {
 }
 
-AVIFHandler::~AVIFHandler()
+QAVIFHandler::~QAVIFHandler()
 {
     if (m_decoder) {
         avifDecoderDestroy(m_decoder);
     }
 }
 
-QImageIOHandler *AVIFPlugin::create(QIODevice *device, const QByteArray &format) const
-{
-    QImageIOHandler *handler = new AVIFHandler;
-    handler->setDevice(device);
-    handler->setFormat(format);
-    return handler;
-}
-
-bool AVIFHandler::canRead() const
+bool QAVIFHandler::canRead() const
 {
     if (m_parseState == ParseAvifNotParsed && !canRead(device())) {
         return false;
@@ -106,7 +72,7 @@ bool AVIFHandler::canRead() const
     return false;
 }
 
-bool AVIFHandler::canRead(QIODevice *device)
+bool QAVIFHandler::canRead(QIODevice *device)
 {
     if (!device) {
         return false;
@@ -126,7 +92,7 @@ bool AVIFHandler::canRead(QIODevice *device)
     return false;
 }
 
-bool AVIFHandler::ensureParsed() const
+bool QAVIFHandler::ensureParsed() const
 {
     if (m_parseState == ParseAvifSuccess) {
         return true;
@@ -135,12 +101,12 @@ bool AVIFHandler::ensureParsed() const
         return false;
     }
 
-    AVIFHandler *that = const_cast<AVIFHandler *>(this);
+    QAVIFHandler *that = const_cast<QAVIFHandler *>(this);
 
     return that->ensureDecoder();
 }
 
-bool AVIFHandler::ensureDecoder()
+bool QAVIFHandler::ensureDecoder()
 {
     if (m_decoder) {
         return true;
@@ -171,24 +137,12 @@ bool AVIFHandler::ensureDecoder()
         return false;
     }
 
-    m_container_width = m_decoder->containerWidth;
-    m_container_height = m_decoder->containerHeight;
-
     decodeResult = avifDecoderNextImage(m_decoder);
 
     if (decodeResult == AVIF_RESULT_OK) {
 
-        if ((m_container_width != m_decoder->image->width) ||
-                (m_container_height != m_decoder->image->height)) {
-            qWarning("Decoded image size (%dx%d) do not match declared container size (%dx%d)!\n",
-                     m_decoder->image->width, m_decoder->image->height,
-                     m_container_width, m_container_height);
-
-            avifDecoderDestroy(m_decoder);
-            m_decoder = NULL;
-            m_parseState = ParseAvifError;
-            return false;
-        }
+        m_container_width = m_decoder->image->width;
+        m_container_height = m_decoder->image->height;
 
         m_parseState = ParseAvifSuccess;
         if (decode_one_frame()) {
@@ -207,7 +161,7 @@ bool AVIFHandler::ensureDecoder()
     return false;
 }
 
-bool AVIFHandler::decode_one_frame()
+bool QAVIFHandler::decode_one_frame()
 {
     if (!ensureParsed()) {
         return false;
@@ -404,7 +358,7 @@ bool AVIFHandler::decode_one_frame()
     return true;
 }
 
-bool AVIFHandler::read(QImage *image)
+bool QAVIFHandler::read(QImage *image)
 {
     if (!ensureParsed()) {
         return false;
@@ -421,7 +375,7 @@ bool AVIFHandler::read(QImage *image)
     return true;
 }
 
-bool AVIFHandler::write(const QImage &image)
+bool QAVIFHandler::write(const QImage &image)
 {
     QImage tmpimage = image.convertToFormat(image.hasAlphaChannel() ? QImage::Format_RGBA8888 : QImage::Format_RGB888);
 
@@ -446,6 +400,8 @@ bool AVIFHandler::write(const QImage &image)
 
     avifImage *avif = avifImageCreate(tmpimage.width(), tmpimage.height(), 8, pixel_format);
     avif->yuvRange = AVIF_RANGE_FULL;
+    
+    avif->matrixCoefficients = (avifMatrixCoefficients) 1; //default for Qt 5.12 and 5.13
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     if (tmpimage.colorSpace().isValid()) {
@@ -601,7 +557,7 @@ bool AVIFHandler::write(const QImage &image)
 }
 
 
-QVariant AVIFHandler::option(ImageOption option) const
+QVariant QAVIFHandler::option(ImageOption option) const
 {
     if (!supportsOption(option) || !ensureParsed()) {
         return QVariant();
@@ -623,7 +579,7 @@ QVariant AVIFHandler::option(ImageOption option) const
     }
 }
 
-void AVIFHandler::setOption(ImageOption option, const QVariant &value)
+void QAVIFHandler::setOption(ImageOption option, const QVariant &value)
 {
     switch (option) {
     case Quality:
@@ -640,14 +596,14 @@ void AVIFHandler::setOption(ImageOption option, const QVariant &value)
     QImageIOHandler::setOption(option, value);
 }
 
-bool AVIFHandler::supportsOption(ImageOption option) const
+bool QAVIFHandler::supportsOption(ImageOption option) const
 {
     return option == Quality
            || option == Size
            || option == Animation;
 }
 
-int AVIFHandler::imageCount() const
+int QAVIFHandler::imageCount() const
 {
     if (!ensureParsed()) {
         return 0;
@@ -659,7 +615,7 @@ int AVIFHandler::imageCount() const
     return 0;
 }
 
-int AVIFHandler::currentImageNumber() const
+int QAVIFHandler::currentImageNumber() const
 {
     if (m_parseState == ParseAvifNotParsed) {
         return -1;
@@ -672,7 +628,7 @@ int AVIFHandler::currentImageNumber() const
     return m_decoder->imageIndex;
 }
 
-bool AVIFHandler::jumpToNextImage()
+bool QAVIFHandler::jumpToNextImage()
 {
     if (!ensureParsed()) {
         return false;
@@ -696,7 +652,7 @@ bool AVIFHandler::jumpToNextImage()
 
     if ((m_container_width != m_decoder->image->width) ||
             (m_container_height != m_decoder->image->height)) {
-        qWarning("Decoded image sequence size (%dx%d) do not match declared container size (%dx%d)!\n",
+        qWarning("Decoded image sequence size (%dx%d) do not match first image size (%dx%d)!\n",
                  m_decoder->image->width, m_decoder->image->height,
                  m_container_width, m_container_height);
 
@@ -713,7 +669,7 @@ bool AVIFHandler::jumpToNextImage()
 
 }
 
-bool AVIFHandler::jumpToImage(int imageNumber)
+bool QAVIFHandler::jumpToImage(int imageNumber)
 {
     if (!ensureParsed()) {
         return false;
@@ -761,7 +717,7 @@ bool AVIFHandler::jumpToImage(int imageNumber)
     }
 }
 
-int AVIFHandler::nextImageDelay() const
+int QAVIFHandler::nextImageDelay() const
 {
     if (!ensureParsed()) {
         return 0;
@@ -778,7 +734,7 @@ int AVIFHandler::nextImageDelay() const
     return delay_ms;
 }
 
-int AVIFHandler::loopCount() const
+int QAVIFHandler::loopCount() const
 {
     if (!ensureParsed()) {
         return 0;
@@ -790,3 +746,4 @@ int AVIFHandler::loopCount() const
 
     return 1;
 }
+
