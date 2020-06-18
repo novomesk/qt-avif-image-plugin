@@ -524,7 +524,7 @@ bool QAVIFHandler::write(const QImage &image)
 
     avifRWData raw = AVIF_DATA_EMPTY;
     avifEncoder *encoder = avifEncoderCreate();
-    encoder->maxThreads = QThread::idealThreadCount();
+    encoder->maxThreads = qBound(1, QThread::idealThreadCount(), 64);
     encoder->minQuantizer = minQuantizer;
     encoder->maxQuantizer = maxQuantizer;
 
