@@ -16,12 +16,12 @@ The plug-in use libavif library internally ( https://github.com/AOMediaCodec/lib
 Qt4 and is not supported and the plug-in doesn’t compile with Qt older than Qt 5.2
 
 Optional requirement:
-Plug-in supports Color spaces and loading/saving of ICC profiles when built with Qt 5.14 or newer.
+Plug-in supports Color spaces and loading ICC profiles when built with Qt 5.14 or newer.
 
 
 How to build the plug-in (two possibilities):
 
-1) Dynamic linking with libavif (ONLY for systems with >=libavif 0.7.0 installed!!!)
+1) Dynamic linking with libavif (ONLY for systems with >libavif 0.7.3 installed!!!)
 Run:
 ./build_libqavif_dynamic.sh
 
@@ -70,6 +70,6 @@ It is safer to delete the old libqavif.so first before installing the new one,
 or to perform update when user’s Qt applications are not running.
 
 If you are building libavif by yourself with libaom support, make sure that the libaom is recently fresh.
-You need at least libaom v1.0.0-errata1-avif .
+You need at least libaom v1.0.0-errata1-avif, v2.0.0 is recommended.
 Do not use the old libaom v1.0.0 which is present in some distributions.
 
