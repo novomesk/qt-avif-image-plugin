@@ -14,11 +14,13 @@ AV1 compression provides significantly better efficiency than traditional JPEG. 
 
 Download [Latest Release](https://github.com/novomesk/qt-avif-image-plugin/releases/latest) and extract the content of the zip file:
 
-`unzip v0.1.0.zip`
+`unzip v0.2.0.zip`
 
 **Recommended**: read [README.txt](README.txt)
 
 ## 2) Adding MIME types
+
+If you have _shared-mime-info 2.0_ or newer installed, you may skip this step. AVIF MIME type are installed already.
 
 In order to install mime types **image/avif** and **image/avif-sequence** in your system, copy (as root) _avif.xml_, _avifs.xml_ files to _/usr/share/mime/packages/_ folder and run:
 
@@ -32,7 +34,7 @@ In order to install mime types **image/avif** and **image/avif-sequence** in you
 Qt Image Plugin allows Qt and KDE applications to open/save pictures in AVIF format. The plug-in uses [libavif](https://github.com/AOMediaCodec/libavif/) internally.  
 You need Qt5 development packages (for example qtbase5-dev), qmake, you may also need cmake and yasm.
 
-If your system has libavif installed (at least version 0.7.0, check for the presence of _/usr/include/avif/avif.h_), run:
+If your system has libavif installed (git master after version 0.7.3, check for the presence of _/usr/include/avif/avif.h_), run:
 
 `./build_libqavif_dynamic.sh` 
 ![](img/build_libqavif_dynamic.png)
