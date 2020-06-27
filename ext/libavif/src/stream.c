@@ -168,7 +168,7 @@ avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header
     return AVIF_TRUE;
 }
 
-avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * version, uint8_t * flags)
+avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * version, uint32_t * flags)
 {
     uint8_t versionAndFlags[4];
     CHECK(avifROStreamRead(stream, versionAndFlags, 4));
@@ -176,7 +176,7 @@ avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * versio
         *version = versionAndFlags[0];
     }
     if (flags) {
-        memcpy(flags, &versionAndFlags[1], 3);
+        *flags = (versionAndFlags[1] << 16) + (versionAndFlags[2] << 8) + (versionAndFlags[3] << 0);
     }
     return AVIF_TRUE;
 }
@@ -250,7 +250,7 @@ void avifRWStreamWriteChars(avifRWStream * stream, const char * chars, size_t si
     avifRWStreamWrite(stream, (const uint8_t *)chars, size);
 }
 
-avifBoxMarker avifRWStreamWriteBox(avifRWStream * stream, const char * type, int version, size_t contentSize)
+avifBoxMarker avifRWStreamWriteFullBox(avifRWStream * stream, const char * type, size_t contentSize, int version, uint32_t flags)
 {
     avifBoxMarker marker = stream->offset;
     size_t headerSize = sizeof(uint32_t) + 4 /* size of type */;
@@ -260,15 +260,23 @@ avifBoxMarker avifRWStreamWriteBox(avifRWStream * stream, const char * type, int
 
     makeRoom(stream, headerSize);
     memset(stream->raw->data + stream->offset, 0, headerSize);
-    if (version != -1) {
-        stream->raw->data[stream->offset + 8] = (uint8_t)version;
-    }
-    uint32_t noSize = avifNTOHL((uint32_t)(headerSize + contentSize));
+    uint32_t noSize = avifHTONL((uint32_t)(headerSize + contentSize));
     memcpy(stream->raw->data + stream->offset, &noSize, sizeof(uint32_t));
     memcpy(stream->raw->data + stream->offset + 4, type, 4);
+    if (version != -1) {
+        stream->raw->data[stream->offset + 8] = (uint8_t)version;
+        stream->raw->data[stream->offset + 9] = (uint8_t)((flags >> 16) & 0xff);
+        stream->raw->data[stream->offset + 10] = (uint8_t)((flags >> 8) & 0xff);
+        stream->raw->data[stream->offset + 11] = (uint8_t)((flags >> 0) & 0xff);
+    }
     stream->offset += headerSize;
 
     return marker;
+}
+
+avifBoxMarker avifRWStreamWriteBox(avifRWStream * stream, const char * type, size_t contentSize)
+{
+    return avifRWStreamWriteFullBox(stream, type, contentSize, -1, 0);
 }
 
 void avifRWStreamFinishBox(avifRWStream * stream, avifBoxMarker marker)
@@ -298,6 +306,15 @@ void avifRWStreamWriteU32(avifRWStream * stream, uint32_t v)
 {
     size_t size = sizeof(uint32_t);
     v = avifHTONL(v);
+    makeRoom(stream, size);
+    memcpy(stream->raw->data + stream->offset, &v, size);
+    stream->offset += size;
+}
+
+void avifRWStreamWriteU64(avifRWStream * stream, uint64_t v)
+{
+    size_t size = sizeof(uint64_t);
+    v = avifHTON64(v);
     makeRoom(stream, size);
     memcpy(stream->raw->data + stream->offset, &v, size);
     stream->offset += size;

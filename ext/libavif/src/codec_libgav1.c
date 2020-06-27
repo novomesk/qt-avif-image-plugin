@@ -42,7 +42,7 @@ static avifBool gav1CodecGetNextImage(avifCodec * codec, avifImage * image)
     // Check if there are more samples to feed
     if (codec->internal->inputSampleIndex < codec->decodeInput->samples.count) {
         // Feed another sample
-        avifSample * sample = &codec->decodeInput->samples.sample[codec->internal->inputSampleIndex];
+        avifDecodeSample * sample = &codec->decodeInput->samples.sample[codec->internal->inputSampleIndex];
         ++codec->internal->inputSampleIndex;
         if (Libgav1DecoderEnqueueFrame(codec->internal->gav1Decoder,
                                        sample->data.data,
@@ -80,6 +80,8 @@ static avifBool gav1CodecGetNextImage(avifCodec * codec, avifImage * image)
         avifPixelFormat yuvFormat = AVIF_PIXEL_FORMAT_NONE;
         switch (gav1Image->image_format) {
             case kLibgav1ImageFormatMonochrome400:
+                yuvFormat = AVIF_PIXEL_FORMAT_YUV400;
+                break;
             case kLibgav1ImageFormatYuv420:
                 yuvFormat = AVIF_PIXEL_FORMAT_YUV420;
                 break;
@@ -115,7 +117,8 @@ static avifBool gav1CodecGetNextImage(avifCodec * codec, avifImage * image)
 
         // Steal the pointers from the decoder's image directly
         avifImageFreePlanes(image, AVIF_PLANES_YUV);
-        for (int yuvPlane = 0; yuvPlane < 3; ++yuvPlane) {
+        int yuvPlaneCount = (yuvFormat == AVIF_PIXEL_FORMAT_YUV400) ? 1 : 3;
+        for (int yuvPlane = 0; yuvPlane < yuvPlaneCount; ++yuvPlane) {
             image->yuvPlanes[yuvPlane] = gav1Image->plane[yuvPlane];
             image->yuvRowBytes[yuvPlane] = gav1Image->stride[yuvPlane];
         }

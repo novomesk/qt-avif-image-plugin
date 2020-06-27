@@ -87,16 +87,16 @@ avifBool avifReformatAlpha(const avifAlphaParams * const params);
 // ---------------------------------------------------------------------------
 // avifCodecDecodeInput
 
-typedef struct avifSample
+typedef struct avifDecodeSample
 {
     avifROData data;
     avifBool sync; // is sync sample (keyframe)
-} avifSample;
-AVIF_ARRAY_DECLARE(avifSampleArray, avifSample, sample);
+} avifDecodeSample;
+AVIF_ARRAY_DECLARE(avifDecodeSampleArray, avifDecodeSample, sample);
 
 typedef struct avifCodecDecodeInput
 {
-    avifSampleArray samples;
+    avifDecodeSampleArray samples;
     avifBool alpha; // if true, this is decoding an alpha plane
 } avifCodecDecodeInput;
 
@@ -104,43 +104,41 @@ avifCodecDecodeInput * avifCodecDecodeInputCreate(void);
 void avifCodecDecodeInputDestroy(avifCodecDecodeInput * decodeInput);
 
 // ---------------------------------------------------------------------------
-// avifCodec (abstraction layer to use different AV1 implementations)
+// avifCodecEncodeOutput
 
-typedef struct avifCodecConfigurationBox
+typedef struct avifEncodeSample
 {
-    // [skipped; is constant] unsigned int (1)marker = 1;
-    // [skipped; is constant] unsigned int (7)version = 1;
+    avifRWData data;
+    avifBool sync; // is sync sample (keyframe)
+} avifEncodeSample;
+AVIF_ARRAY_DECLARE(avifEncodeSampleArray, avifEncodeSample, sample);
 
-    uint8_t seqProfile;           // unsigned int (3) seq_profile;
-    uint8_t seqLevelIdx0;         // unsigned int (5) seq_level_idx_0;
-    uint8_t seqTier0;             // unsigned int (1) seq_tier_0;
-    uint8_t highBitdepth;         // unsigned int (1) high_bitdepth;
-    uint8_t twelveBit;            // unsigned int (1) twelve_bit;
-    uint8_t monochrome;           // unsigned int (1) monochrome;
-    uint8_t chromaSubsamplingX;   // unsigned int (1) chroma_subsampling_x;
-    uint8_t chromaSubsamplingY;   // unsigned int (1) chroma_subsampling_y;
-    uint8_t chromaSamplePosition; // unsigned int (2) chroma_sample_position;
+typedef struct avifCodecEncodeOutput
+{
+    avifEncodeSampleArray samples;
+} avifCodecEncodeOutput;
 
-    // unsigned int (3)reserved = 0;
-    // unsigned int (1)initial_presentation_delay_present;
-    // if (initial_presentation_delay_present) {
-    //     unsigned int (4)initial_presentation_delay_minus_one;
-    // } else {
-    //     unsigned int (4)reserved = 0;
-    // }
-} avifCodecConfigurationBox;
+avifCodecEncodeOutput * avifCodecEncodeOutputCreate(void);
+void avifCodecEncodeOutputAddSample(avifCodecEncodeOutput * encodeOutput, const uint8_t * data, size_t len, avifBool sync);
+void avifCodecEncodeOutputDestroy(avifCodecEncodeOutput * encodeOutput);
+
+// ---------------------------------------------------------------------------
+// avifCodec (abstraction layer to use different AV1 implementations)
 
 struct avifCodec;
 struct avifCodecInternal;
 
 typedef avifBool (*avifCodecOpenFunc)(struct avifCodec * codec, uint32_t firstSampleIndex);
 typedef avifBool (*avifCodecGetNextImageFunc)(struct avifCodec * codec, avifImage * image);
-// avifCodecEncodeImageFunc: if either OBU* is null, skip its encode. alpha should always be lossless
+// EncodeImage and EncodeFinish are not required to always emit a sample, but when all images are
+// encoded and Finish is called, the number of samples emitted must match the number of submitted frames.
 typedef avifBool (*avifCodecEncodeImageFunc)(struct avifCodec * codec,
-                                             const avifImage * image,
                                              avifEncoder * encoder,
-                                             avifRWData * obu,
-                                             avifBool alpha);
+                                             const avifImage * image,
+                                             avifBool alpha,
+                                             uint32_t addImageFlags,
+                                             avifCodecEncodeOutput * output);
+typedef avifBool (*avifCodecEncodeFinishFunc)(struct avifCodec * codec, avifCodecEncodeOutput * output);
 typedef void (*avifCodecDestroyInternalFunc)(struct avifCodec * codec);
 
 typedef struct avifCodec
@@ -152,6 +150,7 @@ typedef struct avifCodec
     avifCodecOpenFunc open;
     avifCodecGetNextImageFunc getNextImage;
     avifCodecEncodeImageFunc encodeImage;
+    avifCodecEncodeFinishFunc encodeFinish;
     avifCodecDestroyInternalFunc destroyInternal;
 } avifCodec;
 
@@ -199,8 +198,8 @@ avifBool avifROStreamReadUX8(avifROStream * stream, uint64_t * v, uint64_t facto
 avifBool avifROStreamReadU64(avifROStream * stream, uint64_t * v);
 avifBool avifROStreamReadString(avifROStream * stream, char * output, size_t outputSize);
 avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header);
-avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * version, uint8_t * flags); // flags is an optional uint8_t[3]
-avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforcedVersion);          // currently discards flags
+avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * version, uint32_t * flags); // version and flags ptrs are both optional
+avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforcedVersion); // currently discards flags
 
 typedef struct avifRWStream
 {
@@ -216,12 +215,31 @@ void avifRWStreamSetOffset(avifRWStream * stream, size_t offset);
 void avifRWStreamFinishWrite(avifRWStream * stream);
 void avifRWStreamWrite(avifRWStream * stream, const uint8_t * data, size_t size);
 void avifRWStreamWriteChars(avifRWStream * stream, const char * chars, size_t size);
-avifBoxMarker avifRWStreamWriteBox(avifRWStream * stream, const char * type, int version /* -1 for "not a FullBox" */, size_t contentSize);
+avifBoxMarker avifRWStreamWriteBox(avifRWStream * stream, const char * type, size_t contentSize);
+avifBoxMarker avifRWStreamWriteFullBox(avifRWStream * stream, const char * type, size_t contentSize, int version, uint32_t flags);
 void avifRWStreamFinishBox(avifRWStream * stream, avifBoxMarker marker);
 void avifRWStreamWriteU8(avifRWStream * stream, uint8_t v);
 void avifRWStreamWriteU16(avifRWStream * stream, uint16_t v);
 void avifRWStreamWriteU32(avifRWStream * stream, uint32_t v);
+void avifRWStreamWriteU64(avifRWStream * stream, uint64_t v);
 void avifRWStreamWriteZeros(avifRWStream * stream, size_t byteCount);
+
+// This is to make it clear that the box size is currently unknown, and will be determined later (with a call to avifRWStreamFinishBox)
+#define AVIF_BOX_SIZE_TBD 0
+
+typedef struct avifSequenceHeader
+{
+    uint32_t maxWidth;
+    uint32_t maxHeight;
+    uint32_t bitDepth;
+    avifPixelFormat yuvFormat;
+    avifChromaSamplePosition chromaSamplePosition;
+    avifColorPrimaries colorPrimaries;
+    avifTransferCharacteristics transferCharacteristics;
+    avifMatrixCoefficients matrixCoefficients;
+    avifRange range;
+} avifSequenceHeader;
+avifBool avifSequenceHeaderParse(avifSequenceHeader * header, const avifROData * sample);
 
 #ifdef __cplusplus
 } // extern "C"

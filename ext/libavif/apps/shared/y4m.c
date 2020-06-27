@@ -80,6 +80,21 @@ static avifBool y4mColorSpaceParse(const char * formatString, avifPixelFormat * 
         *depth = 8;
         return AVIF_TRUE;
     }
+    if (!strcmp(formatString, "Cmono")) {
+        *format = AVIF_PIXEL_FORMAT_YUV400;
+        *depth = 8;
+        return AVIF_TRUE;
+    }
+    if (!strcmp(formatString, "Cmono10")) {
+        *format = AVIF_PIXEL_FORMAT_YUV400;
+        *depth = 10;
+        return AVIF_TRUE;
+    }
+    if (!strcmp(formatString, "Cmono12")) {
+        *format = AVIF_PIXEL_FORMAT_YUV400;
+        *depth = 12;
+        return AVIF_TRUE;
+    }
     return AVIF_FALSE;
 }
 
@@ -278,7 +293,6 @@ cleanup:
 
 avifBool y4mWrite(avifImage * avif, const char * outputFilename)
 {
-    avifBool swapUV = AVIF_FALSE;
     avifBool hasAlpha = (avif->alphaPlane != NULL) && (avif->alphaRowBytes > 0);
     avifBool writeAlpha = AVIF_FALSE;
     char * y4mHeaderFormat = NULL;
@@ -304,9 +318,8 @@ avifBool y4mWrite(avifImage * avif, const char * outputFilename)
                 case AVIF_PIXEL_FORMAT_YUV420:
                     y4mHeaderFormat = "C420jpeg XYSCSS=420JPEG";
                     break;
-                case AVIF_PIXEL_FORMAT_YV12:
-                    y4mHeaderFormat = "C420jpeg XYSCSS=420JPEG";
-                    swapUV = AVIF_TRUE;
+                case AVIF_PIXEL_FORMAT_YUV400:
+                    y4mHeaderFormat = "Cmono XYSCSS=400";
                     break;
                 case AVIF_PIXEL_FORMAT_NONE:
                     // will error later; this case is here for warning's sake
@@ -324,9 +337,8 @@ avifBool y4mWrite(avifImage * avif, const char * outputFilename)
                 case AVIF_PIXEL_FORMAT_YUV420:
                     y4mHeaderFormat = "C420p10 XYSCSS=420P10";
                     break;
-                case AVIF_PIXEL_FORMAT_YV12:
-                    y4mHeaderFormat = "C422p10 XYSCSS=422P10";
-                    swapUV = AVIF_TRUE;
+                case AVIF_PIXEL_FORMAT_YUV400:
+                    y4mHeaderFormat = "Cmono10 XYSCSS=400";
                     break;
                 case AVIF_PIXEL_FORMAT_NONE:
                     // will error later; this case is here for warning's sake
@@ -344,9 +356,8 @@ avifBool y4mWrite(avifImage * avif, const char * outputFilename)
                 case AVIF_PIXEL_FORMAT_YUV420:
                     y4mHeaderFormat = "C420p12 XYSCSS=420P12";
                     break;
-                case AVIF_PIXEL_FORMAT_YV12:
-                    y4mHeaderFormat = "C422p12 XYSCSS=422P12";
-                    swapUV = AVIF_TRUE;
+                case AVIF_PIXEL_FORMAT_YUV400:
+                    y4mHeaderFormat = "Cmono12 XYSCSS=400";
                     break;
                 case AVIF_PIXEL_FORMAT_NONE:
                     // will error later; this case is here for warning's sake
@@ -392,16 +403,6 @@ avifBool y4mWrite(avifImage * avif, const char * outputFilename)
     planeBytes[0] = avif->yuvRowBytes[0] * avif->height;
     planeBytes[1] = avif->yuvRowBytes[1] * (avif->height >> info.chromaShiftY);
     planeBytes[2] = avif->yuvRowBytes[2] * (avif->height >> info.chromaShiftY);
-    if (swapUV) {
-        uint8_t * tmpPtr;
-        uint32_t tmp;
-        tmpPtr = planes[1];
-        tmp = planeBytes[1];
-        planes[1] = planes[2];
-        planeBytes[1] = planeBytes[2];
-        planes[2] = tmpPtr;
-        planeBytes[2] = tmp;
-    }
 
     for (int i = 0; i < 3; ++i) {
         if (fwrite(planes[i], 1, planeBytes[i], f) != planeBytes[i]) {

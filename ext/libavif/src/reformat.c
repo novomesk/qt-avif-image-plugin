@@ -198,7 +198,7 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                         uint16_t * pY = (uint16_t *)&yuvPlanes[AVIF_CHAN_Y][(i * 2) + (j * yuvRowBytes[AVIF_CHAN_Y])];
                         *pY = (uint16_t)yuvToUNorm(
                             AVIF_CHAN_Y, image->yuvRange, image->depth, yuvMaxChannel, yuvBlock[bI][bJ].y, state.mode);
-                        if (!state.formatInfo.chromaShiftX && !state.formatInfo.chromaShiftY) {
+                        if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) {
                             // YUV444, full chroma
                             uint16_t * pU = (uint16_t *)&yuvPlanes[AVIF_CHAN_U][(i * 2) + (j * yuvRowBytes[AVIF_CHAN_U])];
                             *pU = (uint16_t)yuvToUNorm(
@@ -210,7 +210,7 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                     } else {
                         yuvPlanes[AVIF_CHAN_Y][i + (j * yuvRowBytes[AVIF_CHAN_Y])] = (uint8_t)yuvToUNorm(
                             AVIF_CHAN_Y, image->yuvRange, image->depth, yuvMaxChannel, yuvBlock[bI][bJ].y, state.mode);
-                        if (!state.formatInfo.chromaShiftX && !state.formatInfo.chromaShiftY) {
+                        if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) {
                             // YUV444, full chroma
                             yuvPlanes[AVIF_CHAN_U][i + (j * yuvRowBytes[AVIF_CHAN_U])] = (uint8_t)yuvToUNorm(
                                 AVIF_CHAN_U, image->yuvRange, image->depth, yuvMaxChannel, yuvBlock[bI][bJ].u, state.mode);
@@ -222,7 +222,7 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
             }
 
             // Populate any subsampled channels with averages from the 2x2 block
-            if (state.formatInfo.chromaShiftX && state.formatInfo.chromaShiftY) {
+            if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420) {
                 // YUV420, average 4 samples (2x2)
 
                 float sumU = 0.0f;
@@ -237,8 +237,10 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                 float avgU = sumU / totalSamples;
                 float avgV = sumV / totalSamples;
 
-                int uvI = outerI >> state.formatInfo.chromaShiftX;
-                int uvJ = outerJ >> state.formatInfo.chromaShiftY;
+                const int chromaShiftX = 1;
+                const int chromaShiftY = 1;
+                int uvI = outerI >> chromaShiftX;
+                int uvJ = outerJ >> chromaShiftY;
                 if (state.yuvChannelBytes > 1) {
                     uint16_t * pU = (uint16_t *)&yuvPlanes[AVIF_CHAN_U][(uvI * 2) + (uvJ * yuvRowBytes[AVIF_CHAN_U])];
                     *pU = (uint16_t)yuvToUNorm(AVIF_CHAN_U, image->yuvRange, image->depth, yuvMaxChannel, avgU, state.mode);
@@ -250,7 +252,7 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                     yuvPlanes[AVIF_CHAN_V][uvI + (uvJ * yuvRowBytes[AVIF_CHAN_V])] =
                         (uint8_t)yuvToUNorm(AVIF_CHAN_V, image->yuvRange, image->depth, yuvMaxChannel, avgV, state.mode);
                 }
-            } else if (state.formatInfo.chromaShiftX && !state.formatInfo.chromaShiftY) {
+            } else if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV422) {
                 // YUV422, average 2 samples (1x2), twice
 
                 for (int bJ = 0; bJ < blockH; ++bJ) {
@@ -264,7 +266,8 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                     float avgU = sumU / totalSamples;
                     float avgV = sumV / totalSamples;
 
-                    int uvI = outerI >> state.formatInfo.chromaShiftX;
+                    const int chromaShiftX = 1;
+                    int uvI = outerI >> chromaShiftX;
                     int uvJ = outerJ + bJ;
                     if (state.yuvChannelBytes > 1) {
                         uint16_t * pU = (uint16_t *)&yuvPlanes[AVIF_CHAN_U][(uvI * 2) + (uvJ * yuvRowBytes[AVIF_CHAN_U])];
