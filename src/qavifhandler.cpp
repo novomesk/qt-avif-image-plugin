@@ -377,149 +377,307 @@ bool QAVIFHandler::read(QImage *image)
 
 bool QAVIFHandler::write(const QImage &image)
 {
-    QImage tmpimage = image.convertToFormat(image.hasAlphaChannel() ? QImage::Format_RGBA8888 : QImage::Format_RGB888);
+    if (image.format() == QImage::Format_Invalid) {
+        qWarning("No image data to save");
+        return false;
+    }
+
+    if ((image.width() > 32768) || (image.height() > 32768)) {
+        qWarning("Image is too large");
+        return false;
+    }
 
     int maxQuantizer = AVIF_QUANTIZER_WORST_QUALITY * (100 - qBound(0, m_quality, 100)) / 100;
     int minQuantizer = 0;
     int maxQuantizerAlpha = 0;
+    avifResult res;
 
-    avifPixelFormat pixel_format = AVIF_PIXEL_FORMAT_YUV420;
+    bool save_grayscale; //true - monochrome, false - colors
+    int save_depth; //8 or 10bit per channel
+    QImage::Format tmpformat; //format for temporary image
 
-    if (maxQuantizer < 20) {
-        if (maxQuantizer < 10) {
-            pixel_format = AVIF_PIXEL_FORMAT_YUV444;
-        } else {
-            pixel_format = AVIF_PIXEL_FORMAT_YUV422;
-        }
-    } else {
-      minQuantizer = maxQuantizer - 20;
-      if (maxQuantizer > 40) {   //we decrease quality of alpha channel here
-        maxQuantizerAlpha = maxQuantizer - 40;
-      }
+    avifImage *avif = NULL;
+
+    //grayscale detection
+    switch (image.format()) {
+    case QImage::Format_Mono:
+    case QImage::Format_MonoLSB:
+    case QImage::Format_Grayscale8:
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
+    case QImage::Format_Grayscale16:
+#endif
+        save_grayscale = true;
+        break;
+    case QImage::Format_Indexed8:
+        save_grayscale = image.isGrayscale();
+        break;
+    default:
+        save_grayscale = false;
+        break;
     }
 
-    avifImage *avif = avifImageCreate(tmpimage.width(), tmpimage.height(), 8, pixel_format);
-    avif->yuvRange = AVIF_RANGE_FULL;
-    
-    avif->matrixCoefficients = (avifMatrixCoefficients) 1; //default for Qt 5.12 and 5.13
+    //depth detection
+    switch (image.format()) {
+    case QImage::Format_BGR30:
+    case QImage::Format_A2BGR30_Premultiplied:
+    case QImage::Format_RGB30:
+    case QImage::Format_A2RGB30_Premultiplied:
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
+    case QImage::Format_Grayscale16:
+#endif
+    case QImage::Format_RGBX64:
+    case QImage::Format_RGBA64:
+    case QImage::Format_RGBA64_Premultiplied:
+        save_depth = 10;
+        break;
+    default:
+        if (image.depth() > 32) {
+            save_depth = 10;
+        } else {
+            save_depth = 8;
+        }
+        break;
+    }
+
+    //quality settings
+    if (maxQuantizer > 20) {
+        minQuantizer = maxQuantizer - 20;
+        if (maxQuantizer > 40) { //we decrease quality of alpha channel here
+            maxQuantizerAlpha = maxQuantizer - 40;
+        }
+    }
+
+    if (save_grayscale && !image.hasAlphaChannel()) { //we are going to save grayscale image without alpha channel
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
+        if (save_depth > 8) {
+            tmpformat = QImage::Format_Grayscale16;
+        } else {
+            tmpformat = QImage::Format_Grayscale8;
+        }
+#else
+        tmpformat = QImage::Format_Grayscale8;
+        save_depth = 8;
+#endif
+        QImage tmpgrayimage = image.convertToFormat(tmpformat);
+
+        avif = avifImageCreate(tmpgrayimage.width(), tmpgrayimage.height(), save_depth, AVIF_PIXEL_FORMAT_YUV400);
+        avifImageAllocatePlanes(avif, AVIF_PLANES_YUV);
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
-    if (tmpimage.colorSpace().isValid()) {
-        avifColorPrimaries primaries_to_save;
-        avifTransferCharacteristics transfer_to_save;
-        avifMatrixCoefficients matrix_to_save;
+        if (tmpgrayimage.colorSpace().isValid()) {
+            avif->colorPrimaries = (avifColorPrimaries)1;
+            avif->matrixCoefficients = (avifMatrixCoefficients)1;
 
-        switch (tmpimage.colorSpace().primaries()) {
-        case QColorSpace::Primaries::SRgb:
-            /* AVIF_COLOR_PRIMARIES_BT709 */
-            primaries_to_save = (avifColorPrimaries) 1;
-            /* AVIF_MATRIX_COEFFICIENTS_BT709 */
-            matrix_to_save = (avifMatrixCoefficients) 1;
-            break;
-        case QColorSpace::Primaries::DciP3D65:
-            /* AVIF_NCLX_COLOUR_PRIMARIES_P3, AVIF_NCLX_COLOUR_PRIMARIES_SMPTE432 */
-            primaries_to_save = (avifColorPrimaries) 12;
-            /* AVIF_MATRIX_COEFFICIENTS_CHROMA_DERIVED_NCL */
-            matrix_to_save = (avifMatrixCoefficients) 12;
-            break;
-        default:
-            /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
-            primaries_to_save = (avifColorPrimaries) 2;
-            /* AVIF_MATRIX_COEFFICIENTS_UNSPECIFIED */
-            matrix_to_save = (avifMatrixCoefficients) 2;
-            break;
-        }
-
-        switch (tmpimage.colorSpace().transferFunction()) {
-        case QColorSpace::TransferFunction::Linear:
-            /* AVIF_TRANSFER_CHARACTERISTICS_LINEAR */
-            transfer_to_save = (avifTransferCharacteristics) 8;
-            break;
-        case QColorSpace::TransferFunction::Gamma:
-            if (qAbs(tmpimage.colorSpace().gamma() - 2.2f) < 0.1f) {
-                /* AVIF_TRANSFER_CHARACTERISTICS_BT470M */
-                transfer_to_save = (avifTransferCharacteristics) 4;
-            } else if (qAbs(tmpimage.colorSpace().gamma() - 2.8f) < 0.1f) {
-                /* AVIF_TRANSFER_CHARACTERISTICS_BT470BG */
-                transfer_to_save = (avifTransferCharacteristics) 5;
-            } else {
+            switch (tmpgrayimage.colorSpace().transferFunction()) {
+            case QColorSpace::TransferFunction::Linear:
+                /* AVIF_TRANSFER_CHARACTERISTICS_LINEAR */
+                avif->transferCharacteristics = (avifTransferCharacteristics)8;
+                break;
+            case QColorSpace::TransferFunction::SRgb:
+                /* AVIF_TRANSFER_CHARACTERISTICS_SRGB */
+                avif->transferCharacteristics = (avifTransferCharacteristics)13;
+                break;
+            default:
                 /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
-                transfer_to_save = (avifTransferCharacteristics) 2;
-            }
-            break;
-        case QColorSpace::TransferFunction::SRgb:
-            /* AVIF_TRANSFER_CHARACTERISTICS_SRGB */
-            transfer_to_save = (avifTransferCharacteristics) 13;
-            break;
-        default:
-            /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
-            transfer_to_save = (avifTransferCharacteristics) 2;
-            break;
-        }
-
-        if ((primaries_to_save != 2) &&
-                (transfer_to_save != 2)) {    //recognized primaries and trc
-            avif->colorPrimaries = primaries_to_save;
-            avif->transferCharacteristics = transfer_to_save;
-            avif->matrixCoefficients = matrix_to_save;
-        } else if ((primaries_to_save == 2) &&
-                   (transfer_to_save != 2)) {    //other primaries but known trc
-            avif->colorPrimaries = (avifColorPrimaries) 1; // AVIF_COLOR_PRIMARIES_BT709
-            avif->matrixCoefficients = (avifMatrixCoefficients) 1; // AVIF_MATRIX_COEFFICIENTS_BT709
-
-            switch (transfer_to_save) {
-            case 8: // AVIF_TRANSFER_CHARACTERISTICS_LINEAR
-                tmpimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::Linear));
-                break;
-            case 4: // AVIF_TRANSFER_CHARACTERISTICS_BT470M
-                tmpimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.2f));
-                break;
-            case 5: // AVIF_TRANSFER_CHARACTERISTICS_BT470BG
-                tmpimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.8f));
-                break;
-            default: // AVIF_TRANSFER_CHARACTERISTICS_SRGB + any other
-                tmpimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
-                transfer_to_save = (avifTransferCharacteristics) 13;
                 break;
             }
 
-            avif->transferCharacteristics = transfer_to_save;
-
-        } else if ((primaries_to_save != 2) &&
-                   (transfer_to_save == 2)) {    //recognized primaries but other trc
-            avif->colorPrimaries = primaries_to_save;
-            avif->transferCharacteristics = (avifTransferCharacteristics) 13;
-            avif->matrixCoefficients = matrix_to_save;
-
-            tmpimage.convertToColorSpace(tmpimage.colorSpace().withTransferFunction(QColorSpace::TransferFunction::SRgb));
-
-        } else { //unrecognized profile
-            avif->colorPrimaries = (avifColorPrimaries) 1; // AVIF_COLOR_PRIMARIES_BT709
-            avif->transferCharacteristics = (avifTransferCharacteristics) 13;
-            avif->matrixCoefficients = (avifMatrixCoefficients) 1; // AVIF_MATRIX_COEFFICIENTS_BT709
-            tmpimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
         }
-    }
 #endif
 
-    avifRGBImage rgb;
-    rgb.width = tmpimage.width();
-    rgb.height = tmpimage.height();
-    rgb.depth = 8;
-    rgb.rowBytes = tmpimage.bytesPerLine();
-    rgb.pixels = (uint8_t *) tmpimage.constBits();
+        if (save_depth > 8) { // QImage::Format_Grayscale16
+            for (int y = 0; y < tmpgrayimage.height(); y++) {
+                const uint16_t *src16bit = (const uint16_t *) tmpgrayimage.constScanLine(y);
+                uint16_t *dest16bit = (uint16_t *)(avif->yuvPlanes[0] + y * avif->yuvRowBytes[0]);
+                for (int x = 0; x < tmpgrayimage.width(); x++) {
+                    *dest16bit = (*src16bit) >> 6; //downgrade to 10 bits
+                    dest16bit++;
+                    src16bit++;
+                }
+            }
+        } else { // QImage::Format_Grayscale8
+            for (int y = 0; y < tmpgrayimage.height(); y++) {
+                const uchar *src8bit = tmpgrayimage.constScanLine(y);
+                uint8_t *dest8bit = avif->yuvPlanes[0] + y * avif->yuvRowBytes[0];
+                for (int x = 0; x < tmpgrayimage.width(); x++) {
+                    *dest8bit = *src8bit;
+                    dest8bit++;
+                    src8bit++;
+                }
+            }
+        }
 
-    if (tmpimage.hasAlphaChannel()) {
-        rgb.format = AVIF_RGB_FORMAT_RGBA;
-        avif->alphaRange = AVIF_RANGE_FULL;
-    } else {
-        rgb.format = AVIF_RGB_FORMAT_RGB;
-    }
+    } else { //we are going to save color image
+        if (save_depth > 8) {
+            if (image.hasAlphaChannel()) {
+                tmpformat = QImage::Format_RGBA64;
+            } else {
+                tmpformat = QImage::Format_RGBX64;
+            }
+        } else { //8bit depth
+            if (image.hasAlphaChannel()) {
+                tmpformat = QImage::Format_RGBA8888;
+            } else {
+                tmpformat = QImage::Format_RGB888;
+            }
+        }
 
-    avifResult res = avifImageRGBToYUV(avif, &rgb);
-    if (res != AVIF_RESULT_OK) {
-        qWarning("ERROR in avifImageRGBToYUV: %s\n", avifResultToString(res));
-        return false;
+        QImage tmpcolorimage = image.convertToFormat(tmpformat);
+
+        avifPixelFormat pixel_format = AVIF_PIXEL_FORMAT_YUV420;
+        if (maxQuantizer < 20) {
+            if (maxQuantizer < 10) {
+                pixel_format = AVIF_PIXEL_FORMAT_YUV444; //best quality
+            } else {
+                pixel_format = AVIF_PIXEL_FORMAT_YUV422; //high quality
+            }
+        }
+
+        avifMatrixCoefficients matrix_to_save = (avifMatrixCoefficients)1; //default for Qt 5.12 and 5.13;
+
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+
+        avifColorPrimaries primaries_to_save = (avifColorPrimaries)2;
+        avifTransferCharacteristics transfer_to_save = (avifTransferCharacteristics)2;
+
+        if (tmpcolorimage.colorSpace().isValid()) {
+            switch (tmpcolorimage.colorSpace().primaries()) {
+            case QColorSpace::Primaries::SRgb:
+                /* AVIF_COLOR_PRIMARIES_BT709 */
+                primaries_to_save = (avifColorPrimaries)1;
+                /* AVIF_MATRIX_COEFFICIENTS_BT709 */
+                matrix_to_save = (avifMatrixCoefficients)1;
+                break;
+            case QColorSpace::Primaries::DciP3D65:
+                /* AVIF_NCLX_COLOUR_PRIMARIES_P3, AVIF_NCLX_COLOUR_PRIMARIES_SMPTE432 */
+                primaries_to_save = (avifColorPrimaries)12;
+                /* AVIF_MATRIX_COEFFICIENTS_CHROMA_DERIVED_NCL */
+                matrix_to_save = (avifMatrixCoefficients)12;
+                break;
+            default:
+                /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
+                primaries_to_save = (avifColorPrimaries)2;
+                /* AVIF_MATRIX_COEFFICIENTS_UNSPECIFIED */
+                matrix_to_save = (avifMatrixCoefficients)2;
+                break;
+            }
+
+            switch (tmpcolorimage.colorSpace().transferFunction()) {
+            case QColorSpace::TransferFunction::Linear:
+                /* AVIF_TRANSFER_CHARACTERISTICS_LINEAR */
+                transfer_to_save = (avifTransferCharacteristics)8;
+                break;
+            case QColorSpace::TransferFunction::Gamma:
+                if (qAbs(tmpcolorimage.colorSpace().gamma() - 2.2f) < 0.1f) {
+                    /* AVIF_TRANSFER_CHARACTERISTICS_BT470M */
+                    transfer_to_save = (avifTransferCharacteristics)4;
+                } else if (qAbs(tmpcolorimage.colorSpace().gamma() - 2.8f) < 0.1f) {
+                    /* AVIF_TRANSFER_CHARACTERISTICS_BT470BG */
+                    transfer_to_save = (avifTransferCharacteristics)5;
+                } else {
+                    /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
+                    transfer_to_save = (avifTransferCharacteristics)2;
+                }
+                break;
+            case QColorSpace::TransferFunction::SRgb:
+                /* AVIF_TRANSFER_CHARACTERISTICS_SRGB */
+                transfer_to_save = (avifTransferCharacteristics)13;
+                break;
+            default:
+                /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
+                transfer_to_save = (avifTransferCharacteristics)2;
+                break;
+            }
+
+            //in case primaries or trc were not identified
+            if ((primaries_to_save == 2) ||
+                    (transfer_to_save == 2)) {
+
+                //upgrade image to higher bit depth
+                if (save_depth == 8) {
+                    save_depth = 10;
+                    if (tmpcolorimage.hasAlphaChannel()) {
+                        tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBA64);
+                    } else {
+                        tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBX64);
+                    }
+                }
+
+                if ((primaries_to_save == 2) &&
+                        (transfer_to_save != 2)) {    //other primaries but known trc
+                    primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
+                    matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
+
+                    switch (transfer_to_save) {
+                    case 8: // AVIF_TRANSFER_CHARACTERISTICS_LINEAR
+                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::Linear));
+                        break;
+                    case 4: // AVIF_TRANSFER_CHARACTERISTICS_BT470M
+                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.2f));
+                        break;
+                    case 5: // AVIF_TRANSFER_CHARACTERISTICS_BT470BG
+                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.8f));
+                        break;
+                    default: // AVIF_TRANSFER_CHARACTERISTICS_SRGB + any other
+                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
+                        transfer_to_save = (avifTransferCharacteristics)13;
+                        break;
+                    }
+                } else if ((primaries_to_save != 2) &&
+                           (transfer_to_save == 2)) {    //recognized primaries but other trc
+                    transfer_to_save = (avifTransferCharacteristics)13;
+                    tmpcolorimage.convertToColorSpace(tmpcolorimage.colorSpace().withTransferFunction(QColorSpace::TransferFunction::SRgb));
+                } else { //unrecognized profile
+                    primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
+                    transfer_to_save = (avifTransferCharacteristics)13;
+                    matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
+                    tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
+                }
+            }
+        }
+#endif
+        avif = avifImageCreate(tmpcolorimage.width(), tmpcolorimage.height(), save_depth, pixel_format);
+        avif->matrixCoefficients = matrix_to_save;
+
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+        avif->colorPrimaries = primaries_to_save;
+        avif->transferCharacteristics = transfer_to_save;
+#endif
+
+        avifRGBImage rgb;
+        rgb.width = tmpcolorimage.width();
+        rgb.height = tmpcolorimage.height();
+        rgb.rowBytes = tmpcolorimage.bytesPerLine();
+        rgb.pixels = (uint8_t *)tmpcolorimage.constBits();
+
+        if (save_depth > 8) { //10bit depth
+            rgb.depth = 16;
+
+            if (tmpcolorimage.hasAlphaChannel()) {
+                avif->alphaRange = AVIF_RANGE_FULL;
+            }
+
+            rgb.format = AVIF_RGB_FORMAT_RGBA;
+        } else { //8bit depth
+            rgb.depth = 8;
+
+            if (tmpcolorimage.hasAlphaChannel()) {
+                rgb.format = AVIF_RGB_FORMAT_RGBA;
+                avif->alphaRange = AVIF_RANGE_FULL;
+            } else {
+                rgb.format = AVIF_RGB_FORMAT_RGB;
+            }
+        }
+
+        res = avifImageRGBToYUV(avif, &rgb);
+        if (res != AVIF_RESULT_OK) {
+            qWarning("ERROR in avifImageRGBToYUV: %s\n", avifResultToString(res));
+            return false;
+        }
+
+        if ((save_depth > 8) && !tmpcolorimage.hasAlphaChannel()) {
+            avifImageFreePlanes(avif, AVIF_PLANES_A);
+        }
     }
 
     avifRWData raw = AVIF_DATA_EMPTY;
@@ -528,7 +686,7 @@ bool QAVIFHandler::write(const QImage &image)
     encoder->minQuantizer = minQuantizer;
     encoder->maxQuantizer = maxQuantizer;
 
-    if (tmpimage.hasAlphaChannel()) {
+    if (image.hasAlphaChannel()) {
         encoder->minQuantizerAlpha = AVIF_QUANTIZER_LOSSLESS;
         encoder->maxQuantizerAlpha = maxQuantizerAlpha;
     }
@@ -540,7 +698,7 @@ bool QAVIFHandler::write(const QImage &image)
     avifImageDestroy(avif);
 
     if (res == AVIF_RESULT_OK) {
-        qint64 status = device()->write((const char *) raw.data, raw.size);
+        qint64 status = device()->write((const char *)raw.data, raw.size);
         avifRWDataFree(&raw);
 
         if (status > 0) {
