@@ -144,6 +144,18 @@ bool QAVIFHandler::ensureDecoder()
         m_container_width = m_decoder->image->width;
         m_container_height = m_decoder->image->height;
 
+        if ((m_container_width > 32768) || (m_container_height > 32768)) {
+            qWarning("AVIF image (%dx%d) is too large!", m_container_width, m_container_height);
+            m_parseState = ParseAvifError;
+            return false;
+        }
+
+        if ((m_container_width == 0) || (m_container_height == 0)) {
+            qWarning("Empty image, nothing to decode");
+            m_parseState = ParseAvifError;
+            return false;
+        }
+
         m_parseState = ParseAvifSuccess;
         if (decode_one_frame()) {
             return true;
@@ -175,7 +187,23 @@ bool QAVIFHandler::decode_one_frame()
         loadalpha = false;
     }
 
-    QImage result(m_decoder->image->width, m_decoder->image->height, loadalpha ? QImage::Format_RGBA8888 : QImage::Format_RGB888);
+    QImage::Format resultformat;
+
+    if (m_decoder->image->depth > 8) {
+        resultformat = QImage::Format_RGBA64;
+    } else {
+        if (loadalpha) {
+            resultformat = QImage::Format_RGBA8888;
+        } else {
+            resultformat = QImage::Format_RGB888;
+        }
+    }
+    QImage result(m_decoder->image->width, m_decoder->image->height, resultformat);
+
+    if (result.isNull()) {
+        qWarning("Memory cannot be allocated");
+        return false;
+    }
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     if (m_decoder->image->icc.data && (m_decoder->image->icc.size > 0)) {
@@ -264,17 +292,42 @@ bool QAVIFHandler::decode_one_frame()
     avifRGBImage rgb;
     rgb.width = m_decoder->image->width;
     rgb.height = m_decoder->image->height;
-    rgb.depth = 8;
     rgb.rowBytes = result.bytesPerLine();
     rgb.pixels = result.bits();
 
-    if (loadalpha) {
+    if (m_decoder->image->depth > 8) {
+        rgb.depth = 16;
         rgb.format = AVIF_RGB_FORMAT_RGBA;
+
+        if (!loadalpha) {
+            resultformat = QImage::Format_RGBX64;
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
+            if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
+                resultformat = QImage::Format_Grayscale16;
+            }
+#endif
+        }
     } else {
-        rgb.format = AVIF_RGB_FORMAT_RGB;
+        rgb.depth = 8;
+        if (loadalpha) {
+            rgb.format = AVIF_RGB_FORMAT_RGBA;
+            resultformat = QImage::Format_ARGB32;
+        } else {
+            rgb.format = AVIF_RGB_FORMAT_RGB;
+
+            if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
+                resultformat = QImage::Format_Grayscale8;
+            } else {
+                resultformat = QImage::Format_RGB32;
+            }
+        }
     }
 
-    avifImageYUVToRGB(m_decoder->image, &rgb);
+    avifResult res = avifImageYUVToRGB(m_decoder->image, &rgb);
+    if (res != AVIF_RESULT_OK) {
+        qWarning("ERROR in avifImageYUVToRGB: %s\n", avifResultToString(res));
+        return false;
+    }
 
     if (m_decoder->image->transformFlags & AVIF_TRANSFORM_CLAP) {
         if ((m_decoder->image->clap.widthD > 0) && (m_decoder->image->clap.heightD > 0) &&
@@ -347,11 +400,10 @@ bool QAVIFHandler::decode_one_frame()
         }
     }
 
-    // Image is converted for compatibility reasons to the most known 8bit formats
-    if (loadalpha) {
-        m_current_image = result.convertToFormat(QImage::Format_ARGB32);
+    if (resultformat == result.format()) {
+        m_current_image = result;
     } else {
-        m_current_image = result.convertToFormat(QImage::Format_RGB32);
+        m_current_image = result.convertToFormat(resultformat);
     }
 
     m_must_jump_to_next_image = false;
