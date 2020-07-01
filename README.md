@@ -161,3 +161,7 @@ AVIF thumbnails in dolphin:
 ### qimgv
 
 ![AVIF images in qimgv](img/app_qimgv.png)
+
+### PhotoQt
+
+![AVIF images in photoqt](img/app_photoqt2.png)
