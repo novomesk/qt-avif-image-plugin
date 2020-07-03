@@ -290,8 +290,7 @@ bool QAVIFHandler::decode_one_frame()
 #endif
 
     avifRGBImage rgb;
-    rgb.width = m_decoder->image->width;
-    rgb.height = m_decoder->image->height;
+    avifRGBImageSetDefaults(&rgb, m_decoder->image);
     rgb.rowBytes = result.bytesPerLine();
     rgb.pixels = result.bits();
 
@@ -697,8 +696,7 @@ bool QAVIFHandler::write(const QImage &image)
 #endif
 
         avifRGBImage rgb;
-        rgb.width = tmpcolorimage.width();
-        rgb.height = tmpcolorimage.height();
+        avifRGBImageSetDefaults(&rgb, avif);
         rgb.rowBytes = tmpcolorimage.bytesPerLine();
         rgb.pixels = (uint8_t *)tmpcolorimage.constBits();
 
