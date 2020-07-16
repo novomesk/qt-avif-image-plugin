@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.5)
 # and find_package()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
 
-project(libavif LANGUAGES C CXX VERSION 0.7.3)
+project(libavif LANGUAGES C CXX VERSION 0.8.0)
 
 # SOVERSION scheme: MAJOR.MINOR.PATCH
 #   If there was an incompatible interface change:
@@ -16,9 +16,9 @@ project(libavif LANGUAGES C CXX VERSION 0.7.3)
 #     Increment MINOR. Set PATCH to 0
 #   If the source code was changed, but there were no interface changes:
 #     Increment PATCH.
-set(LIBRARY_VERSION_MAJOR 4)
+set(LIBRARY_VERSION_MAJOR 5)
 set(LIBRARY_VERSION_MINOR 0)
-set(LIBRARY_VERSION_PATCH 1)
+set(LIBRARY_VERSION_PATCH 0)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
 set(LIBRARY_SOVERSION ${LIBRARY_VERSION_MAJOR})
 
@@ -376,6 +376,7 @@ configure_file(libavif.pc.cmake ${CMAKE_CURRENT_BINARY_DIR}/libavif.pc @ONLY)
 if(NOT SKIP_INSTALL_LIBRARIES AND NOT SKIP_INSTALL_ALL)
     install(TARGETS avif
         EXPORT ${PROJECT_NAME}-config
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )

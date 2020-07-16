@@ -248,7 +248,7 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
             }
         }
 
-        // aom_codec.h says: aom_codec_version() == (1<<16 | 2<<8 | 3)
+        // aom_codec.h says: aom_codec_version() == (major<<16 | minor<<8 | patch)
         static const int aomVersion_2_0_0 = (2 << 16);
         const int aomVersion = aom_codec_version();
         if ((aomVersion < aomVersion_2_0_0) && (image->depth > 8)) {
@@ -278,10 +278,9 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
 
         avifGetPixelFormatInfo(image->yuvFormat, &codec->internal->formatInfo);
 
-        aom_codec_iface_t * encoder_interface = aom_codec_av1_cx();
+        aom_codec_iface_t * encoderInterface = aom_codec_av1_cx();
         struct aom_codec_enc_cfg cfg;
-        aom_codec_enc_config_default(encoder_interface, &cfg, aomUsage);
-        codec->internal->encoderInitialized = AVIF_TRUE;
+        aom_codec_enc_config_default(encoderInterface, &cfg, aomUsage);
 
         cfg.g_profile = codec->configBox.seqProfile;
         cfg.g_bit_depth = image->depth;
@@ -297,7 +296,6 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
         if (encoder->maxThreads > 1) {
             cfg.g_threads = encoder->maxThreads;
         }
-        cfg.kf_mode = AOM_KF_DISABLED;
 
         int minQuantizer = AVIF_CLAMP(encoder->minQuantizer, 0, 63);
         int maxQuantizer = AVIF_CLAMP(encoder->maxQuantizer, 0, 63);
@@ -312,7 +310,7 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
         codec->internal->monochromeEnabled = AVIF_FALSE;
         if (aomVersion > aomVersion_2_0_0) {
             // There exists a bug in libaom's chroma_check() function where it will attempt to
-            // access nonexistent UV planes when encoding monochrome at slower libavif "speeds". It
+            // access nonexistent UV planes when encoding monochrome at faster libavif "speeds". It
             // was fixed shortly after the 2.0.0 libaom release, and the fix exists in both the
             // master and applejack branches. This ensures that the next version *after* 2.0.0 will
             // have the fix, and we must avoid cfg.monochrome until then.
@@ -329,7 +327,8 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
         if (image->depth > 8) {
             encoderFlags |= AOM_CODEC_USE_HIGHBITDEPTH;
         }
-        aom_codec_enc_init(&codec->internal->encoder, encoder_interface, &cfg, encoderFlags);
+        aom_codec_enc_init(&codec->internal->encoder, encoderInterface, &cfg, encoderFlags);
+        codec->internal->encoderInitialized = AVIF_TRUE;
 
         if (lossless) {
             aom_codec_control(&codec->internal->encoder, AV1E_SET_LOSSLESS, 1);
@@ -387,9 +386,11 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
         aomImage->cp = (aom_color_primaries_t)image->colorPrimaries;
         aomImage->tc = (aom_transfer_characteristics_t)image->transferCharacteristics;
         aomImage->mc = (aom_matrix_coefficients_t)image->matrixCoefficients;
+        aomImage->csp = (aom_chroma_sample_position_t)image->yuvChromaSamplePosition;
         aom_codec_control(&codec->internal->encoder, AV1E_SET_COLOR_PRIMARIES, aomImage->cp);
         aom_codec_control(&codec->internal->encoder, AV1E_SET_TRANSFER_CHARACTERISTICS, aomImage->tc);
         aom_codec_control(&codec->internal->encoder, AV1E_SET_MATRIX_COEFFICIENTS, aomImage->mc);
+        aom_codec_control(&codec->internal->encoder, AV1E_SET_CHROMA_SAMPLE_POSITION, aomImage->csp);
     }
 
     if (monochromeRequested && !codec->internal->monochromeEnabled) {
@@ -402,7 +403,7 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
 
         for (int yuvPlane = 1; yuvPlane < 3; ++yuvPlane) {
             if (image->depth > 8) {
-                const uint16_t half = (image->depth == 10) ? 512 : 2048;
+                const uint16_t half = 1 << (image->depth - 1);
                 for (uint32_t j = 0; j < monoUVHeight; ++j) {
                     uint16_t * dstRow = (uint16_t *)&aomImage->planes[yuvPlane][j * aomImage->stride[yuvPlane]];
                     for (uint32_t i = 0; i < monoUVWidth; ++i) {
@@ -411,10 +412,8 @@ static avifBool aomCodecEncodeImage(avifCodec * codec,
                 }
             } else {
                 const uint8_t half = 128;
-                for (uint32_t j = 0; j < monoUVHeight; ++j) {
-                    uint8_t * dstRow = &aomImage->planes[yuvPlane][j * aomImage->stride[yuvPlane]];
-                    memset(dstRow, half, aomImage->stride[yuvPlane]);
-                }
+                size_t planeSize = (size_t)monoUVHeight * aomImage->stride[yuvPlane];
+                memset(aomImage->planes[yuvPlane], half, planeSize);
             }
         }
     }

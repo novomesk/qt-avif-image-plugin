@@ -131,7 +131,7 @@ struct avifCodecInternal;
 typedef avifBool (*avifCodecOpenFunc)(struct avifCodec * codec, uint32_t firstSampleIndex);
 typedef avifBool (*avifCodecGetNextImageFunc)(struct avifCodec * codec, avifImage * image);
 // EncodeImage and EncodeFinish are not required to always emit a sample, but when all images are
-// encoded and Finish is called, the number of samples emitted must match the number of submitted frames.
+// encoded and EncodeFinish is called, the number of samples emitted must match the number of submitted frames.
 typedef avifBool (*avifCodecEncodeImageFunc)(struct avifCodec * codec,
                                              avifEncoder * encoder,
                                              const avifImage * image,
@@ -185,11 +185,11 @@ typedef struct avifROStream
 
 const uint8_t * avifROStreamCurrent(avifROStream * stream);
 void avifROStreamStart(avifROStream * stream, avifROData * raw);
-size_t avifROStreamOffset(avifROStream * stream);
+size_t avifROStreamOffset(const avifROStream * stream);
 void avifROStreamSetOffset(avifROStream * stream, size_t offset);
 
-avifBool avifROStreamHasBytesLeft(avifROStream * stream, size_t byteCount);
-size_t avifROStreamRemainingBytes(avifROStream * stream);
+avifBool avifROStreamHasBytesLeft(const avifROStream * stream, size_t byteCount);
+size_t avifROStreamRemainingBytes(const avifROStream * stream);
 avifBool avifROStreamSkip(avifROStream * stream, size_t byteCount);
 avifBool avifROStreamRead(avifROStream * stream, uint8_t * data, size_t size);
 avifBool avifROStreamReadU16(avifROStream * stream, uint16_t * v);
@@ -209,11 +209,11 @@ typedef struct avifRWStream
 
 uint8_t * avifRWStreamCurrent(avifRWStream * stream);
 void avifRWStreamStart(avifRWStream * stream, avifRWData * raw);
-size_t avifRWStreamOffset(avifRWStream * stream);
+size_t avifRWStreamOffset(const avifRWStream * stream);
 void avifRWStreamSetOffset(avifRWStream * stream, size_t offset);
 
 void avifRWStreamFinishWrite(avifRWStream * stream);
-void avifRWStreamWrite(avifRWStream * stream, const uint8_t * data, size_t size);
+void avifRWStreamWrite(avifRWStream * stream, const void * data, size_t size);
 void avifRWStreamWriteChars(avifRWStream * stream, const char * chars, size_t size);
 avifBoxMarker avifRWStreamWriteBox(avifRWStream * stream, const char * type, size_t contentSize);
 avifBoxMarker avifRWStreamWriteFullBox(avifRWStream * stream, const char * type, size_t contentSize, int version, uint32_t flags);
