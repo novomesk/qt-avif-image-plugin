@@ -935,7 +935,7 @@ int QAVIFHandler::nextImageDelay() const
         return 0;
     }
 
-    int delay_ms = 1000.0 * m_decoder->duration / m_decoder->imageCount;
+    int delay_ms = 1000.0 * m_decoder->imageTiming.duration;
     if (delay_ms < 1) {
         delay_ms = 1;
     }
