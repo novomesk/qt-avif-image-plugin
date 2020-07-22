@@ -165,3 +165,7 @@ AVIF thumbnails in dolphin:
 ### PhotoQt
 
 ![AVIF images in photoqt](img/app_photoqt2.png)
+
+### Kanryu QuickViewer
+
+![AVIF image in quickviewer](img/app_kanryu_quickviewer.png)
