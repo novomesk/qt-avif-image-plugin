@@ -541,7 +541,8 @@ bool QAVIFHandler::write(const QImage &image)
                 const uint16_t *src16bit = (const uint16_t *) tmpgrayimage.constScanLine(y);
                 uint16_t *dest16bit = (uint16_t *)(avif->yuvPlanes[0] + y * avif->yuvRowBytes[0]);
                 for (int x = 0; x < tmpgrayimage.width(); x++) {
-                    *dest16bit = (*src16bit) >> 6; //downgrade to 10 bits
+                    int tmp_pixelval = (int)(((float)(*src16bit) / 65535.0f) * 1023.0f + 0.5f); //downgrade to 10 bits
+                    *dest16bit = qBound(0, tmp_pixelval, 1023);
                     dest16bit++;
                     src16bit++;
                 }
@@ -954,4 +955,5 @@ int QAVIFHandler::loopCount() const
 
     return 1;
 }
+
 
