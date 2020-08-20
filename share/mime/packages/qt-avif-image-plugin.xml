@@ -3,13 +3,13 @@
   <mime-type type="image/avif">
     <comment>AV1 Image File Format (AVIF)</comment>
     <magic priority="50">
-	<match type="string" value="ftypavif" offset="4"/>
-	<match type="string" value="ftypavis" offset="4"/>
-	<match type="string" value="ftypmif1" offset="4">
-	    <match type="string" value="avif" offset="16"/>
-	    <match type="string" value="avif" offset="20"/>
-	    <match type="string" value="avif" offset="24"/>
-	</match>
+      <match type="string" value="ftypavif" offset="4"/>
+      <match type="string" value="ftypavis" offset="4"/>
+      <match type="string" value="ftypmif1" offset="4">
+        <match type="string" value="avif" offset="16"/>
+        <match type="string" value="avif" offset="20"/>
+        <match type="string" value="avif" offset="24"/>
+      </match>
     </magic>
     <glob pattern="*.avif"/>
     <glob pattern="*.avifs"/>
