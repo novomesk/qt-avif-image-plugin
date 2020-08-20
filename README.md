@@ -18,16 +18,15 @@ Download [Latest Release](https://github.com/novomesk/qt-avif-image-plugin/relea
 
 **Recommended**: read [README.txt](README.txt)
 
-## 2) Adding MIME types
+## 2) Adding MIME type
 
 If you have _shared-mime-info 2.0_ or newer installed, you may skip this step. AVIF MIME type are installed already.
 
-In order to install mime types **image/avif** and **image/avif-sequence** in your system, copy (as root) _avif.xml_, _avifs.xml_ files to _/usr/share/mime/packages/_ folder and run:
+In order to install mime type **image/avif** in your system, copy (as root) _qt-avif-image-plugin.xml_ file to _/usr/share/mime/packages/_ folder and run:
 
 `update-mime-database /usr/share/mime`
 
-![avif.xml](img/avif_xml.png)  
-![avifs.xml](img/avifs_xml.png)
+![qt-avif-image-plugin.xml](img/qt-avif-image-plugin_xml.png)
 
 ## 3) Compile Qt Image Plugin
 
@@ -122,7 +121,7 @@ Copy _avif.desktop_, _avifs.desktop_ to:
 */usr/share/kservices5/qimageioplugins/*
 
 Update _imagethumbnail.desktop_ (in /usr/share/kservices5/ ):  
-Add `;image/avif;image/avif-sequence` to the `MimeType=` list:  
+Add `;image/avif` to the `MimeType=` list:
 ![](img/imagethumbnail.png)
 
 AVIF thumbnails in dolphin:  

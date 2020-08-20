@@ -2,6 +2,6 @@
 Type=Service
 X-KDE-ServiceTypes=QImageIOPlugins
 X-KDE-ImageFormat=avifs
-X-KDE-MimeType=image/avif-sequence
+X-KDE-MimeType=image/avif
 X-KDE-Read=true
 X-KDE-Write=false

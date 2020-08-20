@@ -39,7 +39,7 @@ Archlinux: /usr/lib/qt/plugins/imageformats/
 Ubuntu: /usr/lib/x86_64-linux-gnu/qt5/plugins/imageformats
 
 Further recommend steps:
-If you don’t have "image/avif" and "image/avif-sequence" mime types installed, copy avifs.xml, avif.xml to:
+If you don’t have "image/avif" mime type installed, copy qt-avif-image-plugin.xml to:
 /usr/share/mime/packages
 And run:
 update-mime-database /usr/share/mime
@@ -49,7 +49,7 @@ Copy avif.desktop, avifs.desktop to:
 /usr/share/kservices5/qimageioplugins/
 
 Update imagethumbnail.desktop (in /usr/share/kservices5/ ):
-Add ;image/avif;image/avif-sequence to the MimeType= list.
+Add ;image/avif to the MimeType= list.
 
 How to test:
 Associate image/avif (*.avif) with gwenview and it should be able to display test images:
