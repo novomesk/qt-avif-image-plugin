@@ -21,7 +21,7 @@ Plug-in supports Color spaces and loading ICC profiles when built with Qt 5.14 o
 
 How to build the plug-in (two possibilities):
 
-1) Dynamic linking with libavif (ONLY for systems with >=libavif 0.8.0 installed!!!)
+1) Dynamic linking with libavif (ONLY for systems with >=libavif 0.8.1 installed!!!)
 Run:
 ./build_libqavif_dynamic.sh
 
