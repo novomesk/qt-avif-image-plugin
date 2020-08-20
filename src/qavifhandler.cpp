@@ -190,7 +190,11 @@ bool QAVIFHandler::decode_one_frame()
     QImage::Format resultformat;
 
     if (m_decoder->image->depth > 8) {
-        resultformat = QImage::Format_RGBA64;
+        if (loadalpha) {
+            resultformat = QImage::Format_RGBA64;
+        } else {
+            resultformat = QImage::Format_RGBX64;
+        }
     } else {
         if (loadalpha) {
             resultformat = QImage::Format_RGBA8888;
@@ -291,15 +295,14 @@ bool QAVIFHandler::decode_one_frame()
 
     avifRGBImage rgb;
     avifRGBImageSetDefaults(&rgb, m_decoder->image);
-    rgb.rowBytes = result.bytesPerLine();
-    rgb.pixels = result.bits();
 
     if (m_decoder->image->depth > 8) {
         rgb.depth = 16;
         rgb.format = AVIF_RGB_FORMAT_RGBA;
 
         if (!loadalpha) {
-            resultformat = QImage::Format_RGBX64;
+            rgb.ignoreAlpha = AVIF_TRUE;
+            result.fill(Qt::black);
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
             if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
                 resultformat = QImage::Format_Grayscale16;
@@ -321,6 +324,9 @@ bool QAVIFHandler::decode_one_frame()
             }
         }
     }
+
+    rgb.rowBytes = result.bytesPerLine();
+    rgb.pixels = result.bits();
 
     avifResult res = avifImageYUVToRGB(m_decoder->image, &rgb);
     if (res != AVIF_RESULT_OK) {
@@ -706,6 +712,8 @@ bool QAVIFHandler::write(const QImage &image)
 
             if (tmpcolorimage.hasAlphaChannel()) {
                 avif->alphaRange = AVIF_RANGE_FULL;
+            } else {
+                rgb.ignoreAlpha = AVIF_TRUE;
             }
 
             rgb.format = AVIF_RGB_FORMAT_RGBA;
@@ -724,10 +732,6 @@ bool QAVIFHandler::write(const QImage &image)
         if (res != AVIF_RESULT_OK) {
             qWarning("ERROR in avifImageRGBToYUV: %s\n", avifResultToString(res));
             return false;
-        }
-
-        if ((save_depth > 8) && !tmpcolorimage.hasAlphaChannel()) {
-            avifImageFreePlanes(avif, AVIF_PLANES_A);
         }
     }
 
