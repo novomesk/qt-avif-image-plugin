@@ -243,7 +243,7 @@ void avifImageAllocatePlanes(avifImage * image, uint32_t planes)
     if (planes & AVIF_PLANES_A) {
         if (!image->alphaPlane) {
             image->alphaRowBytes = fullRowBytes;
-            image->alphaPlane = avifAlloc(fullRowBytes * image->height);
+            image->alphaPlane = avifAlloc(fullSize);
         }
         image->imageOwnsAlphaPlane = AVIF_TRUE;
     }
@@ -295,15 +295,12 @@ void avifImageStealPlanes(avifImage * dstImage, avifImage * srcImage, uint32_t p
         srcImage->yuvRowBytes[AVIF_CHAN_V] = 0;
 
         dstImage->yuvFormat = srcImage->yuvFormat;
-        dstImage->yuvRange = srcImage->yuvRange;
-        dstImage->yuvChromaSamplePosition = srcImage->yuvChromaSamplePosition;
         dstImage->imageOwnsYUVPlanes = srcImage->imageOwnsYUVPlanes;
         srcImage->imageOwnsYUVPlanes = AVIF_FALSE;
     }
     if (planes & AVIF_PLANES_A) {
         dstImage->alphaPlane = srcImage->alphaPlane;
         dstImage->alphaRowBytes = srcImage->alphaRowBytes;
-        dstImage->alphaRange = srcImage->alphaRange;
 
         srcImage->alphaPlane = NULL;
         srcImage->alphaRowBytes = 0;
@@ -353,6 +350,7 @@ void avifRGBImageSetDefaults(avifRGBImage * rgb, const avifImage * image)
     rgb->depth = image->depth;
     rgb->format = AVIF_RGB_FORMAT_RGBA;
     rgb->chromaUpsampling = AVIF_CHROMA_UPSAMPLING_BILINEAR;
+    rgb->ignoreAlpha = AVIF_FALSE;
     rgb->pixels = NULL;
     rgb->rowBytes = 0;
 }

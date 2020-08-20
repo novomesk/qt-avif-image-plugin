@@ -6,7 +6,14 @@
 #if defined(_MSC_VER)
 #pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
 #endif
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc11-extensions" // C11 extension used: nameless struct/union
+#endif
 #include "dav1d/dav1d.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 #include <string.h>
 
@@ -207,6 +214,6 @@ avifCodec * avifCodecCreateDav1d(void)
     memset(codec->internal, 0, sizeof(struct avifCodecInternal));
     dav1d_default_settings(&codec->internal->dav1dSettings);
     // Set a maximum frame size limit to avoid OOM'ing fuzzers.
-    codec->internal->dav1dSettings.frame_size_limit = 16384 * 16384;
+    codec->internal->dav1dSettings.frame_size_limit = AVIF_MAX_IMAGE_SIZE;
     return codec;
 }

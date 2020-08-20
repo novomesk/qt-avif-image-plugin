@@ -16,7 +16,7 @@ extern "C" {
 
 #define AVIF_VERSION_MAJOR 0
 #define AVIF_VERSION_MINOR 8
-#define AVIF_VERSION_PATCH 0
+#define AVIF_VERSION_PATCH 1
 #define AVIF_VERSION (AVIF_VERSION_MAJOR * 10000) + (AVIF_VERSION_MINOR * 100) + AVIF_VERSION_PATCH
 
 typedef int avifBool;
@@ -399,6 +399,8 @@ typedef struct avifRGBImage
     avifRGBFormat format;                  // all channels are always full range
     avifChromaUpsampling chromaUpsampling; // How to upsample non-4:4:4 UV (ignored for 444) when converting to RGB.
                                            // Unused when converting to YUV. avifRGBImageSetDefaults() prefers quality over speed.
+    avifBool ignoreAlpha; // Used for XRGB formats, treats formats containing alpha (such as ARGB) as if they were
+                          // RGB, treating the alpha bits as if they were all 1.
 
     uint8_t * pixels;
     uint32_t rowBytes;
@@ -576,6 +578,9 @@ typedef struct avifDecoder
     // present after a successful call to avifDecoderParse(), but prior to any call to
     // avifDecoderNextImage() or avifDecoderNthImage(), as decoder->image->alphaPlane won't exist yet.
     avifBool alphaPresent;
+
+    // Set this to true to disable support of grid images. If a grid image is encountered, AVIF_RESULT_BMFF_PARSE_FAILED will be returned.
+    avifBool disableGridImages;
 
     // stats from the most recent read, possibly 0s if reading an image sequence
     avifIOStats ioStats;

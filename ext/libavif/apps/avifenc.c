@@ -263,11 +263,12 @@ int main(int argc, char * argv[])
     avifBool cicpExplicitlySet = AVIF_FALSE;
 
     // By default, the color profile itself is unspecified, so CP/TC are set (to 2) accordingly.
-    // However, if the end-user doesn't specify any CICP, we will convert to YUV using BT709
-    // coefficients anyway (as MC:2 falls back to MC:1), so we might as well signal it explicitly.
+    // However, if the end-user doesn't specify any CICP, we will convert to YUV using BT601
+    // coefficients anyway (as MC:2 falls back to MC:5/6), so we might as well signal it explicitly.
+    // See: ISO/IEC 23000-22:2019 Amendment 2, or the comment in avifCalcYUVCoefficients()
     avifColorPrimaries colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
     avifTransferCharacteristics transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
-    avifMatrixCoefficients matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT709;
+    avifMatrixCoefficients matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT601;
 
     int argIndex = 1;
     while (argIndex < argc) {
@@ -535,7 +536,7 @@ int main(int argc, char * argv[])
     if ((image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_IDENTITY) && (image->yuvFormat != AVIF_PIXEL_FORMAT_YUV444)) {
         // matrixCoefficients was likely set to AVIF_MATRIX_COEFFICIENTS_IDENTITY as a side effect
         // of --lossless, and Identity is only valid with YUV444. Set this back to the default.
-        image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT709;
+        image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT601;
 
         if (cicpExplicitlySet) {
             // Only warn if someone explicitly asked for identity.
@@ -760,15 +761,15 @@ int main(int argc, char * argv[])
     }
 
     printf("Encoded successfully.\n");
-    printf(" * Color AV1 total size: %zu bytes\n", encoder->ioStats.colorOBUSize);
-    printf(" * Alpha AV1 total size: %zu bytes\n", encoder->ioStats.alphaOBUSize);
+    printf(" * Color AV1 total size: " AVIF_FMT_ZU " bytes\n", encoder->ioStats.colorOBUSize);
+    printf(" * Alpha AV1 total size: " AVIF_FMT_ZU " bytes\n", encoder->ioStats.alphaOBUSize);
     FILE * f = fopen(outputFilename, "wb");
     if (!f) {
         fprintf(stderr, "ERROR: Failed to open file for write: %s\n", outputFilename);
         goto cleanup;
     }
     if (fwrite(raw.data, 1, raw.size, f) != raw.size) {
-        fprintf(stderr, "Failed to write %zu bytes: %s\n", raw.size, outputFilename);
+        fprintf(stderr, "Failed to write " AVIF_FMT_ZU " bytes: %s\n", raw.size, outputFilename);
         returnCode = 1;
     } else {
         printf("Wrote AVIF: %s\n", outputFilename);
