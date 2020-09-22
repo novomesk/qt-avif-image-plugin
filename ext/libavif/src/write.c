@@ -175,16 +175,23 @@ avifEncoder * avifEncoderCreate(void)
     encoder->tileRowsLog2 = 0;
     encoder->tileColsLog2 = 0;
     encoder->speed = AVIF_SPEED_DEFAULT;
-    encoder->data = avifEncoderDataCreate();
-    encoder->timescale = 1;
     encoder->keyframeInterval = 0;
+    encoder->timescale = 1;
+    encoder->data = avifEncoderDataCreate();
+    encoder->csOptions = avifCodecSpecificOptionsCreate();
     return encoder;
 }
 
 void avifEncoderDestroy(avifEncoder * encoder)
 {
+    avifCodecSpecificOptionsDestroy(encoder->csOptions);
     avifEncoderDataDestroy(encoder->data);
     avifFree(encoder);
+}
+
+void avifEncoderSetCodecSpecificOption(avifEncoder * encoder, const char * key, const char * value)
+{
+    avifCodecSpecificOptionsSet(encoder->csOptions, key, value);
 }
 
 static void avifEncoderWriteColorProperties(avifRWStream * s, const avifImage * imageMetadata, struct ipmaArray * ipma, uint8_t * itemPropertyIndex)
@@ -359,6 +366,7 @@ avifResult avifEncoderAddImage(avifEncoder * encoder, const avifImage * image, u
 
         encoder->data->colorItem = avifEncoderDataCreateItem(encoder->data, "av01", "Color", 6);
         encoder->data->colorItem->codec = avifCodecCreate(encoder->codecChoice, AVIF_CODEC_FLAG_CAN_ENCODE);
+        encoder->data->colorItem->codec->csOptions = encoder->csOptions;
         if (!encoder->data->colorItem->codec) {
             // Just bail out early, we're not surviving this function without an encoder compiled in
             return AVIF_RESULT_NO_CODEC_AVAILABLE;
@@ -381,6 +389,7 @@ avifResult avifEncoderAddImage(avifEncoder * encoder, const avifImage * image, u
         if (needsAlpha) {
             encoder->data->alphaItem = avifEncoderDataCreateItem(encoder->data, "av01", "Alpha", 6);
             encoder->data->alphaItem->codec = avifCodecCreate(encoder->codecChoice, AVIF_CODEC_FLAG_CAN_ENCODE);
+            encoder->data->alphaItem->codec->csOptions = encoder->csOptions;
             if (!encoder->data->alphaItem->codec) {
                 return AVIF_RESULT_NO_CODEC_AVAILABLE;
             }
@@ -465,8 +474,13 @@ avifResult avifEncoderAddImage(avifEncoder * encoder, const avifImage * image, u
     for (uint32_t itemIndex = 0; itemIndex < encoder->data->items.count; ++itemIndex) {
         avifEncoderItem * item = &encoder->data->items.item[itemIndex];
         if (item->codec) {
-            if (!item->codec->encodeImage(item->codec, encoder, image, item->alpha, addImageFlags, item->encodeOutput)) {
-                return item->alpha ? AVIF_RESULT_ENCODE_ALPHA_FAILED : AVIF_RESULT_ENCODE_COLOR_FAILED;
+            avifResult encodeResult =
+                item->codec->encodeImage(item->codec, encoder, image, item->alpha, addImageFlags, item->encodeOutput);
+            if (encodeResult == AVIF_RESULT_UNKNOWN_ERROR) {
+                encodeResult = item->alpha ? AVIF_RESULT_ENCODE_ALPHA_FAILED : AVIF_RESULT_ENCODE_COLOR_FAILED;
+            }
+            if (encodeResult != AVIF_RESULT_OK) {
+                return encodeResult;
             }
         }
     }
@@ -948,28 +962,54 @@ avifResult avifEncoderFinish(avifEncoder * encoder, avifRWData * output)
     // Write mdat
 
     avifBoxMarker mdat = avifRWStreamWriteBox(&s, "mdat", AVIF_BOX_SIZE_TBD);
-    for (uint32_t itemIndex = 0; itemIndex < encoder->data->items.count; ++itemIndex) {
-        avifEncoderItem * item = &encoder->data->items.item[itemIndex];
-        if ((item->metadataPayload.size == 0) && (item->encodeOutput->samples.count == 0)) {
-            continue;
-        }
+    for (uint32_t itemPasses = 0; itemPasses < 3; ++itemPasses) {
+        // Use multiple passes to pack in the following order:
+        //   * Pass 0: metadata (Exif/XMP)
+        //   * Pass 1: alpha (AV1)
+        //   * Pass 2: all other item data (AV1 color)
+        //
+        // See here for the discussion on alpha coming first:
+        // https://github.com/AOMediaCodec/libavif/issues/287
+        //
+        // Exif and XMP are packed first as they're required to be fully available
+        // by avifDecoderParse() before it returns AVIF_RESULT_OK, unless ignoreXMP
+        // and ignoreExif are enabled.
+        //
+        const avifBool metadataPass = (itemPasses == 0);
+        const avifBool alphaPass = (itemPasses == 1);
 
-        uint32_t chunkOffset = (uint32_t)avifRWStreamOffset(&s);
-        if (item->encodeOutput->samples.count > 0) {
-            for (uint32_t sampleIndex = 0; sampleIndex < item->encodeOutput->samples.count; ++sampleIndex) {
-                avifEncodeSample * sample = &item->encodeOutput->samples.sample[sampleIndex];
-                avifRWStreamWrite(&s, sample->data.data, sample->data.size);
+        for (uint32_t itemIndex = 0; itemIndex < encoder->data->items.count; ++itemIndex) {
+            avifEncoderItem * item = &encoder->data->items.item[itemIndex];
+            if ((item->metadataPayload.size == 0) && (item->encodeOutput->samples.count == 0)) {
+                // this item has nothing for the mdat box
+                continue;
             }
-        } else {
-            avifRWStreamWrite(&s, item->metadataPayload.data, item->metadataPayload.size);
-        }
+            if (metadataPass != (item->metadataPayload.size > 0)) {
+                // only process metadata payloads when metadataPass is true
+                continue;
+            }
+            if (alphaPass != item->alpha) {
+                // only process alpha payloads when alphaPass is true
+                continue;
+            }
 
-        for (uint32_t fixupIndex = 0; fixupIndex < item->mdatFixups.count; ++fixupIndex) {
-            avifOffsetFixup * fixup = &item->mdatFixups.fixup[fixupIndex];
-            size_t prevOffset = avifRWStreamOffset(&s);
-            avifRWStreamSetOffset(&s, fixup->offset);
-            avifRWStreamWriteU32(&s, chunkOffset);
-            avifRWStreamSetOffset(&s, prevOffset);
+            uint32_t chunkOffset = (uint32_t)avifRWStreamOffset(&s);
+            if (item->encodeOutput->samples.count > 0) {
+                for (uint32_t sampleIndex = 0; sampleIndex < item->encodeOutput->samples.count; ++sampleIndex) {
+                    avifEncodeSample * sample = &item->encodeOutput->samples.sample[sampleIndex];
+                    avifRWStreamWrite(&s, sample->data.data, sample->data.size);
+                }
+            } else {
+                avifRWStreamWrite(&s, item->metadataPayload.data, item->metadataPayload.size);
+            }
+
+            for (uint32_t fixupIndex = 0; fixupIndex < item->mdatFixups.count; ++fixupIndex) {
+                avifOffsetFixup * fixup = &item->mdatFixups.fixup[fixupIndex];
+                size_t prevOffset = avifRWStreamOffset(&s);
+                avifRWStreamSetOffset(&s, fixup->offset);
+                avifRWStreamWriteU32(&s, chunkOffset);
+                avifRWStreamSetOffset(&s, prevOffset);
+            }
         }
     }
     avifRWStreamFinishBox(&s, mdat);

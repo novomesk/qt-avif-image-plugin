@@ -82,6 +82,10 @@ static void syntax(void)
            AVIF_SPEED_SLOWEST,
            AVIF_SPEED_FASTEST);
     printf("    -c,--codec C                      : AV1 codec to use (choose from versions list below)\n");
+    printf("    --exif FILENAME                   : Provide an Exif metadata payload to be associated with the primary item\n");
+    printf("    --xmp FILENAME                    : Provide an XMP metadata payload to be associated with the primary item\n");
+    printf("    --icc FILENAME                    : Provide an ICC profile payload to be associated with the primary item\n");
+    printf("    -a,--advanced KEY[=VALUE]         : Pass an advanced, codec-specific key/value string pair directly to the codec. avifenc will warn on any not used by the codec.\n");
     printf("    --duration D                      : Set all following frame durations (in timescales) to D; default 1. Can be set multiple times (before supplying each filename)\n");
     printf("    --timescale,--fps V               : Set the timescale to V. If all frames are 1 timescale in length, this is equivalent to frames per second\n");
     printf("    -k,--keyframe INTERVAL            : Set the forced keyframe interval (maximum frames between keyframes). Set to 0 to disable (default).\n");
@@ -91,6 +95,15 @@ static void syntax(void)
     printf("    --irot ANGLE                      : Add irot property (rotation). [0-3], makes (90 * ANGLE) degree rotation anti-clockwise\n");
     printf("    --imir AXIS                       : Add imir property (mirroring). 0=vertical, 1=horizontal\n");
     printf("\n");
+    if (avifCodecName(AVIF_CODEC_CHOICE_AOM, 0)) {
+        printf("aom-specific advanced options:\n");
+        printf("    aq-mode=M                         : Adaptive quantization mode (0: off (default), 1: variance, 2: complexity, 3: cyclic refresh)\n");
+        printf("    cq-level=Q                        : Constant/Constrained Quality level (0-63, end-usage must be set to cq or q)\n");
+        printf("    end-usage=MODE                    : Rate control mode (vbr, cbr, cq, or q)\n");
+        printf("    sharpness=S                       : Loop filter sharpness (0-7, default: 0)\n");
+        printf("    tune=METRIC                       : Tune the encoder for distortion metric (psnr or ssim, default: psnr)\n");
+        printf("\n");
+    }
     avifPrintVersions();
 }
 
@@ -220,6 +233,32 @@ static avifAppFileFormat avifInputReadImage(avifInput * input, avifImage * image
     return nextInputFormat;
 }
 
+static avifBool readEntireFile(const char * filename, avifRWData * raw)
+{
+    FILE * f = fopen(filename, "rb");
+    if (!f) {
+        return AVIF_FALSE;
+    }
+
+    fseek(f, 0, SEEK_END);
+    size_t fileSize = (size_t)ftell(f);
+    if (!fileSize) {
+        fclose(f);
+        return AVIF_FALSE;
+    }
+    fseek(f, 0, SEEK_SET);
+
+    avifRWDataRealloc(raw, fileSize);
+    size_t bytesRead = fread(raw->data, 1, fileSize, f);
+    fclose(f);
+
+    if (bytesRead != fileSize) {
+        avifRWDataFree(raw);
+        return AVIF_FALSE;
+    }
+    return AVIF_TRUE;
+}
+
 int main(int argc, char * argv[])
 {
     if (argc < 2) {
@@ -253,10 +292,13 @@ int main(int argc, char * argv[])
     avifRange requestedRange = AVIF_RANGE_FULL;
     avifBool lossless = AVIF_FALSE;
     avifBool ignoreICC = AVIF_FALSE;
-    avifEncoder * encoder = NULL;
+    avifEncoder * encoder = avifEncoderCreate();
     avifImage * image = NULL;
     avifImage * nextImage = NULL;
     avifRWData raw = AVIF_DATA_EMPTY;
+    avifRWData exifOverride = AVIF_DATA_EMPTY;
+    avifRWData xmpOverride = AVIF_DATA_EMPTY;
+    avifRWData iccOverride = AVIF_DATA_EMPTY;
     int duration = 1;  // in timescales, stored per-inputFile (see avifInputFile)
     int timescale = 1; // 1 fps by default
     int keyframeInterval = 0;
@@ -403,6 +445,27 @@ int main(int argc, char * argv[])
                     speed = AVIF_SPEED_SLOWEST;
                 }
             }
+        } else if (!strcmp(arg, "--exif")) {
+            NEXTARG();
+            if (!readEntireFile(arg, &exifOverride)) {
+                fprintf(stderr, "ERROR: Unable to read Exif content: %s\n", arg);
+                returnCode = 1;
+                goto cleanup;
+            }
+        } else if (!strcmp(arg, "--xmp")) {
+            NEXTARG();
+            if (!readEntireFile(arg, &xmpOverride)) {
+                fprintf(stderr, "ERROR: Unable to read XMP content: %s\n", arg);
+                returnCode = 1;
+                goto cleanup;
+            }
+        } else if (!strcmp(arg, "--icc")) {
+            NEXTARG();
+            if (!readEntireFile(arg, &iccOverride)) {
+                fprintf(stderr, "ERROR: Unable to read ICC profile: %s\n", arg);
+                returnCode = 1;
+                goto cleanup;
+            }
         } else if (!strcmp(arg, "--duration")) {
             NEXTARG();
             duration = atoi(arg);
@@ -434,6 +497,20 @@ int main(int argc, char * argv[])
                     goto cleanup;
                 }
             }
+        } else if (!strcmp(arg, "-a") || !strcmp(arg, "--advanced")) {
+            NEXTARG();
+            char * tempBuffer = strdup(arg);
+            char * value = strchr(tempBuffer, '=');
+            if (value) {
+                *value = 0; // remove equals sign,
+                ++value;    // and move past it
+
+            } else {
+                value = ""; // Pass in a non-NULL, empty string. Codecs can use the
+                            // mere existence of a key as a boolean value.
+            }
+            avifEncoderSetCodecSpecificOption(encoder, tempBuffer, value);
+            free(tempBuffer);
         } else if (!strcmp(arg, "--ignore-icc")) {
             ignoreICC = AVIF_TRUE;
         } else if (!strcmp(arg, "--pasp")) {
@@ -546,6 +623,15 @@ int main(int argc, char * argv[])
 
     if (ignoreICC) {
         avifImageSetProfileICC(image, NULL, 0);
+    }
+    if (iccOverride.size) {
+        avifImageSetProfileICC(image, iccOverride.data, iccOverride.size);
+    }
+    if (exifOverride.size) {
+        avifImageSetMetadataExif(image, exifOverride.data, exifOverride.size);
+    }
+    if (xmpOverride.size) {
+        avifImageSetMetadataXMP(image, xmpOverride.data, xmpOverride.size);
     }
 
     if (paspCount == 2) {
@@ -662,7 +748,6 @@ int main(int argc, char * argv[])
            tileRowsLog2,
            tileColsLog2,
            jobs);
-    encoder = avifEncoderCreate();
     encoder->maxThreads = jobs;
     encoder->minQuantizer = minQuantizer;
     encoder->maxQuantizer = maxQuantizer;
@@ -697,6 +782,9 @@ int main(int argc, char * argv[])
 
         printf(" * Encoding frame %d [%u/%d ts]: %s\n", nextImageIndex + 1, nextFile->duration, timescale, nextFile->filename);
 
+        if (nextImage) {
+            avifImageDestroy(nextImage);
+        }
         nextImage = avifImageCreateEmpty();
         nextImage->colorPrimaries = image->colorPrimaries;
         nextImage->transferCharacteristics = image->transferCharacteristics;
