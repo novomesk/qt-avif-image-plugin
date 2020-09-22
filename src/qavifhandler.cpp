@@ -47,7 +47,7 @@ QAVIFHandler::QAVIFHandler() :
     m_container_width(0),
     m_container_height(0),
     m_rawAvifData(AVIF_DATA_EMPTY),
-    m_decoder(NULL),
+    m_decoder(nullptr),
     m_must_jump_to_next_image(false)
 {
 }
@@ -127,12 +127,22 @@ bool QAVIFHandler::ensureDecoder()
 
     avifResult decodeResult;
 
-    decodeResult = avifDecoderParse(m_decoder, &m_rawAvifData);
+    decodeResult = avifDecoderSetIOMemory(m_decoder, &m_rawAvifData);
+    if (decodeResult != AVIF_RESULT_OK) {
+        qWarning("ERROR: avifDecoderSetIOMemory failed: %s\n", avifResultToString(decodeResult));
+
+        avifDecoderDestroy(m_decoder);
+        m_decoder = nullptr;
+        m_parseState = ParseAvifError;
+        return false;
+    }
+
+    decodeResult = avifDecoderParse(m_decoder);
     if (decodeResult != AVIF_RESULT_OK) {
         qWarning("ERROR: Failed to parse input: %s\n", avifResultToString(decodeResult));
 
         avifDecoderDestroy(m_decoder);
-        m_decoder = NULL;
+        m_decoder = nullptr;
         m_parseState = ParseAvifError;
         return false;
     }
@@ -168,7 +178,7 @@ bool QAVIFHandler::ensureDecoder()
     }
 
     avifDecoderDestroy(m_decoder);
-    m_decoder = NULL;
+    m_decoder = nullptr;
     m_parseState = ParseAvifError;
     return false;
 }
@@ -453,7 +463,7 @@ bool QAVIFHandler::write(const QImage &image)
     int save_depth; //8 or 10bit per channel
     QImage::Format tmpformat; //format for temporary image
 
-    avifImage *avif = NULL;
+    avifImage *avif = nullptr;
 
     //grayscale detection
     switch (image.format()) {
@@ -544,8 +554,8 @@ bool QAVIFHandler::write(const QImage &image)
 
         if (save_depth > 8) { // QImage::Format_Grayscale16
             for (int y = 0; y < tmpgrayimage.height(); y++) {
-                const uint16_t *src16bit = (const uint16_t *) tmpgrayimage.constScanLine(y);
-                uint16_t *dest16bit = (uint16_t *)(avif->yuvPlanes[0] + y * avif->yuvRowBytes[0]);
+                const uint16_t *src16bit = reinterpret_cast<const uint16_t *>(tmpgrayimage.constScanLine(y));
+                uint16_t *dest16bit = reinterpret_cast<uint16_t *>(avif->yuvPlanes[0] + y * avif->yuvRowBytes[0]);
                 for (int x = 0; x < tmpgrayimage.width(); x++) {
                     int tmp_pixelval = (int)(((float)(*src16bit) / 65535.0f) * 1023.0f + 0.5f); //downgrade to 10 bits
                     *dest16bit = qBound(0, tmp_pixelval, 1023);
@@ -705,7 +715,7 @@ bool QAVIFHandler::write(const QImage &image)
         avifRGBImage rgb;
         avifRGBImageSetDefaults(&rgb, avif);
         rgb.rowBytes = tmpcolorimage.bytesPerLine();
-        rgb.pixels = (uint8_t *)tmpcolorimage.constBits();
+        rgb.pixels = const_cast<uint8_t *>(tmpcolorimage.constBits());
 
         if (save_depth > 8) { //10bit depth
             rgb.depth = 16;
@@ -959,5 +969,3 @@ int QAVIFHandler::loopCount() const
 
     return 1;
 }
-
-
