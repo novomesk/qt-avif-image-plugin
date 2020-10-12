@@ -127,7 +127,7 @@ bool QAVIFHandler::ensureDecoder()
 
     avifResult decodeResult;
 
-    decodeResult = avifDecoderSetIOMemory(m_decoder, &m_rawAvifData);
+    decodeResult = avifDecoderSetIOMemory(m_decoder, m_rawAvifData.data, m_rawAvifData.size);
     if (decodeResult != AVIF_RESULT_OK) {
         qWarning("ERROR: avifDecoderSetIOMemory failed: %s\n", avifResultToString(decodeResult));
 
