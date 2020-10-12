@@ -94,7 +94,10 @@ avifBool avifJPEGRead(avifImage * avif, const char * inputFilename, avifPixelFor
         memcpy(pixelRow, buffer[0], rgb.rowBytes);
         ++row;
     }
-    avifImageRGBToYUV(avif, &rgb);
+    if (avifImageRGBToYUV(avif, &rgb) != AVIF_RESULT_OK) {
+        fprintf(stderr, "Conversion to YUV failed: %s\n", inputFilename);
+        goto cleanup;
+    }
 
     jpeg_finish_decompress(&cinfo);
     ret = AVIF_TRUE;
@@ -113,8 +116,11 @@ avifBool avifJPEGWrite(avifImage * avif, const char * outputFilename, int jpegQu
     avifBool ret = AVIF_FALSE;
     FILE * f = NULL;
 
-    (void)avif;
-    (void)outputFilename;
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    JSAMPROW row_pointer[1];
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
 
     avifRGBImage rgb;
     avifRGBImageSetDefaults(&rgb, avif);
@@ -122,17 +128,14 @@ avifBool avifJPEGWrite(avifImage * avif, const char * outputFilename, int jpegQu
     rgb.chromaUpsampling = chromaUpsampling;
     rgb.depth = 8;
     avifRGBImageAllocatePixels(&rgb);
-    avifImageYUVToRGB(avif, &rgb);
-
-    struct jpeg_compress_struct cinfo;
-    struct jpeg_error_mgr jerr;
-    JSAMPROW row_pointer[1];
-    cinfo.err = jpeg_std_error(&jerr);
-    jpeg_create_compress(&cinfo);
+    if (avifImageYUVToRGB(avif, &rgb) != AVIF_RESULT_OK) {
+        fprintf(stderr, "Conversion to RGB failed: %s\n", outputFilename);
+        goto cleanup;
+    }
 
     f = fopen(outputFilename, "wb");
     if (!f) {
-        fprintf(stderr, "Can't open PNG file for write: %s\n", outputFilename);
+        fprintf(stderr, "Can't open JPEG file for write: %s\n", outputFilename);
         goto cleanup;
     }
 

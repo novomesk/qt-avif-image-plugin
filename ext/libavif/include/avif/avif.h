@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -524,23 +523,23 @@ typedef struct avifCodecConfigurationBox
 struct avifIO;
 
 // Destroy must completely destroy all child structures *and* free the avifIO object itself.
-// This function pointer is optional, however, if the reader isn't intended to be owned by
+// This function pointer is optional, however, if the avifIO object isn't intended to be owned by
 // a libavif encoder/decoder.
 typedef void (*avifIODestroyFunc)(struct avifIO * io);
 
-// This function should return a block of memory that *must* remain valid until another call to this
-// avifIO struct is used (reusing a read buffer is acceptable/expected).
+// This function should return a block of memory that *must* remain valid until another read call to
+// this avifIO struct is made (reusing a read buffer is acceptable/expected).
 //
+// * If offset exceeds the size of the content (past EOF), return AVIF_RESULT_IO_ERROR.
 // * If (offset+size) does not exceed the contents' size but the *entire range* is unavailable yet
 //   (due to network conditions or any other reason), return AVIF_RESULT_WAITING_ON_IO.
 // * If (offset+size) does not exceed the contents' size, it must provide the *entire range* and
 //   return AVIF_RESULT_OK.
 // * If (offset+size) exceeds the contents' size, it must provide a truncated buffer that provides
 //   all bytes from the offset to EOF, and return AVIF_RESULT_OK.
-// * If offset exceeds the size of the content (past EOF), provide 0 bytes and return AVIF_RESULT_OK.
 typedef avifResult (*avifIOReadFunc)(struct avifIO * io, uint32_t readFlags, uint64_t offset, uint64_t size, avifROData * out);
 
-typedef avifResult (*avifIOWriteFunc)(struct avifIO * io, uint32_t writeFlags, uint64_t offset, uint8_t * data, uint64_t size);
+typedef avifResult (*avifIOWriteFunc)(struct avifIO * io, uint32_t writeFlags, uint64_t offset, const uint8_t * data, uint64_t size);
 
 typedef struct avifIO
 {
@@ -555,23 +554,22 @@ typedef struct avifIO
     // can possibly be for your environment, but within your environment's memory constraints). This
     // is used for sanity checks when allocating internal buffers to protect against
     // malformed/malicious files.
-    size_t sizeHint;
+    uint64_t sizeHint;
 
     // If true, *all* memory regions returned from *all* calls to read are guaranteed to be
-    // persistent and exist for the lifetime of the avifDecoder object. If false, libavif will make
+    // persistent and exist for the lifetime of the avifIO object. If false, libavif will make
     // in-memory copies of samples and metadata content, and a memory region returned from read must
     // only persist until the next call to read.
     avifBool persistent;
 
-    // The contents of this are defined by the IO implementation, and should be fully destroyed by
-    // the implementation of the associated destroy function, unless it isn't owned by the avifIO
+    // The contents of this are defined by the avifIO implementation, and should be fully destroyed
+    // by the implementation of the associated destroy function, unless it isn't owned by the avifIO
     // struct. It is not necessary to use this pointer in your implementation.
     void * data;
 } avifIO;
 
 avifIO * avifIOCreateMemoryReader(const uint8_t * data, size_t size);
 avifIO * avifIOCreateFileReader(const char * filename);
-avifIO * avifIOCreateFilePtrReader(FILE * f, avifBool closeOnDestroy);
 void avifIODestroy(avifIO * io);
 
 // ---------------------------------------------------------------------------
@@ -674,9 +672,9 @@ typedef struct avifDecoder
 avifDecoder * avifDecoderCreate(void);
 void avifDecoderDestroy(avifDecoder * decoder);
 
-// Simple interfaces to decode a single image, independent of the decoder afterwards (decoder may be deestroyed).
+// Simple interfaces to decode a single image, independent of the decoder afterwards (decoder may be destroyed).
 avifResult avifDecoderRead(avifDecoder * decoder, avifImage * image); // call avifDecoderSetIO*() first
-avifResult avifDecoderReadMemory(avifDecoder * decoder, avifImage * image, const avifROData * input);
+avifResult avifDecoderReadMemory(avifDecoder * decoder, avifImage * image, const uint8_t * data, size_t size);
 avifResult avifDecoderReadFile(avifDecoder * decoder, avifImage * image, const char * filename);
 
 // Multi-function alternative to avifDecoderRead() for image sequences and gaining direct access
@@ -700,8 +698,7 @@ avifResult avifDecoderReadFile(avifDecoder * decoder, avifImage * image, const c
 // Parse again. Normally AVIF_DECODER_SOURCE_AUTO is enough for the common path.
 avifResult avifDecoderSetSource(avifDecoder * decoder, avifDecoderSource source);
 avifResult avifDecoderSetIO(avifDecoder * decoder, avifIO * io);
-avifResult avifDecoderSetIOMemory(avifDecoder * decoder, const avifROData * rawInput);
-avifResult avifDecoderSetIOFilePtr(avifDecoder * decoder, FILE * f, avifBool closeOnDestroy);
+avifResult avifDecoderSetIOMemory(avifDecoder * decoder, const uint8_t * data, size_t size);
 avifResult avifDecoderSetIOFile(avifDecoder * decoder, const char * filename);
 avifResult avifDecoderParse(avifDecoder * decoder);
 avifResult avifDecoderNextImage(avifDecoder * decoder);
