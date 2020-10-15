@@ -13,7 +13,7 @@ qmake (or qt5-qmake) – to build the QT plugin
 QT5 development packages (for example qtbase5-dev on Ubuntu)
 qt5-image-formats-plugins (or qt5-imageformats, dev-qt/qtimageformats, …)
 The plug-in use libavif library internally ( https://github.com/AOMediaCodec/libavif ).
-Qt4 and is not supported and the plug-in doesn’t compile with Qt older than Qt 5.2
+Qt4 and is not supported and the plug-in doesn’t compile with Qt older than Qt 5.12
 
 Optional requirement:
 Plug-in supports Color spaces and loading ICC profiles when built with Qt 5.14 or newer.
@@ -21,7 +21,7 @@ Plug-in supports Color spaces and loading ICC profiles when built with Qt 5.14 o
 
 How to build the plug-in (two possibilities):
 
-1) Dynamic linking with libavif (ONLY for systems with >=libavif 0.8.1 installed!!!)
+1) Dynamic linking with libavif (ONLY for systems with >=libavif 0.8.2 installed!!!)
 Run:
 ./build_libqavif_dynamic.sh
 

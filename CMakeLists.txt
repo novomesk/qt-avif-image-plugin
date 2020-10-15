@@ -22,7 +22,7 @@ include(CheckIncludeFiles)
 set(REQUIRED_QT_VERSION 5.12.0)
 find_package(Qt5Gui ${REQUIRED_QT_VERSION} REQUIRED NO_MODULE)
 
-find_package(libavif 0.8.1 CONFIG)
+find_package(libavif 0.8.2 CONFIG)
 if (TARGET avif)
   MESSAGE(STATUS "libavif found - we will use dynamic linking")
   set(BUILD_QAVIF_DYNAMIC TRUE)
