@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+// TODO(any): rename this struct to something else. There is already another
+// struct called inter_modes_info, which makes this terribly confusing.
 typedef struct {
   int64_t rd;
   int drl_cost;

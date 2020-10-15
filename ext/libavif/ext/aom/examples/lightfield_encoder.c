@@ -128,7 +128,7 @@ static void get_raw_image(aom_image_t **frame_to_encode, aom_image_t *raw,
 }
 
 static aom_fixed_buf_t pass0(aom_image_t *raw, FILE *infile,
-                             const AvxInterface *encoder,
+                             aom_codec_iface_t *encoder,
                              const aom_codec_enc_cfg_t *cfg, int lf_width,
                              int lf_height, int lf_blocksize, int flags,
                              aom_image_t *raw_shift) {
@@ -140,8 +140,8 @@ static aom_fixed_buf_t pass0(aom_image_t *raw, FILE *infile,
   aom_fixed_buf_t stats = { NULL, 0 };
   aom_image_t *frame_to_encode;
 
-  if (aom_codec_enc_init(&codec, encoder->codec_interface(), cfg, flags))
-    die_codec(&codec, "Failed to initialize encoder");
+  if (aom_codec_enc_init(&codec, encoder, cfg, flags))
+    die("Failed to initialize encoder");
   if (aom_codec_control(&codec, AOME_SET_ENABLEAUTOALTREF, 0))
     die_codec(&codec, "Failed to turn off auto altref");
   if (aom_codec_control(&codec, AV1E_SET_FRAME_PARALLEL_DECODING, 0))
@@ -231,10 +231,10 @@ static aom_fixed_buf_t pass0(aom_image_t *raw, FILE *infile,
 }
 
 static void pass1(aom_image_t *raw, FILE *infile, const char *outfile_name,
-                  const AvxInterface *encoder, aom_codec_enc_cfg_t *cfg,
+                  aom_codec_iface_t *encoder, aom_codec_enc_cfg_t *cfg,
                   int lf_width, int lf_height, int lf_blocksize, int flags,
                   aom_image_t *raw_shift) {
-  AvxVideoInfo info = { encoder->fourcc,
+  AvxVideoInfo info = { get_fourcc_by_aom_encoder(encoder),
                         cfg->g_w,
                         cfg->g_h,
                         { cfg->g_timebase.num, cfg->g_timebase.den },
@@ -253,15 +253,15 @@ static void pass1(aom_image_t *raw, FILE *infile, const char *outfile_name,
   writer = aom_video_writer_open(outfile_name, kContainerIVF, &info);
   if (!writer) die("Failed to open %s for writing", outfile_name);
 
-  if (aom_codec_enc_init(&codec, encoder->codec_interface(), cfg, flags))
-    die_codec(&codec, "Failed to initialize encoder");
+  if (aom_codec_enc_init(&codec, encoder, cfg, flags))
+    die("Failed to initialize encoder");
   if (aom_codec_control(&codec, AOME_SET_ENABLEAUTOALTREF, 0))
     die_codec(&codec, "Failed to turn off auto altref");
   if (aom_codec_control(&codec, AV1E_SET_FRAME_PARALLEL_DECODING, 0))
     die_codec(&codec, "Failed to set frame parallel decoding");
   if (aom_codec_control(&codec, AV1E_ENABLE_EXT_TILE_DEBUG, 1))
     die_codec(&codec, "Failed to enable encoder ext_tile debug");
-  if (aom_codec_control(&codec, AOME_SET_CPUUSED, 1))
+  if (aom_codec_control(&codec, AOME_SET_CPUUSED, 3))
     die_codec(&codec, "Failed to set cpu-used");
 
   // Note: The superblock is a sequence parameter and has to be the same for 1
@@ -438,7 +438,6 @@ int main(int argc, char **argv) {
   aom_fixed_buf_t stats;
   int flags = 0;
 
-  const AvxInterface *encoder = NULL;
   const int fps = 30;
   const int bitrate = 200;  // kbit/s
   const char *const width_arg = argv[1];
@@ -452,7 +451,7 @@ int main(int argc, char **argv) {
 
   if (argc < 8) die("Invalid number of arguments");
 
-  encoder = get_aom_encoder_by_name("av1");
+  aom_codec_iface_t *encoder = get_aom_encoder_by_short_name("av1");
   if (!encoder) die("Unsupported codec.");
 
   w = (int)strtol(width_arg, NULL, 0);
@@ -478,10 +477,10 @@ int main(int argc, char **argv) {
                   32);
   }
 
-  printf("Using %s\n", aom_codec_iface_name(encoder->codec_interface()));
+  printf("Using %s\n", aom_codec_iface_name(encoder));
 
   // Configuration
-  res = aom_codec_enc_config_default(encoder->codec_interface(), &cfg, 0);
+  res = aom_codec_enc_config_default(encoder, &cfg, 0);
   if (res) die_codec(&codec, "Failed to get default codec config.");
 
   cfg.g_w = w;

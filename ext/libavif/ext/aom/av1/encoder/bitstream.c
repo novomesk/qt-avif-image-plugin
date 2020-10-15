@@ -145,8 +145,8 @@ static AOM_INLINE void write_tx_size_vartx(MACROBLOCKD *xd,
                                            int blk_row, int blk_col,
                                            aom_writer *w) {
   FRAME_CONTEXT *const ec_ctx = xd->tile_ctx;
-  const int max_blocks_high = max_block_high(xd, mbmi->sb_type, 0);
-  const int max_blocks_wide = max_block_wide(xd, mbmi->sb_type, 0);
+  const int max_blocks_high = max_block_high(xd, mbmi->bsize, 0);
+  const int max_blocks_wide = max_block_wide(xd, mbmi->bsize, 0);
 
   if (blk_row >= max_blocks_high || blk_col >= max_blocks_wide) return;
 
@@ -158,9 +158,9 @@ static AOM_INLINE void write_tx_size_vartx(MACROBLOCKD *xd,
 
   const int ctx = txfm_partition_context(xd->above_txfm_context + blk_col,
                                          xd->left_txfm_context + blk_row,
-                                         mbmi->sb_type, tx_size);
+                                         mbmi->bsize, tx_size);
   const int txb_size_index =
-      av1_get_txb_size_index(mbmi->sb_type, blk_row, blk_col);
+      av1_get_txb_size_index(mbmi->bsize, blk_row, blk_col);
   const int write_txfm_partition =
       tx_size == mbmi->inter_tx_size[txb_size_index];
   if (write_txfm_partition) {
@@ -195,7 +195,7 @@ static AOM_INLINE void write_tx_size_vartx(MACROBLOCKD *xd,
 static AOM_INLINE void write_selected_tx_size(const MACROBLOCKD *xd,
                                               aom_writer *w) {
   const MB_MODE_INFO *const mbmi = xd->mi[0];
-  const BLOCK_SIZE bsize = mbmi->sb_type;
+  const BLOCK_SIZE bsize = mbmi->bsize;
   FRAME_CONTEXT *ec_ctx = xd->tile_ctx;
   if (block_signals_txsize(bsize)) {
     const TX_SIZE tx_size = mbmi->tx_size;
@@ -218,11 +218,11 @@ static int write_skip(const AV1_COMMON *cm, const MACROBLOCKD *xd,
   if (segfeature_active(&cm->seg, segment_id, SEG_LVL_SKIP)) {
     return 1;
   } else {
-    const int skip = mi->skip;
-    const int ctx = av1_get_skip_context(xd);
+    const int skip_txfm = mi->skip_txfm;
+    const int ctx = av1_get_skip_txfm_context(xd);
     FRAME_CONTEXT *ec_ctx = xd->tile_ctx;
-    aom_write_symbol(w, skip, ec_ctx->skip_cdfs[ctx], 2);
-    return skip;
+    aom_write_symbol(w, skip_txfm, ec_ctx->skip_txfm_cdfs[ctx], 2);
+    return skip_txfm;
   }
 }
 
@@ -234,7 +234,7 @@ static int write_skip_mode(const AV1_COMMON *cm, const MACROBLOCKD *xd,
     return 0;
   }
   const int skip_mode = mi->skip_mode;
-  if (!is_comp_ref_allowed(mi->sb_type)) {
+  if (!is_comp_ref_allowed(mi->bsize)) {
     assert(!skip_mode);
     return 0;
   }
@@ -278,11 +278,11 @@ static AOM_INLINE void write_motion_mode(const AV1_COMMON *cm, MACROBLOCKD *xd,
     case SIMPLE_TRANSLATION: break;
     case OBMC_CAUSAL:
       aom_write_symbol(w, mbmi->motion_mode == OBMC_CAUSAL,
-                       xd->tile_ctx->obmc_cdf[mbmi->sb_type], 2);
+                       xd->tile_ctx->obmc_cdf[mbmi->bsize], 2);
       break;
     default:
       aom_write_symbol(w, mbmi->motion_mode,
-                       xd->tile_ctx->motion_mode_cdf[mbmi->sb_type],
+                       xd->tile_ctx->motion_mode_cdf[mbmi->bsize],
                        MOTION_MODES);
   }
 }
@@ -339,22 +339,25 @@ static AOM_INLINE void write_delta_lflevel(const AV1_COMMON *cm,
   }
 }
 
-static AOM_INLINE void pack_map_tokens(aom_writer *w, const TOKENEXTRA **tp,
-                                       int n, int num) {
-  const TOKENEXTRA *p = *tp;
+static AOM_INLINE void pack_map_tokens(aom_writer *w, const TokenExtra **tp,
+                                       int n, int num, MapCdf map_pb_cdf) {
+  const TokenExtra *p = *tp;
+  const int palette_size_idx = n - PALETTE_MIN_SIZE;
   write_uniform(w, n, p->token);  // The first color index.
   ++p;
   --num;
   for (int i = 0; i < num; ++i) {
-    aom_write_symbol(w, p->token, p->color_map_cdf, n);
+    assert((p->color_ctx >= 0) && (p->color_ctx < CDF_SIZE(PALETTE_COLORS)));
+    aom_cdf_prob *color_map_cdf = map_pb_cdf[palette_size_idx][p->color_ctx];
+    aom_write_symbol(w, p->token, color_map_cdf, n);
     ++p;
   }
   *tp = p;
 }
 
 static AOM_INLINE void pack_txb_tokens(
-    aom_writer *w, AV1_COMMON *cm, MACROBLOCK *const x, const TOKENEXTRA **tp,
-    const TOKENEXTRA *const tok_end, MACROBLOCKD *xd, MB_MODE_INFO *mbmi,
+    aom_writer *w, AV1_COMMON *cm, MACROBLOCK *const x, const TokenExtra **tp,
+    const TokenExtra *const tok_end, MACROBLOCKD *xd, MB_MODE_INFO *mbmi,
     int plane, BLOCK_SIZE plane_bsize, aom_bit_depth_t bit_depth, int block,
     int blk_row, int blk_col, TX_SIZE tx_size, TOKEN_STATS *token_stats) {
   const int max_blocks_high = max_block_high(xd, plane_bsize, plane);
@@ -364,7 +367,7 @@ static AOM_INLINE void pack_txb_tokens(
 
   const struct macroblockd_plane *const pd = &xd->plane[plane];
   const TX_SIZE plane_tx_size =
-      plane ? av1_get_max_uv_txsize(mbmi->sb_type, pd->subsampling_x,
+      plane ? av1_get_max_uv_txsize(mbmi->bsize, pd->subsampling_x,
                                     pd->subsampling_y)
             : mbmi->inter_tx_size[av1_get_txb_size_index(plane_bsize, blk_row,
                                                          blk_col)];
@@ -439,9 +442,12 @@ int av1_neg_interleave(int x, int ref, int max) {
   }
 }
 
-static AOM_INLINE void write_segment_id(
-    AV1_COMP *cpi, const MB_MODE_INFO *const mbmi, aom_writer *w,
-    const struct segmentation *seg, struct segmentation_probs *segp, int skip) {
+static AOM_INLINE void write_segment_id(AV1_COMP *cpi,
+                                        const MB_MODE_INFO *const mbmi,
+                                        aom_writer *w,
+                                        const struct segmentation *seg,
+                                        struct segmentation_probs *segp,
+                                        int skip_txfm) {
   if (!seg->enabled || !seg->update_map) return;
 
   AV1_COMMON *const cm = &cpi->common;
@@ -451,15 +457,15 @@ static AOM_INLINE void write_segment_id(
   const int mi_row = xd->mi_row;
   const int mi_col = xd->mi_col;
 
-  if (skip) {
-    // Still need to transmit tx size for intra blocks even if skip is
+  if (skip_txfm) {
+    // Still need to transmit tx size for intra blocks even if skip_txfm is
     // true. Changing segment_id may make the tx size become invalid, e.g
     // changing from lossless to lossy.
     assert(is_inter_block(mbmi) || !cpi->enc_seg.has_lossless_segment);
 
-    set_spatial_segment_id(&cm->mi_params, cm->cur_frame->seg_map,
-                           mbmi->sb_type, mi_row, mi_col, pred);
-    set_spatial_segment_id(&cm->mi_params, cpi->enc_seg.map, mbmi->sb_type,
+    set_spatial_segment_id(&cm->mi_params, cm->cur_frame->seg_map, mbmi->bsize,
+                           mi_row, mi_col, pred);
+    set_spatial_segment_id(&cm->mi_params, cpi->enc_seg.map, mbmi->bsize,
                            mi_row, mi_col, pred);
     /* mbmi is read only but we need to update segment_id */
     ((MB_MODE_INFO *)mbmi)->segment_id = pred;
@@ -470,7 +476,7 @@ static AOM_INLINE void write_segment_id(
       av1_neg_interleave(mbmi->segment_id, pred, seg->last_active_segid + 1);
   aom_cdf_prob *pred_cdf = segp->spatial_pred_seg_cdf[cdf_num];
   aom_write_symbol(w, coded_id, pred_cdf, MAX_SEGMENTS);
-  set_spatial_segment_id(&cm->mi_params, cm->cur_frame->seg_map, mbmi->sb_type,
+  set_spatial_segment_id(&cm->mi_params, cm->cur_frame->seg_map, mbmi->bsize,
                          mi_row, mi_col, mbmi->segment_id);
 }
 
@@ -498,7 +504,7 @@ static AOM_INLINE void write_ref_frames(const AV1_COMMON *cm,
     // does the feature use compound prediction or not
     // (if not specified at the frame/segment level)
     if (cm->current_frame.reference_mode == REFERENCE_MODE_SELECT) {
-      if (is_comp_ref_allowed(mbmi->sb_type))
+      if (is_comp_ref_allowed(mbmi->bsize))
         aom_write_symbol(w, is_compound, av1_get_reference_mode_cdf(xd), 2);
     } else {
       assert((!is_compound) ==
@@ -587,7 +593,7 @@ static AOM_INLINE void write_filter_intra_mode_info(
     aom_writer *w) {
   if (av1_filter_intra_allowed(cm, mbmi)) {
     aom_write_symbol(w, mbmi->filter_intra_mode_info.use_filter_intra,
-                     xd->tile_ctx->filter_intra_cdfs[mbmi->sb_type], 2);
+                     xd->tile_ctx->filter_intra_cdfs[mbmi->bsize], 2);
     if (mbmi->filter_intra_mode_info.use_filter_intra) {
       const FILTER_INTRA_MODE mode =
           mbmi->filter_intra_mode_info.filter_intra_mode;
@@ -753,7 +759,7 @@ static AOM_INLINE void write_palette_mode_info(const AV1_COMMON *cm,
                                                const MB_MODE_INFO *const mbmi,
                                                aom_writer *w) {
   const int num_planes = av1_num_planes(cm);
-  const BLOCK_SIZE bsize = mbmi->sb_type;
+  const BLOCK_SIZE bsize = mbmi->bsize;
   assert(av1_allow_palette(cm->features.allow_screen_content_tools, bsize));
   const PALETTE_MODE_INFO *const pmi = &mbmi->palette_mode_info;
   const int bsize_ctx = av1_get_palette_bsize_ctx(bsize);
@@ -796,7 +802,7 @@ void av1_write_tx_type(const AV1_COMMON *const cm, const MACROBLOCKD *xd,
   if (get_ext_tx_types(tx_size, is_inter, features->reduced_tx_set_used) > 1 &&
       ((!cm->seg.enabled && cm->quant_params.base_qindex > 0) ||
        (cm->seg.enabled && xd->qindex[mbmi->segment_id] > 0)) &&
-      !mbmi->skip &&
+      !mbmi->skip_txfm &&
       !segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP)) {
     FRAME_CONTEXT *ec_ctx = xd->tile_ctx;
     const TX_SIZE square_tx_size = txsize_sqr_map[tx_size];
@@ -928,7 +934,7 @@ static AOM_INLINE void write_inter_segment_id(
       }
       if (pred_flag) {
         set_spatial_segment_id(&cm->mi_params, cm->cur_frame->seg_map,
-                               mbmi->sb_type, mi_row, mi_col, mbmi->segment_id);
+                               mbmi->bsize, mi_row, mi_col, mbmi->segment_id);
       }
     } else {
       write_segment_id(cpi, mbmi, w, seg, segp, 0);
@@ -947,7 +953,7 @@ static AOM_INLINE void write_delta_q_params(AV1_COMP *cpi, int skip,
     MACROBLOCK *const x = &cpi->td.mb;
     MACROBLOCKD *const xd = &x->e_mbd;
     const MB_MODE_INFO *const mbmi = xd->mi[0];
-    const BLOCK_SIZE bsize = mbmi->sb_type;
+    const BLOCK_SIZE bsize = mbmi->bsize;
     const int super_block_upper_left =
         ((xd->mi_row & (cm->seq_params.mib_size - 1)) == 0) &&
         ((xd->mi_col & (cm->seq_params.mib_size - 1)) == 0);
@@ -956,10 +962,10 @@ static AOM_INLINE void write_delta_q_params(AV1_COMP *cpi, int skip,
         super_block_upper_left) {
       assert(mbmi->current_qindex > 0);
       const int reduced_delta_qindex =
-          (mbmi->current_qindex - xd->current_qindex) /
+          (mbmi->current_qindex - xd->current_base_qindex) /
           delta_q_info->delta_q_res;
       write_delta_qindex(xd, reduced_delta_qindex, w);
-      xd->current_qindex = mbmi->current_qindex;
+      xd->current_base_qindex = mbmi->current_qindex;
       if (delta_q_info->delta_lf_present_flag) {
         if (delta_q_info->delta_lf_multi) {
           const int frame_lf_count =
@@ -992,7 +998,7 @@ static AOM_INLINE void write_intra_prediction_modes(AV1_COMP *cpi,
   FRAME_CONTEXT *ec_ctx = xd->tile_ctx;
   const MB_MODE_INFO *const mbmi = xd->mi[0];
   const PREDICTION_MODE mode = mbmi->mode;
-  const BLOCK_SIZE bsize = mbmi->sb_type;
+  const BLOCK_SIZE bsize = mbmi->bsize;
 
   // Y mode.
   if (is_keyframe) {
@@ -1084,7 +1090,7 @@ static AOM_INLINE void pack_inter_mode_mvs(AV1_COMP *cpi, aom_writer *w) {
   const MB_MODE_INFO_EXT_FRAME *const mbmi_ext_frame = x->mbmi_ext_frame;
   const PREDICTION_MODE mode = mbmi->mode;
   const int segment_id = mbmi->segment_id;
-  const BLOCK_SIZE bsize = mbmi->sb_type;
+  const BLOCK_SIZE bsize = mbmi->bsize;
   const int allow_hp = cm->features.allow_high_precision_mv;
   const int is_inter = is_inter_block(mbmi);
   const int is_compound = has_second_ref(mbmi);
@@ -1094,7 +1100,7 @@ static AOM_INLINE void pack_inter_mode_mvs(AV1_COMP *cpi, aom_writer *w) {
 
   write_skip_mode(cm, xd, segment_id, mbmi, w);
 
-  assert(IMPLIES(mbmi->skip_mode, mbmi->skip));
+  assert(IMPLIES(mbmi->skip_mode, mbmi->skip_txfm));
   const int skip =
       mbmi->skip_mode ? 1 : write_skip(cm, xd, segment_id, mbmi, w);
 
@@ -1278,7 +1284,7 @@ static AOM_INLINE void write_mb_modes_kf(
 static AOM_INLINE void dump_mode_info(MB_MODE_INFO *mi) {
   printf("\nmi->mi_row == %d\n", mi->mi_row);
   printf("&& mi->mi_col == %d\n", mi->mi_col);
-  printf("&& mi->sb_type == %d\n", mi->sb_type);
+  printf("&& mi->bsize == %d\n", mi->bsize);
   printf("&& mi->tx_size == %d\n", mi->tx_size);
   printf("&& mi->mode == %d\n", mi->mode);
 }
@@ -1324,7 +1330,7 @@ static AOM_INLINE void enc_dump_logs(
 #define FRAME_TO_CHECK 11
     if (cm->current_frame.frame_number == FRAME_TO_CHECK &&
         cm->show_frame == 1) {
-      const BLOCK_SIZE bsize = mbmi->sb_type;
+      const BLOCK_SIZE bsize = mbmi->bsize;
 
       int_mv mv[2] = { 0 };
       const int is_comp_ref = has_second_ref(mbmi);
@@ -1390,12 +1396,12 @@ static AOM_INLINE void write_mbmi_b(AV1_COMP *cpi, aom_writer *w) {
 
 static AOM_INLINE void write_inter_txb_coeff(
     AV1_COMMON *const cm, MACROBLOCK *const x, MB_MODE_INFO *const mbmi,
-    aom_writer *w, const TOKENEXTRA **tok, const TOKENEXTRA *const tok_end,
+    aom_writer *w, const TokenExtra **tok, const TokenExtra *const tok_end,
     TOKEN_STATS *token_stats, const int row, const int col, int *block,
     const int plane) {
   MACROBLOCKD *const xd = &x->e_mbd;
   const struct macroblockd_plane *const pd = &xd->plane[plane];
-  const BLOCK_SIZE bsize = mbmi->sb_type;
+  const BLOCK_SIZE bsize = mbmi->bsize;
   assert(bsize < BLOCK_SIZES_ALL);
   const int ss_x = pd->subsampling_x;
   const int ss_y = pd->subsampling_y;
@@ -1425,19 +1431,19 @@ static AOM_INLINE void write_inter_txb_coeff(
 }
 
 static AOM_INLINE void write_tokens_b(AV1_COMP *cpi, aom_writer *w,
-                                      const TOKENEXTRA **tok,
-                                      const TOKENEXTRA *const tok_end) {
+                                      const TokenExtra **tok,
+                                      const TokenExtra *const tok_end) {
   AV1_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
-  const BLOCK_SIZE bsize = mbmi->sb_type;
+  const BLOCK_SIZE bsize = mbmi->bsize;
 
-  assert(!mbmi->skip);
+  assert(!mbmi->skip_txfm);
 
   const int is_inter = is_inter_block(mbmi);
   if (!is_inter) {
-    av1_write_coeffs_mb(cm, x, w, bsize);
+    av1_write_intra_coeffs_mb(cm, x, w, bsize);
   } else {
     int block[MAX_MB_PLANE] = { 0 };
     assert(bsize == get_plane_block_size(bsize, xd->plane[0].subsampling_x,
@@ -1468,7 +1474,7 @@ static AOM_INLINE void write_tokens_b(AV1_COMP *cpi, aom_writer *w,
     }
 #if CONFIG_RD_DEBUG
     for (int plane = 0; plane < num_planes; ++plane) {
-      if (mbmi->sb_type >= BLOCK_8X8 &&
+      if (mbmi->bsize >= BLOCK_8X8 &&
           rd_token_stats_mismatch(&mbmi->rd_stats, &token_stats, plane)) {
         dump_mode_info(mbmi);
         assert(0);
@@ -1479,12 +1485,13 @@ static AOM_INLINE void write_tokens_b(AV1_COMP *cpi, aom_writer *w,
 }
 
 static AOM_INLINE void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
-                                     aom_writer *w, const TOKENEXTRA **tok,
-                                     const TOKENEXTRA *const tok_end,
+                                     aom_writer *w, const TokenExtra **tok,
+                                     const TokenExtra *const tok_end,
                                      int mi_row, int mi_col) {
   const AV1_COMMON *cm = &cpi->common;
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
   MACROBLOCKD *xd = &cpi->td.mb.e_mbd;
+  FRAME_CONTEXT *tile_ctx = xd->tile_ctx;
   const int grid_idx = mi_row * mi_params->mi_stride + mi_col;
   xd->mi = mi_params->mi_grid_base + grid_idx;
   cpi->td.mb.mbmi_ext_frame =
@@ -1495,7 +1502,7 @@ static AOM_INLINE void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
   xd->tx_type_map_stride = mi_params->mi_stride;
 
   const MB_MODE_INFO *mbmi = xd->mi[0];
-  const BLOCK_SIZE bsize = mbmi->sb_type;
+  const BLOCK_SIZE bsize = mbmi->bsize;
   assert(bsize <= cm->seq_params.sb_size ||
          (bsize >= BLOCK_SIZES && bsize < BLOCK_SIZES_ALL));
 
@@ -1517,21 +1524,23 @@ static AOM_INLINE void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
     if (palette_size_plane > 0) {
       assert(mbmi->use_intrabc == 0);
       assert(av1_allow_palette(cm->features.allow_screen_content_tools,
-                               mbmi->sb_type));
+                               mbmi->bsize));
       assert(!plane || xd->is_chroma_ref);
       int rows, cols;
-      av1_get_block_dimensions(mbmi->sb_type, plane, xd, NULL, NULL, &rows,
+      av1_get_block_dimensions(mbmi->bsize, plane, xd, NULL, NULL, &rows,
                                &cols);
       assert(*tok < tok_end);
-      pack_map_tokens(w, tok, palette_size_plane, rows * cols);
+      MapCdf map_pb_cdf = plane ? tile_ctx->palette_uv_color_index_cdf
+                                : tile_ctx->palette_y_color_index_cdf;
+      pack_map_tokens(w, tok, palette_size_plane, rows * cols, map_pb_cdf);
     }
   }
 
   const int is_inter_tx = is_inter_block(mbmi);
-  const int skip = mbmi->skip;
+  const int skip_txfm = mbmi->skip_txfm;
   const int segment_id = mbmi->segment_id;
   if (cm->features.tx_mode == TX_MODE_SELECT && block_signals_txsize(bsize) &&
-      !(is_inter_tx && skip) && !xd->lossless[segment_id]) {
+      !(is_inter_tx && skip_txfm) && !xd->lossless[segment_id]) {
     if (is_inter_tx) {  // This implies skip flag is 0.
       const TX_SIZE max_tx_size = get_vartx_max_txsize(xd, bsize, 0);
       const int txbh = tx_size_high_unit[max_tx_size];
@@ -1548,11 +1557,11 @@ static AOM_INLINE void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
       set_txfm_ctxs(mbmi->tx_size, xd->width, xd->height, 0, xd);
     }
   } else {
-    set_txfm_ctxs(mbmi->tx_size, xd->width, xd->height, skip && is_inter_tx,
-                  xd);
+    set_txfm_ctxs(mbmi->tx_size, xd->width, xd->height,
+                  skip_txfm && is_inter_tx, xd);
   }
 
-  if (!mbmi->skip) {
+  if (!mbmi->skip_txfm) {
     write_tokens_b(cpi, w, tok, tok_end);
   }
 }
@@ -1596,7 +1605,7 @@ static AOM_INLINE void write_partition(const AV1_COMMON *const cm,
 
 static AOM_INLINE void write_modes_sb(
     AV1_COMP *const cpi, const TileInfo *const tile, aom_writer *const w,
-    const TOKENEXTRA **tok, const TOKENEXTRA *const tok_end, int mi_row,
+    const TokenExtra **tok, const TokenExtra *const tok_end, int mi_row,
     int mi_col, BLOCK_SIZE bsize) {
   const AV1_COMMON *const cm = &cpi->common;
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
@@ -1709,7 +1718,7 @@ static AOM_INLINE void write_modes(AV1_COMP *const cpi,
   av1_init_above_context(&cm->above_contexts, num_planes, tile->tile_row, xd);
 
   if (cpi->common.delta_q_info.delta_q_present_flag) {
-    xd->current_qindex = cpi->common.quant_params.base_qindex;
+    xd->current_base_qindex = cpi->common.quant_params.base_qindex;
     if (cpi->common.delta_q_info.delta_lf_present_flag) {
       av1_reset_loop_filter_delta(xd, num_planes);
     }
@@ -1719,10 +1728,10 @@ static AOM_INLINE void write_modes(AV1_COMP *const cpi,
        mi_row += cm->seq_params.mib_size) {
     const int sb_row_in_tile =
         (mi_row - tile->mi_row_start) >> cm->seq_params.mib_size_log2;
-    const TOKENEXTRA *tok =
-        cpi->tplist[tile_row][tile_col][sb_row_in_tile].start;
-    const TOKENEXTRA *tok_end =
-        tok + cpi->tplist[tile_row][tile_col][sb_row_in_tile].count;
+    const TokenExtra *tok =
+        cpi->token_info.tplist[tile_row][tile_col][sb_row_in_tile].start;
+    const TokenExtra *tok_end =
+        tok + cpi->token_info.tplist[tile_row][tile_col][sb_row_in_tile].count;
 
     av1_zero_left_context(xd);
 
@@ -1732,7 +1741,7 @@ static AOM_INLINE void write_modes(AV1_COMP *const cpi,
       write_modes_sb(cpi, tile, w, &tok, tok_end, mi_row, mi_col,
                      cm->seq_params.sb_size);
     }
-    assert(tok == cpi->tplist[tile_row][tile_col][sb_row_in_tile].stop);
+    assert(tok == tok_end);
   }
 }
 
@@ -3077,7 +3086,7 @@ static AOM_INLINE void write_uncompressed_header_obu(
     aom_wb_write_bit(wb, delta_q_info->delta_q_present_flag);
     if (delta_q_info->delta_q_present_flag) {
       aom_wb_write_literal(wb, get_msb(delta_q_info->delta_q_res), 2);
-      xd->current_qindex = quant_params->base_qindex;
+      xd->current_base_qindex = quant_params->base_qindex;
       if (features->allow_intrabc)
         assert(delta_q_info->delta_lf_present_flag == 0);
       else
@@ -3492,7 +3501,7 @@ static uint32_t write_tiles_in_tg_obus(AV1_COMP *const cpi, uint8_t *const dst,
     total_size += frame_header_size;
 
     // (yunqing) This test ensures the correctness of large scale tile coding.
-    if (cpi->oxcf.ext_tile_debug) {
+    if (cpi->oxcf.tile_cfg.enable_ext_tile_debug) {
       char fn[20] = "./fh";
       fn[4] = cm->current_frame.frame_number / 100 + '0';
       fn[5] = (cm->current_frame.frame_number % 100) / 10 + '0';
@@ -3864,7 +3873,7 @@ int av1_pack_bitstream(AV1_COMP *const cpi, uint8_t *dst, size_t *size,
   // The TD is now written outside the frame encode loop
 
   // write sequence header obu if KEY_FRAME, preceded by 4-byte size
-  if (cm->current_frame.frame_type == KEY_FRAME && cm->show_frame) {
+  if (cm->current_frame.frame_type == KEY_FRAME && !cpi->no_show_fwd_kf) {
     obu_header_size =
         av1_write_obu_header(level_params, OBU_SEQUENCE_HEADER, 0, data);
 
@@ -3885,7 +3894,8 @@ int av1_pack_bitstream(AV1_COMP *const cpi, uint8_t *dst, size_t *size,
 
   const int write_frame_header =
       (cpi->num_tg > 1 || encode_show_existing_frame(cm));
-  struct aom_write_bit_buffer saved_wb;
+  struct aom_write_bit_buffer saved_wb = { NULL, 0 };
+  size_t length_field = 0;
   if (write_frame_header) {
     // Write Frame Header OBU.
     fh_info.frame_header = data;
@@ -3894,26 +3904,24 @@ int av1_pack_bitstream(AV1_COMP *const cpi, uint8_t *dst, size_t *size,
     obu_payload_size =
         write_frame_header_obu(cpi, &saved_wb, data + obu_header_size, 1);
 
-    const size_t length_field_size =
-        obu_memmove(obu_header_size, obu_payload_size, data);
+    length_field = obu_memmove(obu_header_size, obu_payload_size, data);
     if (av1_write_uleb_obu_size(obu_header_size, obu_payload_size, data) !=
         AOM_CODEC_OK) {
       return AOM_CODEC_ERROR;
     }
 
     fh_info.obu_header_byte_offset = 0;
-    fh_info.total_length =
-        obu_header_size + obu_payload_size + length_field_size;
+    fh_info.total_length = obu_header_size + obu_payload_size + length_field;
     data += fh_info.total_length;
-
-    // Since length_field_size is determined adaptively after frame header
-    // encoding, saved_wb must be adjusted accordingly.
-    saved_wb.bit_buffer += length_field_size;
   }
 
   if (encode_show_existing_frame(cm)) {
     data_size = 0;
   } else {
+    // Since length_field is determined adaptively after frame header
+    // encoding, saved_wb must be adjusted accordingly.
+    saved_wb.bit_buffer += length_field;
+
     //  Each tile group obu will be preceded by 4-byte size of the tile group
     //  obu
     data_size = write_tiles_in_tg_obus(

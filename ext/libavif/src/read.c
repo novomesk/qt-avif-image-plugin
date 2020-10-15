@@ -2177,29 +2177,28 @@ avifResult avifDecoderSetSource(avifDecoder * decoder, avifDecoderSource source)
     return avifDecoderReset(decoder);
 }
 
-avifResult avifDecoderSetIO(avifDecoder * decoder, avifIO * io)
+void avifDecoderSetIO(avifDecoder * decoder, avifIO * io)
 {
     avifIODestroy(decoder->io);
     decoder->io = io;
-    return AVIF_RESULT_OK;
 }
 
 avifResult avifDecoderSetIOMemory(avifDecoder * decoder, const uint8_t * data, size_t size)
 {
     avifIO * io = avifIOCreateMemoryReader(data, size);
-    if (!io) {
-        return AVIF_RESULT_NO_IO;
-    }
-    return avifDecoderSetIO(decoder, io);
+    assert(io);
+    avifDecoderSetIO(decoder, io);
+    return AVIF_RESULT_OK;
 }
 
 avifResult avifDecoderSetIOFile(avifDecoder * decoder, const char * filename)
 {
     avifIO * io = avifIOCreateFileReader(filename);
     if (!io) {
-        return AVIF_RESULT_NO_IO;
+        return AVIF_RESULT_IO_ERROR;
     }
-    return avifDecoderSetIO(decoder, io);
+    avifDecoderSetIO(decoder, io);
+    return AVIF_RESULT_OK;
 }
 
 static avifResult avifDecoderPrepareSample(avifDecoder * decoder, avifDecodeSample * sample, size_t partialByteCount)
@@ -2257,7 +2256,7 @@ static avifResult avifDecoderPrepareSample(avifDecoder * decoder, avifDecodeSamp
 avifResult avifDecoderParse(avifDecoder * decoder)
 {
     if (!decoder->io || !decoder->io->read) {
-        return AVIF_RESULT_NO_IO;
+        return AVIF_RESULT_IO_NOT_SET;
     }
 
     // Cleanup anything lingering in the decoder
@@ -2718,7 +2717,7 @@ avifResult avifDecoderReset(avifDecoder * decoder)
 avifResult avifDecoderNextImage(avifDecoder * decoder)
 {
     if (!decoder->io || !decoder->io->read) {
-        return AVIF_RESULT_NO_IO;
+        return AVIF_RESULT_IO_NOT_SET;
     }
 
     uint32_t nextImageIndex = (uint32_t)(decoder->imageIndex + 1);

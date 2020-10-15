@@ -16,7 +16,7 @@ extern "C" {
 
 #define AVIF_VERSION_MAJOR 0
 #define AVIF_VERSION_MINOR 8
-#define AVIF_VERSION_PATCH 1
+#define AVIF_VERSION_PATCH 2
 #define AVIF_VERSION (AVIF_VERSION_MAJOR * 10000) + (AVIF_VERSION_MINOR * 100) + AVIF_VERSION_PATCH
 
 typedef int avifBool;
@@ -92,7 +92,7 @@ typedef enum avifResult
     AVIF_RESULT_INVALID_IMAGE_GRID,
     AVIF_RESULT_INVALID_CODEC_SPECIFIC_OPTION,
     AVIF_RESULT_TRUNCATED_DATA,
-    AVIF_RESULT_NO_IO,
+    AVIF_RESULT_IO_NOT_SET, // the avifIO field of avifDecoder is not set
     AVIF_RESULT_IO_ERROR,
     AVIF_RESULT_WAITING_ON_IO // similar to EAGAIN/EWOULDBLOCK, this means the avifIO doesn't have necessary data available yet
 } avifResult;
@@ -537,9 +537,9 @@ typedef void (*avifIODestroyFunc)(struct avifIO * io);
 //   return AVIF_RESULT_OK.
 // * If (offset+size) exceeds the contents' size, it must provide a truncated buffer that provides
 //   all bytes from the offset to EOF, and return AVIF_RESULT_OK.
-typedef avifResult (*avifIOReadFunc)(struct avifIO * io, uint32_t readFlags, uint64_t offset, uint64_t size, avifROData * out);
+typedef avifResult (*avifIOReadFunc)(struct avifIO * io, uint32_t readFlags, uint64_t offset, size_t size, avifROData * out);
 
-typedef avifResult (*avifIOWriteFunc)(struct avifIO * io, uint32_t writeFlags, uint64_t offset, const uint8_t * data, uint64_t size);
+typedef avifResult (*avifIOWriteFunc)(struct avifIO * io, uint32_t writeFlags, uint64_t offset, const uint8_t * data, size_t size);
 
 typedef struct avifIO
 {
@@ -697,7 +697,11 @@ avifResult avifDecoderReadFile(avifDecoder * decoder, avifImage * image, const c
 // items in a file containing both, but switch between sources without having to
 // Parse again. Normally AVIF_DECODER_SOURCE_AUTO is enough for the common path.
 avifResult avifDecoderSetSource(avifDecoder * decoder, avifDecoderSource source);
-avifResult avifDecoderSetIO(avifDecoder * decoder, avifIO * io);
+// Note: When avifDecoderSetIO() is called, whether 'decoder' takes ownership of 'io' depends on
+// whether io->destroy is set. avifDecoderDestroy(decoder) calls avifIODestroy(io), which calls
+// io->destroy(io) if io->destroy is set. Therefore, if io->destroy is not set, then
+// avifDecoderDestroy(decoder) has no effects on 'io'.
+void avifDecoderSetIO(avifDecoder * decoder, avifIO * io);
 avifResult avifDecoderSetIOMemory(avifDecoder * decoder, const uint8_t * data, size_t size);
 avifResult avifDecoderSetIOFile(avifDecoder * decoder, const char * filename);
 avifResult avifDecoderParse(avifDecoder * decoder);

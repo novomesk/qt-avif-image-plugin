@@ -35,9 +35,9 @@ extern "C" {
   (((D) * (1 << RDDIV_BITS)) - \
    ROUND_POWER_OF_TWO(((int64_t)(R)) * (RM), AV1_PROB_COST_SHIFT))
 
-#define RDCOST_DBL(RM, R, D)                                       \
+#define RDCOST_DBL_WITH_NATIVE_BD_DIST(RM, R, D, BD)               \
   (((((double)(R)) * (RM)) / (double)(1 << AV1_PROB_COST_SHIFT)) + \
-   ((double)(D) * (1 << RDDIV_BITS)))
+   ((double)((D) >> (2 * (BD - 8))) * (1 << RDDIV_BITS)))
 
 #define QIDX_SKIP_THRESH 115
 
@@ -78,8 +78,7 @@ typedef struct RD_OPT {
 
   int RDMULT;
 
-  double r0, arf_r0;
-  double mc_saved_base, mc_count_base;
+  double r0;
 } RD_OPT;
 
 typedef struct {
@@ -104,7 +103,7 @@ static INLINE void av1_init_rd_stats(RD_STATS *rd_stats) {
   rd_stats->dist = 0;
   rd_stats->rdcost = 0;
   rd_stats->sse = 0;
-  rd_stats->skip = 1;
+  rd_stats->skip_txfm = 1;
   rd_stats->zero_rate = 0;
 #if CONFIG_RD_DEBUG
   // This may run into problems when monochrome video is
@@ -129,7 +128,7 @@ static INLINE void av1_invalid_rd_stats(RD_STATS *rd_stats) {
   rd_stats->dist = INT64_MAX;
   rd_stats->rdcost = INT64_MAX;
   rd_stats->sse = INT64_MAX;
-  rd_stats->skip = 0;
+  rd_stats->skip_txfm = 0;
   rd_stats->zero_rate = 0;
 #if CONFIG_RD_DEBUG
   // This may run into problems when monochrome video is
@@ -155,7 +154,7 @@ static INLINE void av1_merge_rd_stats(RD_STATS *rd_stats_dst,
     rd_stats_dst->zero_rate = rd_stats_src->zero_rate;
   rd_stats_dst->dist += rd_stats_src->dist;
   rd_stats_dst->sse += rd_stats_src->sse;
-  rd_stats_dst->skip &= rd_stats_src->skip;
+  rd_stats_dst->skip_txfm &= rd_stats_src->skip_txfm;
 #if CONFIG_RD_DEBUG
   // This may run into problems when monochrome video is
   // encoded, as there will only be 1 plane
@@ -178,13 +177,13 @@ static INLINE void av1_merge_rd_stats(RD_STATS *rd_stats_dst,
 }
 
 static INLINE void av1_accumulate_rd_stats(RD_STATS *rd_stats, int64_t dist,
-                                           int rate, int skip, int64_t sse,
+                                           int rate, int skip_txfm, int64_t sse,
                                            int zero_rate) {
   assert(rd_stats->rate != INT_MAX && rate != INT_MAX);
   rd_stats->rate += rate;
   if (!rd_stats->zero_rate) rd_stats->zero_rate = zero_rate;
   rd_stats->dist += dist;
-  rd_stats->skip &= skip;
+  rd_stats->skip_txfm &= skip_txfm;
   rd_stats->sse += sse;
 }
 
@@ -231,8 +230,9 @@ int av1_compute_rd_mult(const struct AV1_COMP *cpi, int qindex);
 
 void av1_initialize_rd_consts(struct AV1_COMP *cpi);
 
-void av1_initialize_me_consts(const struct AV1_COMP *cpi, MACROBLOCK *x,
-                              int qindex);
+// Sets the multiplier to convert mv cost to l1 error during motion search.
+void av1_set_sad_per_bit(const struct AV1_COMP *cpi, MvCosts *mv_costs,
+                         int qindex);
 
 void av1_model_rd_from_var_lapndz(int64_t var, unsigned int n,
                                   unsigned int qstep, int *rate, int64_t *dist);
@@ -280,9 +280,9 @@ void av1_mv_pred(const struct AV1_COMP *cpi, MACROBLOCK *x,
                  uint8_t *ref_y_buffer, int ref_y_stride, int ref_frame,
                  BLOCK_SIZE block_size);
 
-static INLINE void set_error_per_bit(MACROBLOCK *x, int rdmult) {
-  x->errorperbit = rdmult >> RD_EPB_SHIFT;
-  x->errorperbit += (x->errorperbit == 0);
+// Sets the multiplier to convert mv cost to l2 error during motion search.
+static INLINE void av1_set_error_per_bit(MvCosts *mv_costs, int rdmult) {
+  mv_costs->errorperbit = AOMMAX(rdmult >> RD_EPB_SHIFT, 1);
 }
 
 // Get the threshold for R-D optimization of coefficients depending upon mode
@@ -309,7 +309,7 @@ static INLINE uint32_t get_rd_opt_coeff_thresh(
 }
 
 // Used to reset the state of tx/mb rd hash information
-static INLINE void reset_hash_records(MACROBLOCK *const x,
+static INLINE void reset_hash_records(TxfmSearchInfo *const txfm_info,
                                       int use_inter_txb_hash) {
   int32_t record_idx;
 
@@ -317,27 +317,28 @@ static INLINE void reset_hash_records(MACROBLOCK *const x,
   if (use_inter_txb_hash) {
     for (record_idx = 0;
          record_idx < ((MAX_MIB_SIZE >> 1) * (MAX_MIB_SIZE >> 1)); record_idx++)
-      x->txb_rd_record_8X8[record_idx].num =
-          x->txb_rd_record_8X8[record_idx].index_start = 0;
+      txfm_info->txb_rd_record_8X8[record_idx].num =
+          txfm_info->txb_rd_record_8X8[record_idx].index_start = 0;
     for (record_idx = 0;
          record_idx < ((MAX_MIB_SIZE >> 2) * (MAX_MIB_SIZE >> 2)); record_idx++)
-      x->txb_rd_record_16X16[record_idx].num =
-          x->txb_rd_record_16X16[record_idx].index_start = 0;
+      txfm_info->txb_rd_record_16X16[record_idx].num =
+          txfm_info->txb_rd_record_16X16[record_idx].index_start = 0;
     for (record_idx = 0;
          record_idx < ((MAX_MIB_SIZE >> 3) * (MAX_MIB_SIZE >> 3)); record_idx++)
-      x->txb_rd_record_32X32[record_idx].num =
-          x->txb_rd_record_32X32[record_idx].index_start = 0;
+      txfm_info->txb_rd_record_32X32[record_idx].num =
+          txfm_info->txb_rd_record_32X32[record_idx].index_start = 0;
     for (record_idx = 0;
          record_idx < ((MAX_MIB_SIZE >> 4) * (MAX_MIB_SIZE >> 4)); record_idx++)
-      x->txb_rd_record_64X64[record_idx].num =
-          x->txb_rd_record_64X64[record_idx].index_start = 0;
+      txfm_info->txb_rd_record_64X64[record_idx].num =
+          txfm_info->txb_rd_record_64X64[record_idx].index_start = 0;
   }
 
   // Reset the state for use_intra_txb_hash
-  x->txb_rd_record_intra.num = x->txb_rd_record_intra.index_start = 0;
+  txfm_info->txb_rd_record_intra.num =
+      txfm_info->txb_rd_record_intra.index_start = 0;
 
   // Reset the state for use_mb_rd_hash
-  x->mb_rd_record.num = x->mb_rd_record.index_start = 0;
+  txfm_info->mb_rd_record.num = txfm_info->mb_rd_record.index_start = 0;
 }
 
 void av1_setup_pred_block(const MACROBLOCKD *xd,
@@ -350,14 +351,16 @@ void av1_setup_pred_block(const MACROBLOCKD *xd,
 int av1_get_intra_cost_penalty(int qindex, int qdelta,
                                aom_bit_depth_t bit_depth);
 
-void av1_fill_mode_rates(AV1_COMMON *const cm, MACROBLOCK *x,
+void av1_fill_mode_rates(AV1_COMMON *const cm, ModeCosts *mode_costs,
                          FRAME_CONTEXT *fc);
 
-void av1_fill_coeff_costs(MACROBLOCK *x, FRAME_CONTEXT *fc,
+void av1_fill_lr_rates(ModeCosts *mode_costs, FRAME_CONTEXT *fc);
+
+void av1_fill_coeff_costs(CoeffCosts *coeff_costs, FRAME_CONTEXT *fc,
                           const int num_planes);
 
 void av1_fill_mv_costs(const FRAME_CONTEXT *fc, int integer_mv, int usehp,
-                       MACROBLOCK *x);
+                       MvCosts *mv_costs);
 
 int av1_get_adaptive_rdmult(const struct AV1_COMP *cpi, double beta);
 

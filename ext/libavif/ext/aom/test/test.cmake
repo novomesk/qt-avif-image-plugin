@@ -27,7 +27,7 @@ list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
             "${AOM_ROOT}/test/acm_random.h"
             "${AOM_ROOT}/test/aom_integer_test.cc"
             "${AOM_ROOT}/test/av1_config_test.cc"
-            "${AOM_ROOT}/test/blockd_test.cc"
+            "${AOM_ROOT}/test/block_test.cc"
             "${AOM_ROOT}/test/clear_system_state.h"
             "${AOM_ROOT}/test/codec_factory.h"
             "${AOM_ROOT}/test/decode_test_driver.cc"
@@ -56,7 +56,6 @@ list(APPEND AOM_UNIT_TEST_DECODER_SOURCES "${AOM_ROOT}/test/decode_api_test.cc"
 
 list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/active_map_test.cc"
-            "${AOM_ROOT}/test/altref_test.cc"
             "${AOM_ROOT}/test/aq_segment_test.cc"
             "${AOM_ROOT}/test/borders_test.cc"
             "${AOM_ROOT}/test/cpu_speed_test.cc"
@@ -64,20 +63,17 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/datarate_test.h"
             "${AOM_ROOT}/test/svc_datarate_test.cc"
             "${AOM_ROOT}/test/encode_api_test.cc"
+            "${AOM_ROOT}/test/encode_small_width_height_test.cc"
             "${AOM_ROOT}/test/encode_test_driver.cc"
             "${AOM_ROOT}/test/encode_test_driver.h"
             "${AOM_ROOT}/test/end_to_end_test.cc"
-            "${AOM_ROOT}/test/fwd_kf_test.cc"
             "${AOM_ROOT}/test/gf_pyr_height_test.cc"
             "${AOM_ROOT}/test/rt_end_to_end_test.cc"
-            "${AOM_ROOT}/test/error_resilience_test.cc"
             "${AOM_ROOT}/test/frame_size_tests.cc"
             "${AOM_ROOT}/test/horz_superres_test.cc"
             "${AOM_ROOT}/test/i420_video_source.h"
             "${AOM_ROOT}/test/level_test.cc"
-            "${AOM_ROOT}/test/lossless_test.cc"
             "${AOM_ROOT}/test/monochrome_test.cc"
-            "${AOM_ROOT}/test/qm_test.cc"
             "${AOM_ROOT}/test/resize_test.cc"
             "${AOM_ROOT}/test/scalability_test.cc"
             "${AOM_ROOT}/test/y4m_test.cc"
@@ -115,6 +111,7 @@ if(NOT BUILD_SHARED_LIBS)
 
   if(CONFIG_AV1_DECODER AND CONFIG_AV1_ENCODER)
     list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
+                "${AOM_ROOT}/test/altref_test.cc"
                 "${AOM_ROOT}/test/av1_encoder_parms_get_to_decoder.cc"
                 "${AOM_ROOT}/test/av1_ext_tile_test.cc"
                 "${AOM_ROOT}/test/binary_codes_test.cc"
@@ -125,18 +122,24 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/divu_small_test.cc"
                 "${AOM_ROOT}/test/dr_prediction_test.cc"
                 "${AOM_ROOT}/test/ec_test.cc"
+                "${AOM_ROOT}/test/error_resilience_test.cc"
                 "${AOM_ROOT}/test/ethread_test.cc"
                 "${AOM_ROOT}/test/film_grain_table_test.cc"
+                "${AOM_ROOT}/test/fwd_kf_test.cc"
+                "${AOM_ROOT}/test/kf_test.cc"
+                "${AOM_ROOT}/test/lossless_test.cc"
+                "${AOM_ROOT}/test/quant_test.cc"
                 "${AOM_ROOT}/test/sb_multipass_test.cc"
+                "${AOM_ROOT}/test/screen_content_test.cc"
                 "${AOM_ROOT}/test/segment_binarization_sync.cc"
+                "${AOM_ROOT}/test/still_picture_test.cc"
                 "${AOM_ROOT}/test/superframe_test.cc"
+                "${AOM_ROOT}/test/tile_config_test.cc"
                 "${AOM_ROOT}/test/tile_independence_test.cc"
-                "${AOM_ROOT}/test/temporal_filter_planewise_test.cc"
-                "${AOM_ROOT}/test/temporal_filter_yuv_test.cc")
+                "${AOM_ROOT}/test/temporal_filter_test.cc")
     if(CONFIG_REALTIME_ONLY)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
-                       "${AOM_ROOT}/test/cnn_test.cc"
-                       "${AOM_ROOT}/test/temporal_filter_yuv_test.cc")
+                       "${AOM_ROOT}/test/cnn_test.cc")
     endif()
     if(NOT CONFIG_AV1_HIGHBITDEPTH)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
@@ -170,7 +173,7 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/simd_sse4_test.cc")
   endif()
 
-  if(HAVE_SSE4_1)
+  if(HAVE_SSE4_1 OR HAVE_NEON)
     list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
                 "${AOM_ROOT}/test/filterintra_test.cc")
   endif()
@@ -184,9 +187,7 @@ if(NOT BUILD_SHARED_LIBS)
 
   list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
               "${AOM_ROOT}/test/arf_freq_test.cc"
-              "${AOM_ROOT}/test/av1_convolve_2d_test.cc"
-              "${AOM_ROOT}/test/av1_convolve_2d_test_util.cc"
-              "${AOM_ROOT}/test/av1_convolve_2d_test_util.h"
+              "${AOM_ROOT}/test/av1_convolve_test.cc"
               "${AOM_ROOT}/test/av1_fwd_txfm1d_test.cc"
               "${AOM_ROOT}/test/av1_fwd_txfm2d_test.cc"
               "${AOM_ROOT}/test/av1_inv_txfm1d_test.cc"
@@ -222,15 +223,21 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/subtract_test.cc"
               "${AOM_ROOT}/test/reconinter_test.cc"
               "${AOM_ROOT}/test/sum_squares_test.cc"
+              "${AOM_ROOT}/test/sse_sum_test.cc"
               "${AOM_ROOT}/test/variance_test.cc"
               "${AOM_ROOT}/test/wiener_test.cc"
               "${AOM_ROOT}/test/frame_error_test.cc"
               "${AOM_ROOT}/test/warp_filter_test.cc"
               "${AOM_ROOT}/test/warp_filter_test_util.cc"
-              "${AOM_ROOT}/test/warp_filter_test_util.h")
+              "${AOM_ROOT}/test/warp_filter_test_util.h"
+              "${AOM_ROOT}/test/webmenc_test.cc")
+
+  if((HAVE_SSE4_1 OR HAVE_NEON))
+    list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
+                "${AOM_ROOT}/test/av1_highbd_iht_test.cc")
+  endif()
 
   list(APPEND AOM_UNIT_TEST_ENCODER_INTRIN_SSE4_1
-              "${AOM_ROOT}/test/av1_highbd_iht_test.cc"
               "${AOM_ROOT}/test/av1_quantize_test.cc"
               "${AOM_ROOT}/test/corner_match_test.cc"
               "${AOM_ROOT}/test/simd_cmp_sse4.cc")

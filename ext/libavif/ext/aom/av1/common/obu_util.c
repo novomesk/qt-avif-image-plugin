@@ -74,10 +74,8 @@ static aom_codec_err_t read_obu_header(struct aom_read_bit_buffer *rb,
     return AOM_CODEC_UNSUP_BITSTREAM;
   }
 
-  if (aom_rb_read_bit(rb) != 0) {
-    // obu_reserved_1bit must be set to 0.
-    return AOM_CODEC_CORRUPT_FRAME;
-  }
+  // obu_reserved_1bit must be set to 0. The value is ignored by a decoder.
+  aom_rb_read_bit(rb);
 
   if (header->has_extension) {
     if (bit_buffer_byte_length == 1) return AOM_CODEC_CORRUPT_FRAME;
@@ -85,10 +83,12 @@ static aom_codec_err_t read_obu_header(struct aom_read_bit_buffer *rb,
     header->size += 1;
     header->temporal_layer_id = aom_rb_read_literal(rb, 3);
     header->spatial_layer_id = aom_rb_read_literal(rb, 2);
-    if (aom_rb_read_literal(rb, 3) != 0) {
-      // extension_header_reserved_3bits must be set to 0.
-      return AOM_CODEC_CORRUPT_FRAME;
-    }
+    // extension_header_reserved_3bits must be set to 0. The value is ignored by
+    // a decoder.
+    aom_rb_read_literal(rb, 3);
+  } else {
+    header->temporal_layer_id = 0;
+    header->spatial_layer_id = 0;
   }
 
   return AOM_CODEC_OK;

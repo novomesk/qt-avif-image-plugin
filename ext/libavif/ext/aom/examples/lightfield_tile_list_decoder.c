@@ -98,9 +98,7 @@ static void write_tile_yuv1d(aom_codec_ctx_t *codec, const aom_image_t *img,
 
 int main(int argc, char **argv) {
   FILE *outfile = NULL;
-  aom_codec_ctx_t codec;
   AvxVideoReader *reader = NULL;
-  const AvxInterface *decoder = NULL;
   const AvxVideoInfo *info = NULL;
   int num_references;
   int num_tile_lists;
@@ -129,16 +127,17 @@ int main(int argc, char **argv) {
 
   info = aom_video_reader_get_info(reader);
 
-  decoder = get_aom_decoder_by_fourcc(info->codec_fourcc);
+  aom_codec_iface_t *decoder = get_aom_decoder_by_fourcc(info->codec_fourcc);
   if (!decoder) die("Unknown input codec.");
-  printf("Using %s\n", aom_codec_iface_name(decoder->codec_interface()));
+  printf("Using %s\n", aom_codec_iface_name(decoder));
 
-  if (aom_codec_dec_init(&codec, decoder->codec_interface(), NULL, 0))
-    die_codec(&codec, "Failed to initialize decoder.");
+  aom_codec_ctx_t codec;
+  if (aom_codec_dec_init(&codec, decoder, NULL, 0))
+    die("Failed to initialize decoder.");
 
   if (AOM_CODEC_CONTROL_TYPECHECKED(&codec, AV1D_SET_IS_ANNEXB,
                                     info->is_annexb)) {
-    die("Failed to set annex b status");
+    die_codec(&codec, "Failed to set annex b status");
   }
 
   // Decode anchor frames.

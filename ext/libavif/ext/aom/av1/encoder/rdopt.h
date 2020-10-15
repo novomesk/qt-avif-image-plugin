@@ -35,54 +35,138 @@ struct TileInfo;
 struct macroblock;
 struct RD_STATS;
 
-// Returns the number of colors in 'src'.
-int av1_count_colors(const uint8_t *src, int stride, int rows, int cols,
-                     int *val_count);
-// Same as av1_count_colors(), but for high-bitdepth mode.
-int av1_count_colors_highbd(const uint8_t *src8, int stride, int rows, int cols,
-                            int bit_depth, int *val_count);
-
-static INLINE int av1_cost_skip_txb(MACROBLOCK *x, const TXB_CTX *const txb_ctx,
-                                    int plane, TX_SIZE tx_size) {
-  const TX_SIZE txs_ctx = get_txsize_entropy_ctx(tx_size);
-  const PLANE_TYPE plane_type = get_plane_type(plane);
-  const LV_MAP_COEFF_COST *const coeff_costs =
-      &x->coeff_costs[txs_ctx][plane_type];
-  return coeff_costs->txb_skip_cost[txb_ctx->txb_skip_ctx][1];
-}
-
+/*!\brief AV1 intra mode selection for intra frames.
+ *
+ * \ingroup intra_mode_search
+ * \callgraph
+ * Top level function for rd-based intra mode selection during intra frame
+ * encoding. This function will first search for the best luma prediction by
+ * calling av1_rd_pick_intra_sby_mode, then it searches for chroma prediction
+ * with av1_rd_pick_intra_sbuv_mode. If applicable, this function ends the
+ * search with an evaluation for intrabc.
+ *
+ * \param[in]    cpi            Top-level encoder structure.
+ * \param[in]    x              Pointer to structure holding all the data for
+                                the current macroblock.
+ * \param[in]    rd_cost        Struct to keep track of the RD information.
+ * \param[in]    bsize          Current block size.
+ * \param[in]    ctx            Structure to hold snapshot of coding context
+                                during the mode picking process.
+ * \param[in]    best_rd Best   RD seen for this block so far.
+ *
+ * \return Nothing is returned. Instead, the MB_MODE_INFO struct inside x
+ * is modified to store information about the best mode computed
+ * in this function. The rd_cost struct is also updated with the RD stats
+ * corresponding to the best mode found.
+ */
 void av1_rd_pick_intra_mode_sb(const struct AV1_COMP *cpi, struct macroblock *x,
                                struct RD_STATS *rd_cost, BLOCK_SIZE bsize,
                                PICK_MODE_CONTEXT *ctx, int64_t best_rd);
 
-unsigned int av1_get_sby_perpixel_variance(const struct AV1_COMP *cpi,
-                                           const struct buf_2d *ref,
-                                           BLOCK_SIZE bs);
-unsigned int av1_high_get_sby_perpixel_variance(const struct AV1_COMP *cpi,
-                                                const struct buf_2d *ref,
-                                                BLOCK_SIZE bs, int bd);
-
+/*!\brief AV1 inter mode selection.
+ *
+ * \ingroup inter_mode_search
+ * \callgraph
+ * Top level function for inter mode selection. This function will loop over
+ * all possible inter modes and select the best one for the current block by
+ * computing the RD cost. The mode search and RD are computed in
+ * handle_inter_mode(), which is called from this function within the main
+ * loop.
+ *
+ * \param[in]    cpi            Top-level encoder structure
+ * \param[in]    tile_data      Pointer to struct holding adaptive
+                                data/contexts/models for the tile during
+                                encoding
+ * \param[in]    x              Pointer to structure holding all the data for
+                                the current macroblock
+ * \param[in]    rd_cost        Struct to keep track of the RD information
+ * \param[in]    bsize          Current block size
+ * \param[in]    ctx            Structure to hold snapshot of coding context
+                                during the mode picking process
+ * \param[in]    best_rd_so_far Best RD seen for this block so far
+ *
+ * \return Nothing is returned. Instead, the MB_MODE_INFO struct inside x
+ * is modified to store information about the best mode computed
+ * in this function. The rd_cost struct is also updated with the RD stats
+ * corresponding to the best mode found.
+ */
 void av1_rd_pick_inter_mode_sb(struct AV1_COMP *cpi,
                                struct TileDataEnc *tile_data,
                                struct macroblock *x, struct RD_STATS *rd_cost,
                                BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx,
                                int64_t best_rd_so_far);
 
-void av1_pick_intra_mode(AV1_COMP *cpi, MACROBLOCK *x, RD_STATS *rd_cost,
-                         BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx);
+/*!\brief AV1 intra mode selection based on Non-RD optimized model.
+ *
+ * \ingroup nonrd_mode_search
+ * \callgraph
+ * \callergraph
+ * Top level function for Non-RD optimized intra mode selection.
+ * This finction will loop over subset of intra modes and select the best one
+ * based on calculated modelled RD cost. Only 4 intra modes are checked as
+ * specified in \c intra_mode_list. When calculating RD cost Hadamard transform
+ * of residual is used to calculate rate. Estmation of RD cost is performed
+ * in \c estimate_block_intra which is called from this function
+ *
+ * \param[in]    cpi            Top-level encoder structure
+ * \param[in]    x              Pointer to structure holding all the data for
+                                the current macroblock
+ * \param[in]    rd_cost        Struct to keep track of the RD information
+ * \param[in]    bsize          Current block size
+ * \param[in]    ctx            Structure to hold snapshot of coding context
+                                during the mode picking process
+ *
+ * \return Nothing is returned. Instead, the MB_MODE_INFO struct inside x
+ * is modified to store information about the best mode computed
+ * in this function. The rd_cost struct is also updated with the RD stats
+ * corresponding to the best mode found.
+ */
+void av1_nonrd_pick_intra_mode(AV1_COMP *cpi, MACROBLOCK *x, RD_STATS *rd_cost,
+                               BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx);
 
+/*!\brief AV1 inter mode selection based on Non-RD optimized model.
+ *
+ * \ingroup nonrd_mode_search
+ * \callgraph
+ * Top level function for Non-RD optimized inter mode selection.
+ * This finction will loop over subset of inter modes and select the best one
+ * based on calculated modelled RD cost. While making decisions which modes to
+ * check, this function applies heuristics based on previously checked modes,
+ * block residual variance, block size, and other factors to prune certain
+ * modes and reference frames. Currently only single reference frame modes
+ * are checked. Additional heuristics are applied to decide if intra modes
+ *  need to be checked.
+ *  *
+ * \param[in]    cpi            Top-level encoder structure
+ * \param[in]    tile_data      Pointer to struct holding adaptive
+                                data/contexts/models for the tile during
+                                encoding
+ * \param[in]    x              Pointer to structure holding all the data for
+                                the current macroblock
+ * \param[in]    rd_cost        Struct to keep track of the RD information
+ * \param[in]    bsize          Current block size
+ * \param[in]    ctx            Structure to hold snapshot of coding context
+                                during the mode picking process
+ *
+ * \return Nothing is returned. Instead, the MB_MODE_INFO struct inside x
+ * is modified to store information about the best mode computed
+ * in this function. The rd_cost struct is also updated with the RD stats
+ * corresponding to the best mode found.
+ */
 void av1_nonrd_pick_inter_mode_sb(struct AV1_COMP *cpi,
                                   struct TileDataEnc *tile_data,
                                   struct macroblock *x,
                                   struct RD_STATS *rd_cost, BLOCK_SIZE bsize,
-                                  PICK_MODE_CONTEXT *ctx,
-                                  int64_t best_rd_so_far);
+                                  PICK_MODE_CONTEXT *ctx);
 
 void av1_rd_pick_inter_mode_sb_seg_skip(
     const struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
     struct macroblock *x, int mi_row, int mi_col, struct RD_STATS *rd_cost,
     BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx, int64_t best_rd_so_far);
 
+// TODO(any): The defs below could potentially be moved to rdopt_utils.h instead
+// because they are not the main rdopt functions.
+/*!\cond */
 // The best edge strength seen in the block, as well as the best x and y
 // components of edge strength seen.
 typedef struct {
@@ -90,6 +174,7 @@ typedef struct {
   uint16_t x;
   uint16_t y;
 } EdgeInfo;
+/*!\endcond */
 
 /** Returns an integer indicating the strength of the edge.
  * 0 means no edge found, 556 is the strength of a solid black/white edge,
@@ -106,11 +191,13 @@ EdgeInfo av1_edge_exists(const uint8_t *src, int src_stride, int w, int h,
 void av1_gaussian_blur(const uint8_t *src, int src_stride, int w, int h,
                        uint8_t *dst, bool high_bd, int bd);
 
+/*!\cond */
 /* Applies standard 3x3 Sobel matrix. */
 typedef struct {
   int16_t x;
   int16_t y;
 } sobel_xy;
+/*!\endcond */
 
 sobel_xy av1_sobel(const uint8_t *input, int stride, int i, int j,
                    bool high_bd);
@@ -195,8 +282,8 @@ static INLINE int prune_ref_by_selective_ref_frame(
     int ref_frame_list[2] = { LAST3_FRAME, LAST2_FRAME };
 
     if (x != NULL) {
-      if (x->search_ref_frame[LAST3_FRAME]) ref_frame_list[0] = NONE_FRAME;
-      if (x->search_ref_frame[LAST2_FRAME]) ref_frame_list[1] = NONE_FRAME;
+      if (x->tpl_keep_ref_frame[LAST3_FRAME]) ref_frame_list[0] = NONE_FRAME;
+      if (x->tpl_keep_ref_frame[LAST2_FRAME]) ref_frame_list[1] = NONE_FRAME;
     }
 
     if (prune_ref(ref_frame, order_hint_info, ref_display_order_hint,
@@ -209,8 +296,8 @@ static INLINE int prune_ref_by_selective_ref_frame(
     int ref_frame_list[2] = { ALTREF2_FRAME, BWDREF_FRAME };
 
     if (x != NULL) {
-      if (x->search_ref_frame[ALTREF2_FRAME]) ref_frame_list[0] = NONE_FRAME;
-      if (x->search_ref_frame[BWDREF_FRAME]) ref_frame_list[1] = NONE_FRAME;
+      if (x->tpl_keep_ref_frame[ALTREF2_FRAME]) ref_frame_list[0] = NONE_FRAME;
+      if (x->tpl_keep_ref_frame[BWDREF_FRAME]) ref_frame_list[1] = NONE_FRAME;
     }
 
     if (prune_ref(ref_frame, order_hint_info, ref_display_order_hint,

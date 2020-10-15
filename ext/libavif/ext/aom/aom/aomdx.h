@@ -33,9 +33,17 @@ extern "C" {
  * This interface provides the capability to decode AV1 streams.
  * @{
  */
+
+/*!\brief A single instance of the AV1 decoder.
+ *\deprecated This access mechanism is provided for backwards compatibility;
+ * prefer aom_codec_av1_dx().
+ */
 extern aom_codec_iface_t aom_codec_av1_dx_algo;
+/*!\brief The interface to the AV1 decoder.
+ */
 extern aom_codec_iface_t *aom_codec_av1_dx(void);
-/*!@} - end algorithm interface member group*/
+
+/*!@} - end algorithm interface member group */
 
 /** Data structure that stores bit accounting for debug
  */
@@ -88,6 +96,81 @@ typedef struct aom_tile_data {
   /*! Extra size information. */
   size_t extra_size;
 } aom_tile_data;
+
+/*!\brief Max number of tile columns
+ *
+ * This is the limit of number of tile columns allowed within a frame.
+ *
+ * Currently same as "MAX_TILE_COLS" in AV1, the maximum that AV1 supports.
+ *
+ */
+#define AOM_MAX_TILE_COLS 64
+/*!\brief Max number of tile rows
+ *
+ * This is the limit of number of tile rows allowed within a frame.
+ *
+ * Currently same as "MAX_TILE_ROWS" in AV1, the maximum that AV1 supports.
+ *
+ */
+#define AOM_MAX_TILE_ROWS 64
+
+/*!\brief Structure to hold information about tiles in a frame.
+ *
+ * Defines a structure to hold a frame's tile information, namely
+ * number of tile columns, number of tile_rows, and the width and
+ * height of each tile.
+ */
+typedef struct aom_tile_info {
+  /*! Indicates the number of tile columns. */
+  int tile_columns;
+  /*! Indicates the number of tile rows. */
+  int tile_rows;
+  /*! Indicates the tile widths in units of SB. */
+  int tile_widths[AOM_MAX_TILE_COLS];
+  /*! Indicates the tile heights in units of SB. */
+  int tile_heights[AOM_MAX_TILE_ROWS];
+  /*! Indicates the number of tile groups present in a frame. */
+  int num_tile_groups;
+} aom_tile_info;
+
+/*!\brief Structure to hold information about still image coding.
+ *
+ * Defines a structure to hold a information regarding still picture
+ * and its header type.
+ */
+typedef struct aom_still_picture_info {
+  /*! Video is a single frame still picture */
+  int is_still_picture;
+  /*! Use full header for still picture */
+  int is_reduced_still_picture_hdr;
+} aom_still_picture_info;
+
+/*!\brief Structure to hold information about S_FRAME.
+ *
+ * Defines a structure to hold a information regarding S_FRAME
+ * and its position.
+ */
+typedef struct aom_s_frame_info {
+  /*! Indicates if current frame is S_FRAME */
+  int is_s_frame;
+  /*! Indicates if current S_FRAME is present at ALTREF frame*/
+  int is_s_frame_at_altref;
+} aom_s_frame_info;
+
+/*!\brief Structure to hold information about screen content tools.
+ *
+ * Defines a structure to hold information about screen content
+ * tools, namely: allow_screen_content_tools, allow_intrabc, and
+ * force_integer_mv.
+ */
+typedef struct aom_screen_content_tools_info {
+  /*! Are screen content tools allowed */
+  int allow_screen_content_tools;
+  /*! Is intrabc allowed */
+  int allow_intrabc;
+  /*! Is integer mv forced */
+  int force_integer_mv;
+} aom_screen_content_tools_info;
 
 /*!\brief Structure to hold the external reference frame pointer.
  *
@@ -299,6 +382,50 @@ enum aom_dec_control_id {
   AV1D_SET_SKIP_FILM_GRAIN,
 
   AOM_DECODER_CTRL_ID_MAX,
+
+  /*!\brief Codec control function to check the presence of forward key frames
+   */
+  AOMD_GET_FWD_KF_PRESENT,
+
+  /*!\brief Codec control function to get the frame flags of the previous frame
+   * decoded. This will return a flag of type aom_codec_frame_flags_t.
+   */
+  AOMD_GET_FRAME_FLAGS,
+
+  /*!\brief Codec control function to check the presence of altref frames */
+  AOMD_GET_ALTREF_PRESENT,
+
+  /*!\brief Codec control function to get tile information of the previous frame
+   * decoded. This will return a struct of type aom_tile_info.
+   */
+  AOMD_GET_TILE_INFO,
+
+  /*!\brief Codec control function to get screen content tools information.
+   * It returns a struct of type aom_screen_content_tools_info, which contains
+   * the header flags allow_screen_content_tools, allow_intrabc, and
+   * force_integer_mv.
+   */
+  AOMD_GET_SCREEN_CONTENT_TOOLS_INFO,
+
+  /*!\brief Codec control function to get the still picture coding information
+   */
+  AOMD_GET_STILL_PICTURE,
+
+  /*!\brief Codec control function to get superblock size.
+   * It returns an integer, indicating the superblock size
+   * read from the sequence header(0 for BLOCK_64X64 and
+   * 1 for BLOCK_128X128)
+   */
+  AOMD_GET_SB_SIZE,
+
+  /*!\brief Codec control function to check if the previous frame
+   * decoded has show existing frame flag set.
+   */
+  AOMD_GET_SHOW_EXISTING_FRAME_FLAG,
+
+  /*!\brief Codec control function to get the S_FRAME coding information
+   */
+  AOMD_GET_S_FRAME_INFO,
 };
 
 /*!\cond */
@@ -324,6 +451,34 @@ AOM_CTRL_USE_TYPE(AOMD_GET_LAST_REF_USED, int *)
 
 AOM_CTRL_USE_TYPE(AOMD_GET_LAST_QUANTIZER, int *)
 #define AOM_CTRL_AOMD_GET_LAST_QUANTIZER
+
+AOM_CTRL_USE_TYPE(AOMD_GET_FWD_KF_PRESENT, int *)
+#define AOM_CTRL_AOMD_GET_FWD_KF_PRESENT
+
+AOM_CTRL_USE_TYPE(AOMD_GET_ALTREF_PRESENT, int *)
+#define AOM_CTRL_AOMD_GET_ALTREF_PRESENT
+
+AOM_CTRL_USE_TYPE(AOMD_GET_FRAME_FLAGS, int *)
+#define AOM_CTRL_AOMD_GET_FRAME_FLAGS
+
+AOM_CTRL_USE_TYPE(AOMD_GET_TILE_INFO, aom_tile_info *)
+#define AOM_CTRL_AOMD_GET_TILE_INFO
+
+AOM_CTRL_USE_TYPE(AOMD_GET_SCREEN_CONTENT_TOOLS_INFO,
+                  aom_screen_content_tools_info *)
+#define AOM_CTRL_AOMD_GET_SCREEN_CONTENT_TOOLS_INFO
+
+AOM_CTRL_USE_TYPE(AOMD_GET_STILL_PICTURE, aom_still_picture_info *)
+#define AOM_CTRL_AOMD_GET_STILL_PICTURE
+
+AOM_CTRL_USE_TYPE(AOMD_GET_SB_SIZE, aom_superblock_size_t *)
+#define AOMD_CTRL_AOMD_GET_SB_SIZE
+
+AOM_CTRL_USE_TYPE(AOMD_GET_SHOW_EXISTING_FRAME_FLAG, int *)
+#define AOMD_CTRL_AOMD_GET_SHOW_EXISTING_FRAME_FLAG
+
+AOM_CTRL_USE_TYPE(AOMD_GET_S_FRAME_INFO, aom_s_frame_info *)
+#define AOMD_CTRL_AOMD_GET_S_FRAME_INFO
 
 AOM_CTRL_USE_TYPE(AV1D_GET_DISPLAY_SIZE, int *)
 #define AOM_CTRL_AV1D_GET_DISPLAY_SIZE
@@ -389,7 +544,6 @@ AOM_CTRL_USE_TYPE(AV1_SET_INSPECTION_CALLBACK, aom_inspect_init *)
 #define AOM_CTRL_AV1_SET_INSPECTION_CALLBACK
 /*!\endcond */
 /*! @} - end defgroup aom_decoder */
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

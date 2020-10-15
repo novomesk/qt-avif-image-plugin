@@ -267,6 +267,8 @@ void EncoderTest::RunLoop(VideoSource *video) {
 
             case AOM_CODEC_PSNR_PKT: PSNRPktHook(pkt); break;
 
+            case AOM_CODEC_STATS_PKT: StatsPktHook(pkt); break;
+
             default: break;
           }
         }

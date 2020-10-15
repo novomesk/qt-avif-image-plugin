@@ -47,10 +47,11 @@ static int get_aq_c_strength(int q_index, aom_bit_depth_t bit_depth) {
 
 static bool is_frame_aq_enabled(const AV1_COMP *const cpi) {
   const AV1_COMMON *const cm = &cpi->common;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
 
   return frame_is_intra_only(cm) || cm->features.error_resilient_mode ||
-         cpi->refresh_alt_ref_frame ||
-         (cpi->refresh_golden_frame && !cpi->rc.is_src_frame_alt_ref);
+         refresh_frame_flags->alt_ref_frame ||
+         (refresh_frame_flags->golden_frame && !cpi->rc.is_src_frame_alt_ref);
 }
 
 // Segmentation only makes sense if the target bits per SB is above a threshold.
@@ -106,7 +107,8 @@ void av1_setup_in_frame_q_adj(AV1_COMP *cpi) {
 
       qindex_delta = av1_compute_qdelta_by_rate(
           &cpi->rc, cm->current_frame.frame_type, base_qindex,
-          aq_c_q_adj_factor[aq_strength][segment], cm->seq_params.bit_depth);
+          aq_c_q_adj_factor[aq_strength][segment], cpi->is_screen_content_type,
+          cm->seq_params.bit_depth);
 
       // For AQ complexity mode, we dont allow Q0 in a segment if the base
       // Q is not 0. Q0 (lossless) implies 4x4 only and in AQ mode 2 a segment

@@ -44,6 +44,7 @@ static const int segment_id[ENERGY_SPAN] = { 0, 1, 1, 2, 3, 4 };
 
 void av1_vaq_frame_setup(AV1_COMP *cpi) {
   AV1_COMMON *cm = &cpi->common;
+  const RefreshFrameFlagsInfo *const refresh_frame_flags = &cpi->refresh_frame;
   const int base_qindex = cm->quant_params.base_qindex;
   struct segmentation *seg = &cm->seg;
   int i;
@@ -65,8 +66,8 @@ void av1_vaq_frame_setup(AV1_COMP *cpi) {
     return;
   }
   if (frame_is_intra_only(cm) || cm->features.error_resilient_mode ||
-      cpi->refresh_alt_ref_frame ||
-      (cpi->refresh_golden_frame && !cpi->rc.is_src_frame_alt_ref)) {
+      refresh_frame_flags->alt_ref_frame ||
+      (refresh_frame_flags->golden_frame && !cpi->rc.is_src_frame_alt_ref)) {
     cpi->vaq_refresh = 1;
 
     av1_enable_segmentation(seg);
@@ -79,7 +80,8 @@ void av1_vaq_frame_setup(AV1_COMP *cpi) {
       // it.
       int qindex_delta = av1_compute_qdelta_by_rate(
           &cpi->rc, cm->current_frame.frame_type, base_qindex,
-          rate_ratio[i] / avg_ratio, cm->seq_params.bit_depth);
+          rate_ratio[i] / avg_ratio, cpi->is_screen_content_type,
+          cm->seq_params.bit_depth);
 
       // We don't allow qindex 0 in a segment if the base value is not 0.
       // Q index 0 (lossless) implies 4x4 encoding only and in AQ mode a segment
@@ -196,7 +198,8 @@ int av1_compute_q_from_energy_level_deltaq_mode(const AV1_COMP *const cpi,
   const int base_qindex = cm->quant_params.base_qindex;
   int qindex_delta = av1_compute_qdelta_by_rate(
       &cpi->rc, cm->current_frame.frame_type, base_qindex,
-      deltaq_rate_ratio[rate_level], cm->seq_params.bit_depth);
+      deltaq_rate_ratio[rate_level], cpi->is_screen_content_type,
+      cm->seq_params.bit_depth);
 
   if ((base_qindex != 0) && ((base_qindex + qindex_delta) == 0)) {
     qindex_delta = -base_qindex + 1;
