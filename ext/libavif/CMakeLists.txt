@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.5)
 # and find_package()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
 
-project(libavif LANGUAGES C VERSION 0.8.2)
+project(libavif LANGUAGES C VERSION 0.8.3)
 
 # Set C99 as the default
 set(CMAKE_C_STANDARD 99)
@@ -19,7 +19,7 @@ set(CMAKE_C_STANDARD 99)
 #     Increment MINOR. Set PATCH to 0
 #   If the source code was changed, but there were no interface changes:
 #     Increment PATCH.
-set(LIBRARY_VERSION_MAJOR 7)
+set(LIBRARY_VERSION_MAJOR 8)
 set(LIBRARY_VERSION_MINOR 0)
 set(LIBRARY_VERSION_PATCH 0)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
@@ -29,15 +29,21 @@ option(BUILD_SHARED_LIBS "Build shared avif library" ON)
 
 option(AVIF_ENABLE_WERROR "Treat all compiler warnings as errors" ON)
 
-option(AVIF_CODEC_AOM "Use the AOM codec for encoding (and decoding if no other decoder is present)" OFF)
-option(AVIF_CODEC_DAV1D "Use the dav1d codec for decoding (overrides AOM decoding if also enabled)" OFF)
-option(AVIF_CODEC_LIBGAV1 "Use the libgav1 codec for decoding (overrides AOM decoding if also enabled)" OFF)
-option(AVIF_CODEC_RAV1E "Use the rav1e codec for encoding (overrides AOM encoding if also enabled)" OFF)
+option(AVIF_CODEC_AOM "Use the AOM codec for encoding/decoding (see AVIF_CODEC_AOM_DECODE/AVIF_CODEC_AOM_ENCODE)" OFF)
+option(AVIF_CODEC_DAV1D "Use the dav1d codec for decoding" OFF)
+option(AVIF_CODEC_LIBGAV1 "Use the libgav1 codec for decoding" OFF)
+option(AVIF_CODEC_RAV1E "Use the rav1e codec for encoding" OFF)
+option(AVIF_CODEC_SVT "Use the SVT-AV1 codec for encoding" OFF)
+
+# These options allow libavif to only link against / use libaom's encoder or decoder, instead of being forced to use both
+option(AVIF_CODEC_AOM_DECODE "if AVIF_CODEC_AOM is on, use/offer libaom's decoder" ON)
+option(AVIF_CODEC_AOM_ENCODE "if AVIF_CODEC_AOM is on, use/offer libaom's encoder" ON)
 
 option(AVIF_LOCAL_AOM "Build the AOM codec by providing your own copy of the repo in ext/aom (see Local Builds in README)" OFF)
 option(AVIF_LOCAL_DAV1D "Build the dav1d codec by providing your own copy of the repo in ext/dav1d (see Local Builds in README)" OFF)
 option(AVIF_LOCAL_LIBGAV1 "Build the libgav1 codec by providing your own copy of the repo in ext/libgav1 (see Local Builds in README)" OFF)
 option(AVIF_LOCAL_RAV1E "Build the rav1e codec by providing your own copy of the repo in ext/rav1e (see Local Builds in README)" OFF)
+option(AVIF_LOCAL_SVT "Build the SVT-AV1 codec by providing your own copy of the repo in ext/SVT-AV1 (see Local Builds in README)" OFF)
 
 if(AVIF_LOCAL_LIBGAV1)
     enable_language(CXX)
@@ -55,7 +61,10 @@ endif()
 option(AVIF_LOCAL_ZLIBPNG "Build zlib and libpng by providing your own copy inside the ext subdir." OFF)
 if(AVIF_LOCAL_ZLIBPNG)
     add_subdirectory(ext/zlib)
-    set(ZLIB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/zlib")
+    # Put the value of ZLIB_INCLUDE_DIR in the cache. This works around cmake behavior that has been updated by
+    # cmake policy CMP0102 in cmake 3.17. Remove the CACHE workaround when we require cmake 3.17 or later. See
+    # https://gitlab.kitware.com/cmake/cmake/-/issues/21343.
+    set(ZLIB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/zlib" CACHE PATH "zlib include dir")
     include_directories("${CMAKE_CURRENT_BINARY_DIR}/ext/zlib")
     set(CMAKE_DEBUG_POSTFIX "")
 
@@ -82,6 +91,20 @@ if(AVIF_LOCAL_JPEG)
     else()
         set(JPEG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/libjpeg" PARENT_SCOPE)
         set(JPEG_LIBRARY jpeg PARENT_SCOPE)
+    endif()
+endif()
+option(AVIF_LOCAL_LIBYUV "Build libyuv by providing your own copy inside the ext subdir." OFF)
+if(AVIF_LOCAL_LIBYUV)
+    set(LIB_FILENAME "${CMAKE_CURRENT_SOURCE_DIR}/ext/libyuv/build/${CMAKE_STATIC_LIBRARY_PREFIX}yuv${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    if(NOT EXISTS "${LIB_FILENAME}")
+        message(FATAL_ERROR "libavif(AVIF_LOCAL_LIBYUV): ${LIB_FILENAME} is missing, bailing out")
+    endif()
+    if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+        set(LIBYUV_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/libyuv/include")
+        set(LIBYUV_LIBRARY ${LIB_FILENAME})
+    else()
+        set(LIBYUV_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/libyuv/include" PARENT_SCOPE)
+        set(LIBYUV_LIBRARY ${LIB_FILENAME} PARENT_SCOPE)
     endif()
 endif()
 # ---------------------------------------------------------------------------------------
@@ -165,11 +188,14 @@ set(AVIF_SRCS
     src/rawdata.c
     src/read.c
     src/reformat.c
+    src/reformat_libyuv.c
     src/stream.c
     src/utils.c
     src/write.c
 )
 
+set(AVIF_PLATFORM_DEFINITIONS)
+set(AVIF_PLATFORM_INCLUDES)
 set(AVIF_PLATFORM_LIBRARIES)
 if(UNIX)
     # Find out if we have threading available
@@ -177,6 +203,16 @@ if(UNIX)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads)
     set(AVIF_PLATFORM_LIBRARIES m Threads::Threads)
+endif()
+
+find_package(libyuv QUIET) # not required
+if(libyuv_FOUND)
+    message(STATUS "libavif: libyuv found, libyuv-based fast paths enabled.")
+    set(AVIF_PLATFORM_DEFINITIONS ${AVIF_PLATFORM_DEFINITIONS} -DAVIF_LIBYUV_ENABLED=1)
+    set(AVIF_PLATFORM_INCLUDES ${AVIF_PLATFORM_INCLUDES} ${LIBYUV_INCLUDE_DIR})
+    set(AVIF_PLATFORM_LIBRARIES ${AVIF_PLATFORM_LIBRARIES} ${LIBYUV_LIBRARY})
+else()
+    message(STATUS "libavif: libyuv not found, libyuv-based fast paths disabled.")
 endif()
 
 set(AVIF_CODEC_DEFINITIONS)
@@ -278,9 +314,47 @@ if(AVIF_CODEC_RAV1E)
     endif()
 endif()
 
+if(AVIF_CODEC_SVT)
+    message(STATUS "libavif: Codec enabled: svt (encode)")
+    set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_SVT=1)
+    set(AVIF_SRCS ${AVIF_SRCS}
+        src/codec_svt.c
+    )
+
+    if(AVIF_LOCAL_SVT)
+        set(LIB_FILENAME "${CMAKE_CURRENT_SOURCE_DIR}/ext/SVT-AV1/Bin/Release/${CMAKE_STATIC_LIBRARY_PREFIX}SvtAv1Enc${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        if(NOT EXISTS "${LIB_FILENAME}")
+            message(FATAL_ERROR "libavif: compiled svt library is missing (in ext/SVT-AV1/Bin/Release), bailing out")
+        endif()
+
+        set(AVIF_CODEC_INCLUDES ${AVIF_CODEC_INCLUDES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/ext/SVT-AV1/include"
+        )
+        set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${LIB_FILENAME})
+    else()
+        # Check to see if svt is independently being built by the outer CMake project
+        if(NOT TARGET svt)
+            find_package(svt REQUIRED)
+            set(AVIF_CODEC_INCLUDES ${AVIF_CODEC_INCLUDES} ${SVT_INCLUDE_DIR})
+        endif()
+        set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${SVT_LIBRARY})
+    endif()
+endif()
+
 if(AVIF_CODEC_AOM)
-    message(STATUS "libavif: Codec enabled: aom (encode/decode)")
     set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM=1)
+    if(AVIF_CODEC_AOM_ENCODE AND AVIF_CODEC_AOM_DECODE)
+        message(STATUS "libavif: Codec enabled: aom (encode/decode)")
+        set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM_ENCODE=1 -DAVIF_CODEC_AOM_DECODE=1)
+    elseif(AVIF_CODEC_AOM_ENCODE)
+        message(STATUS "libavif: Codec enabled: aom (encode only)")
+        set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM_ENCODE=1)
+    elseif(AVIF_CODEC_AOM_DECODE)
+        message(STATUS "libavif: Codec enabled: aom (decode only)")
+        set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM_DECODE=1)
+    else()
+        message(FATAL_ERROR "libavif: AVIF_CODEC_AOM is on, but both AVIF_CODEC_AOM_ENCODE and AVIF_CODEC_AOM_DECODE are off. Disable AVIF_CODEC_AOM to disable both parts of the codec.")
+    endif()
     set(AVIF_SRCS ${AVIF_SRCS}
         src/codec_aom.c
     )
@@ -292,10 +366,8 @@ if(AVIF_CODEC_AOM)
 
         set(AVIF_CODEC_INCLUDES ${AVIF_CODEC_INCLUDES}
             "${CMAKE_CURRENT_SOURCE_DIR}/ext/aom"
-            "${CMAKE_CURRENT_SOURCE_DIR}/ext/aom/build.avif"
         )
         set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${LIB_FILENAME})
-        message(STATUS "LIBAOM_INCLUDE_PATH: ${CMAKE_CURRENT_SOURCE_DIR}/ext/aom")
     else()
         # Check to see if aom is independently being built by the outer CMake project
         if(NOT TARGET aom)
@@ -316,21 +388,30 @@ set_target_properties(avif
                           VERSION ${LIBRARY_VERSION}
                           SOVERSION ${LIBRARY_SOVERSION})
 target_compile_definitions(avif
-                           PRIVATE ${AVIF_CODEC_DEFINITIONS})
+                           PRIVATE ${AVIF_PLATFORM_DEFINITIONS} ${AVIF_CODEC_DEFINITIONS})
 target_link_libraries(avif
                       PRIVATE ${AVIF_CODEC_LIBRARIES} ${AVIF_PLATFORM_LIBRARIES})
 target_include_directories(avif
                            PUBLIC $<BUILD_INTERFACE:${libavif_SOURCE_DIR}/include>
                                   $<INSTALL_INTERFACE:include>
-                           PRIVATE ${AVIF_CODEC_INCLUDES})
+                           PRIVATE ${AVIF_PLATFORM_INCLUDES} ${AVIF_CODEC_INCLUDES})
 
 option(AVIF_BUILD_EXAMPLES "Build avif Examples." OFF)
 if(AVIF_BUILD_EXAMPLES)
-    add_executable(avif_example1 examples/avif_example1.c)
-    if(AVIF_LOCAL_LIBGAV1)
-        set_target_properties(avif_example1 PROPERTIES LINKER_LANGUAGE "CXX")
-    endif()
-    target_link_libraries(avif_example1 avif ${AVIF_PLATFORM_LIBRARIES})
+    set(AVIF_EXAMPLES
+        avif_example_decode_memory
+        avif_example_decode_file
+        avif_example_decode_streaming
+        avif_example_encode
+    )
+
+    foreach(EXAMPLE ${AVIF_EXAMPLES})
+        add_executable(${EXAMPLE} examples/${EXAMPLE}.c)
+        if(AVIF_LOCAL_LIBGAV1)
+            set_target_properties(${EXAMPLE} PROPERTIES LINKER_LANGUAGE "CXX")
+        endif()
+        target_link_libraries(${EXAMPLE} avif ${AVIF_PLATFORM_LIBRARIES})
+    endforeach()
 endif()
 
 if(CMAKE_SKIP_INSTALL_RULES)
@@ -359,12 +440,11 @@ if(AVIF_BUILD_APPS)
     if(AVIF_LOCAL_LIBGAV1)
         set_target_properties(avifenc PROPERTIES LINKER_LANGUAGE "CXX")
     endif()
-    target_link_libraries(avifenc avif ${AVIF_PLATFORM_LIBRARIES} ${ZLIB_LIBRARY} ${PNG_LIBRARY} ${JPEG_LIBRARY})
+    target_link_libraries(avifenc avif ${AVIF_PLATFORM_LIBRARIES} ${PNG_LIBRARY} ${ZLIB_LIBRARY} ${JPEG_LIBRARY})
     target_include_directories(avifenc
                                PRIVATE
                                    $<TARGET_PROPERTY:avif,INTERFACE_INCLUDE_DIRECTORIES>
                                    ${CMAKE_CURRENT_SOURCE_DIR}/apps/shared
-                                   ${ZLIB_INCLUDE_DIR}
                                    ${PNG_PNG_INCLUDE_DIR}
                                    ${JPEG_INCLUDE_DIR})
     add_executable(avifdec
@@ -379,12 +459,11 @@ if(AVIF_BUILD_APPS)
     if(AVIF_LOCAL_LIBGAV1)
         set_target_properties(avifdec PROPERTIES LINKER_LANGUAGE "CXX")
     endif()
-    target_link_libraries(avifdec avif ${AVIF_PLATFORM_LIBRARIES} ${ZLIB_LIBRARY} ${PNG_LIBRARY} ${JPEG_LIBRARY})
+    target_link_libraries(avifdec avif ${AVIF_PLATFORM_LIBRARIES} ${PNG_LIBRARY} ${ZLIB_LIBRARY} ${JPEG_LIBRARY})
     target_include_directories(avifdec
                                PRIVATE
                                    $<TARGET_PROPERTY:avif,INTERFACE_INCLUDE_DIRECTORIES>
                                    ${CMAKE_CURRENT_SOURCE_DIR}/apps/shared
-                                   ${ZLIB_INCLUDE_DIR}
                                    ${PNG_PNG_INCLUDE_DIR}
                                    ${JPEG_INCLUDE_DIR})
 
@@ -487,6 +566,11 @@ if(WIN32)
     set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
     avif_set_folder_safe(avif "ext/avif")
+    if(AVIF_BUILD_EXAMPLES)
+        foreach(EXAMPLE ${AVIF_EXAMPLES})
+            avif_set_folder_safe(${EXAMPLE} "ext/avif/examples")
+        endforeach()
+    endif()
     if(AVIF_LOCAL_ZLIBPNG)
         avif_set_folder_safe(example "ext/zlibpng")
         avif_set_folder_safe(genfiles "ext/zlibpng")

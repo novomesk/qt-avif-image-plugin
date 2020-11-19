@@ -11,10 +11,15 @@
 #pragma clang diagnostic ignored "-Wused-but-marked-unused"
 #endif
 
-#include "aom/aom_decoder.h"
+#if defined(AVIF_CODEC_AOM_ENCODE)
 #include "aom/aom_encoder.h"
 #include "aom/aomcx.h"
+#endif
+
+#if defined(AVIF_CODEC_AOM_DECODE)
+#include "aom/aom_decoder.h"
 #include "aom/aomdx.h"
+#endif
 
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -31,29 +36,39 @@
 
 struct avifCodecInternal
 {
+#if defined(AVIF_CODEC_AOM_DECODE)
     avifBool decoderInitialized;
     aom_codec_ctx_t decoder;
     aom_codec_iter_t iter;
     aom_image_t * image;
+#endif
 
+#if defined(AVIF_CODEC_AOM_ENCODE)
     avifBool encoderInitialized;
     aom_codec_ctx_t encoder;
     avifPixelFormatInfo formatInfo;
     aom_img_fmt_t aomFormat;
     avifBool monochromeEnabled;
+#endif
 };
 
 static void aomCodecDestroyInternal(avifCodec * codec)
 {
+#if defined(AVIF_CODEC_AOM_DECODE)
     if (codec->internal->decoderInitialized) {
         aom_codec_destroy(&codec->internal->decoder);
     }
+#endif
+
+#if defined(AVIF_CODEC_AOM_ENCODE)
     if (codec->internal->encoderInitialized) {
         aom_codec_destroy(&codec->internal->encoder);
     }
     avifFree(codec->internal);
+#endif
 }
 
+#if defined(AVIF_CODEC_AOM_DECODE)
 static avifBool aomCodecOpen(struct avifCodec * codec)
 {
     aom_codec_iface_t * decoder_interface = aom_codec_av1_dx();
@@ -145,6 +160,7 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec, const avifDecodeS
 
         image->yuvFormat = yuvFormat;
         image->yuvRange = (codec->internal->image->range == AOM_CR_STUDIO_RANGE) ? AVIF_RANGE_LIMITED : AVIF_RANGE_FULL;
+        image->yuvChromaSamplePosition = (avifChromaSamplePosition)codec->internal->image->csp;
 
         image->colorPrimaries = (avifColorPrimaries)codec->internal->image->cp;
         image->transferCharacteristics = (avifTransferCharacteristics)codec->internal->image->tc;
@@ -184,6 +200,9 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec, const avifDecodeS
 
     return AVIF_TRUE;
 }
+#endif // defined(AVIF_CODEC_AOM_DECODE)
+
+#if defined(AVIF_CODEC_AOM_ENCODE)
 
 static aom_img_fmt_t avifImageCalcAOMFmt(const avifImage * image, avifBool alpha)
 {
@@ -410,7 +429,41 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         struct aom_codec_enc_cfg cfg;
         aom_codec_enc_config_default(encoderInterface, &cfg, aomUsage);
 
-        cfg.g_profile = codec->configBox.seqProfile;
+        // Profile 0.  8-bit and 10-bit 4:2:0 and 4:0:0 only.
+        // Profile 1.  8-bit and 10-bit 4:4:4
+        // Profile 2.  8-bit and 10-bit 4:2:2
+        //            12-bit 4:0:0, 4:2:0, 4:2:2 and 4:4:4
+        uint8_t seqProfile = 0;
+        if (image->depth == 12) {
+            // Only seqProfile 2 can handle 12 bit
+            seqProfile = 2;
+        } else {
+            // 8-bit or 10-bit
+
+            if (alpha) {
+                seqProfile = 0;
+            } else {
+                switch (image->yuvFormat) {
+                    case AVIF_PIXEL_FORMAT_YUV444:
+                        seqProfile = 1;
+                        break;
+                    case AVIF_PIXEL_FORMAT_YUV422:
+                        seqProfile = 2;
+                        break;
+                    case AVIF_PIXEL_FORMAT_YUV420:
+                        seqProfile = 0;
+                        break;
+                    case AVIF_PIXEL_FORMAT_YUV400:
+                        seqProfile = 0;
+                        break;
+                    case AVIF_PIXEL_FORMAT_NONE:
+                    default:
+                        break;
+                }
+            }
+        }
+
+        cfg.g_profile = seqProfile;
         cfg.g_bit_depth = image->depth;
         cfg.g_input_bit_depth = image->depth;
         cfg.g_w = image->width;
@@ -420,6 +473,10 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
             // libaom to set still_picture and reduced_still_picture_header to
             // 1 in AV1 sequence headers.
             cfg.g_limit = 1;
+            // Set g_lag_in_frames to 1 to reduce the number of frame buffers
+            // (from 20 to 2) in libaom's lookahead structure. This reduces
+            // memory consumption when encoding a single image.
+            cfg.g_lag_in_frames = 1;
         }
         if (encoder->maxThreads > 1) {
             cfg.g_threads = encoder->maxThreads;
@@ -601,6 +658,8 @@ static avifBool aomCodecEncodeFinish(avifCodec * codec, avifCodecEncodeOutput * 
     return AVIF_TRUE;
 }
 
+#endif // defined(AVIF_CODEC_AOM_ENCODE)
+
 const char * avifCodecVersionAOM(void)
 {
     return aom_codec_version_str();
@@ -610,12 +669,18 @@ avifCodec * avifCodecCreateAOM(void)
 {
     avifCodec * codec = (avifCodec *)avifAlloc(sizeof(avifCodec));
     memset(codec, 0, sizeof(struct avifCodec));
+
+#if defined(AVIF_CODEC_AOM_DECODE)
     codec->open = aomCodecOpen;
     codec->getNextImage = aomCodecGetNextImage;
+#endif
+
+#if defined(AVIF_CODEC_AOM_ENCODE)
     codec->encodeImage = aomCodecEncodeImage;
     codec->encodeFinish = aomCodecEncodeFinish;
-    codec->destroyInternal = aomCodecDestroyInternal;
+#endif
 
+    codec->destroyInternal = aomCodecDestroyInternal;
     codec->internal = (struct avifCodecInternal *)avifAlloc(sizeof(struct avifCodecInternal));
     memset(codec->internal, 0, sizeof(struct avifCodecInternal));
     return codec;
