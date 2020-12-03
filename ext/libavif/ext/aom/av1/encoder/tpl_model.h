@@ -185,6 +185,11 @@ typedef struct TplParams {
    * Frame border for tpl frame.
    */
   int border_in_pixels;
+
+  /*!
+   * Skip tpl setup when tpl data from gop length decision can be reused.
+   */
+  int skip_tpl_setup_stats;
 } TplParams;
 
 /*!\brief Implements temporal dependency modelling for a GOP (GF/ARF

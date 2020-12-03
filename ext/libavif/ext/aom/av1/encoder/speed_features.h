@@ -71,6 +71,8 @@ enum {
   INTRA_DC = (1 << DC_PRED),
   INTRA_DC_TM = (1 << DC_PRED) | (1 << PAETH_PRED),
   INTRA_DC_H_V = (1 << DC_PRED) | (1 << V_PRED) | (1 << H_PRED),
+  INTRA_DC_H_V_SMOOTH =
+      (1 << DC_PRED) | (1 << V_PRED) | (1 << H_PRED) | (1 << SMOOTH_PRED),
   INTRA_DC_PAETH_H_V =
       (1 << DC_PRED) | (1 << PAETH_PRED) | (1 << V_PRED) | (1 << H_PRED)
 };
@@ -119,25 +121,19 @@ enum {
    */
   DISALLOW_RECODE = 0,
   /*
-   * Recode KF's exceeding maximum frame bandwidth
-   */
-  ALLOW_RECODE_KFMAXBW = 1,
-  /*
    * Allow recode only for KF/ARF/GF frames
    */
-  ALLOW_RECODE_KFARFGF = 2,
+  ALLOW_RECODE_KFARFGF = 1,
   /*
    * Allow recode for all frame types based on bitrate constraints.
    */
-  ALLOW_RECODE = 3,
+  ALLOW_RECODE = 2,
 } UENUM1BYTE(RECODE_LOOP_TYPE);
 
 enum {
   SUBPEL_TREE = 0,
-  SUBPEL_TREE_PRUNED = 1,           // Prunes 1/2-pel searches
-  SUBPEL_TREE_PRUNED_MORE = 2,      // Prunes 1/2-pel searches more aggressively
-  SUBPEL_TREE_PRUNED_EVENMORE = 3,  // Prunes 1/2- and 1/4-pel searches
-  // Other methods to come
+  SUBPEL_TREE_PRUNED = 1,       // Prunes 1/2-pel searches
+  SUBPEL_TREE_PRUNED_MORE = 2,  // Prunes 1/2-pel searches more aggressively
 } UENUM1BYTE(SUBPEL_SEARCH_METHODS);
 
 enum {
@@ -283,6 +279,12 @@ enum {
   QTR_ONLY,
 } UENUM1BYTE(MV_PREC_LOGIC);
 
+enum {
+  SUPERRES_AUTO_ALL,   // Tries all possible superres ratios
+  SUPERRES_AUTO_DUAL,  // Tries no superres and q-based superres ratios
+  SUPERRES_AUTO_SOLO,  // Only apply the q-based superres ratio
+} UENUM1BYTE(SUPERRES_AUTO_SEARCH_TYPE);
+
 /*!\endcond */
 /*!
  * \brief Sequence/frame level speed vs quality features
@@ -317,7 +319,22 @@ typedef struct HIGH_LEVEL_SPEED_FEATURES {
   // backgrounds very to cheap to encode, and the segmentation we have
   // adds overhead.
   int static_segmentation;
+
+  /*!
+   * Superres-auto mode search type:
+   */
+  SUPERRES_AUTO_SEARCH_TYPE superres_auto_search_type;
   /*!\endcond */
+
+  /*!
+   * Enable/disable extra screen content test by encoding key frame twice.
+   */
+  int disable_extra_sc_testing;
+
+  /*!
+   * Enable/disable second_alt_ref temporal filtering.
+   */
+  int second_alt_ref_filtering;
 } HIGH_LEVEL_SPEED_FEATURES;
 
 /*!\cond */
@@ -669,12 +686,6 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // Disable one sided compound modes.
   int disable_onesided_comp;
 
-  // Prune/gate motion mode evaluation based on token based rd
-  // during transform search for inter blocks
-  // Values are 0 (not used) , 1 - 3 with progressively increasing
-  // aggressiveness
-  int prune_motion_mode_level;
-
   // Prune obmc search using previous frame stats.
   int prune_obmc_prob_thresh;
 
@@ -789,10 +800,12 @@ typedef struct INTRA_MODE_SPEED_FEATURES {
   unsigned int src_var_thresh_intra_skip;
 
   // Prune intra mode candidates based on source block histogram of gradient.
+  // Applies to luma plane only.
   int intra_pruning_with_hog;
 
-  // TODO(anyone): tune intra_pruning_with_hog_thresh for various speeds.
-  float intra_pruning_with_hog_thresh;
+  // Prune intra mode candidates based on source block histogram of gradient.
+  // Applies to chroma plane only.
+  int chroma_intra_pruning_with_hog;
 
   // Enable/disable smooth intra modes.
   int disable_smooth_intra;
@@ -1047,9 +1060,6 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // Forces larger partition blocks in variance based partitioning
   int force_large_partition_blocks;
 
-  // Only checks intra DCPRED mode in nonrd_pick_inter_mode
-  int nonrd_intra_dc_only;
-
   // uses results of temporal noise estimate
   int use_temporal_noise_estimate;
 
@@ -1062,6 +1072,13 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // Skip loopfilter (and cdef) in svc real-time mode for
   // non_reference/droppable frames.
   int skip_loopfilter_non_reference;
+
+  // Bit mask to enable or disable intra modes for each prediction block size
+  // separately, for nonrd pickmode.
+  int intra_y_mode_bsize_mask_nrd[BLOCK_SIZES];
+
+  // Skips mode checks more agressively in nonRD mode
+  int nonrd_agressive_skip;
 } REAL_TIME_SPEED_FEATURES;
 
 /*!\endcond */

@@ -58,7 +58,7 @@ class DatarateTestLarge
     ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
     ASSERT_GE(effective_datarate_, cfg_.rc_target_bitrate * 0.7)
         << " The datarate for the file is lower than target by too much!";
-    ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.3)
+    ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.4)
         << " The datarate for the file is greater than target by too much!";
   }
 

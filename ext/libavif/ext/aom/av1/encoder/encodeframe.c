@@ -231,7 +231,7 @@ void av1_setup_src_planes(MACROBLOCK *x, const YV12_BUFFER_CONFIG *src,
  * \param[out]    num_planes  Number of image planes (e.g. Y,U,V)
  *
  * \return No return value but updates macroblock and thread data
- * relating to the q / q delta to be used.
+ * related to the q / q delta to be used.
  */
 static AOM_INLINE void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
                                      MACROBLOCK *const x,
@@ -339,7 +339,6 @@ static void init_ref_frame_space(AV1_COMP *cpi, ThreadData *td, int mi_row,
   if (tpl_frame->is_valid == 0) return;
   if (!is_frame_tpl_eligible(gf_group, gf_group->index)) return;
   if (frame_idx >= MAX_TPL_FRAME_IDX) return;
-  if (cpi->superres_mode != AOM_SUPERRES_NONE) return;
   if (cpi->oxcf.q_cfg.aq_mode != NO_AQ) return;
 
   const int is_overlay = cpi->gf_group.update_type[frame_idx] == OVERLAY_UPDATE;
@@ -353,13 +352,21 @@ static void init_ref_frame_space(AV1_COMP *cpi, ThreadData *td, int mi_row,
   int64_t inter_cost[INTER_REFS_PER_FRAME] = { 0 };
   const int step = 1 << block_mis_log2;
   const BLOCK_SIZE sb_size = cm->seq_params.sb_size;
+
   const int mi_row_end =
       AOMMIN(mi_size_high[sb_size] + mi_row, mi_params->mi_rows);
-  const int mi_col_end =
-      AOMMIN(mi_size_wide[sb_size] + mi_col, mi_params->mi_cols);
-
-  for (int row = mi_row; row < mi_row_end; row += step) {
-    for (int col = mi_col; col < mi_col_end; col += step) {
+  const int mi_cols_sr = av1_pixels_to_mi(cm->superres_upscaled_width);
+  const int mi_col_sr =
+      coded_to_superres_mi(mi_col, cm->superres_scale_denominator);
+  const int mi_col_end_sr =
+      AOMMIN(coded_to_superres_mi(mi_col + mi_size_wide[sb_size],
+                                  cm->superres_scale_denominator),
+             mi_cols_sr);
+  const int row_step = step;
+  const int col_step_sr =
+      coded_to_superres_mi(step, cm->superres_scale_denominator);
+  for (int row = mi_row; row < mi_row_end; row += row_step) {
+    for (int col = mi_col_sr; col < mi_col_end_sr; col += col_step_sr) {
       const TplDepStats *this_stats =
           &tpl_stats[av1_tpl_ptr_pos(row, col, tpl_stride, block_mis_log2)];
       int64_t tpl_pred_error[INTER_REFS_PER_FRAME] = { 0 };
@@ -540,8 +547,7 @@ static AOM_INLINE void encode_nonrd_sb(AV1_COMP *cpi, ThreadData *td,
     av1_set_fixed_partitioning(cpi, tile_info, mi, mi_row, mi_col, bsize);
   } else if (sf->part_sf.partition_search_type == VAR_BASED_PARTITION) {
     // set a variance-based partition
-    av1_set_offsets_without_segment_id(cpi, tile_info, x, mi_row, mi_col,
-                                       sb_size);
+    av1_set_offsets(cpi, tile_info, x, mi_row, mi_col, sb_size);
     av1_choose_var_based_partitioning(cpi, tile_info, td, x, mi_row, mi_col);
   }
   assert(sf->part_sf.partition_search_type == FIXED_PARTITION || seg_skip ||
@@ -769,7 +775,7 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
   const int use_nonrd_mode = cpi->sf.rt_sf.use_nonrd_pick_mode;
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
-  start_timing(cpi, encode_sb_time);
+  start_timing(cpi, encode_sb_row_time);
 #endif
 
   // Initialize the left context for the new SB row
@@ -815,7 +821,9 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
     // Reset color coding related parameters
     x->color_sensitivity[0] = 0;
     x->color_sensitivity[1] = 0;
-    x->content_state_sb = 0;
+    x->content_state_sb.source_sad = kMedSad;
+    x->content_state_sb.lighting_change = 0;
+    x->content_state_sb.low_sumdiff = 0;
 
     xd->cur_frame_force_integer_mv = cm->features.cur_frame_force_integer_mv;
     x->source_variance = UINT_MAX;
@@ -853,7 +861,7 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
                                     sb_cols_in_tile);
   }
 #if CONFIG_COLLECT_COMPONENT_TIMING
-  end_timing(cpi, encode_sb_time);
+  end_timing(cpi, encode_sb_row_time);
 #endif
 }
 
@@ -1027,7 +1035,6 @@ static AOM_INLINE void encode_tiles(AV1_COMP *cpi) {
 static AOM_INLINE void set_rel_frame_dist(
     const AV1_COMMON *const cm, RefFrameDistanceInfo *const ref_frame_dist_info,
     const int ref_frame_flags) {
-  const OrderHintInfo *const order_hint_info = &cm->seq_params.order_hint_info;
   MV_REFERENCE_FRAME ref_frame;
   int min_past_dist = INT32_MAX, min_future_dist = INT32_MAX;
   ref_frame_dist_info->nearest_past_ref = NONE_FRAME;
@@ -1036,7 +1043,6 @@ static AOM_INLINE void set_rel_frame_dist(
     ref_frame_dist_info->ref_relative_dist[ref_frame - LAST_FRAME] = 0;
     if (ref_frame_flags & av1_ref_frame_flag_list[ref_frame]) {
       int dist = av1_encoder_get_relative_dist(
-          order_hint_info,
           cm->cur_frame->ref_display_order_hint[ref_frame - LAST_FRAME],
           cm->current_frame.display_order_hint);
       ref_frame_dist_info->ref_relative_dist[ref_frame - LAST_FRAME] = dist;
@@ -1058,14 +1064,12 @@ static INLINE int refs_are_one_sided(const AV1_COMMON *cm) {
   assert(!frame_is_intra_only(cm));
 
   int one_sided_refs = 1;
+  const int cur_display_order_hint = cm->current_frame.display_order_hint;
   for (int ref = LAST_FRAME; ref <= ALTREF_FRAME; ++ref) {
     const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref);
     if (buf == NULL) continue;
-
-    const int ref_display_order_hint = buf->display_order_hint;
-    if (av1_encoder_get_relative_dist(
-            &cm->seq_params.order_hint_info, ref_display_order_hint,
-            (int)cm->current_frame.display_order_hint) > 0) {
+    if (av1_encoder_get_relative_dist(buf->display_order_hint,
+                                      cur_display_order_hint) > 0) {
       one_sided_refs = 0;  // bwd reference
       break;
     }
@@ -1145,17 +1149,15 @@ static AOM_INLINE void setup_prune_ref_frame_mask(AV1_COMP *cpi) {
   } else if (!cpi->sf.rt_sf.use_nonrd_pick_mode &&
              cpi->sf.inter_sf.selective_ref_frame >= 2) {
     AV1_COMMON *const cm = &cpi->common;
-    const OrderHintInfo *const order_hint_info =
-        &cm->seq_params.order_hint_info;
     const int cur_frame_display_order_hint =
         cm->current_frame.display_order_hint;
     unsigned int *ref_display_order_hint =
         cm->cur_frame->ref_display_order_hint;
     const int arf2_dist = av1_encoder_get_relative_dist(
-        order_hint_info, ref_display_order_hint[ALTREF2_FRAME - LAST_FRAME],
+        ref_display_order_hint[ALTREF2_FRAME - LAST_FRAME],
         cur_frame_display_order_hint);
     const int bwd_dist = av1_encoder_get_relative_dist(
-        order_hint_info, ref_display_order_hint[BWDREF_FRAME - LAST_FRAME],
+        ref_display_order_hint[BWDREF_FRAME - LAST_FRAME],
         cur_frame_display_order_hint);
 
     for (int ref_idx = REF_FRAMES; ref_idx < MODE_CTX_REF_FRAMES; ++ref_idx) {
@@ -1170,7 +1172,7 @@ static AOM_INLINE void setup_prune_ref_frame_mask(AV1_COMP *cpi) {
         int ref_dist[2];
         for (int i = 0; i < 2; ++i) {
           ref_dist[i] = av1_encoder_get_relative_dist(
-              order_hint_info, ref_display_order_hint[rf[i] - LAST_FRAME],
+              ref_display_order_hint[rf[i] - LAST_FRAME],
               cur_frame_display_order_hint);
         }
 
@@ -1391,6 +1393,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
   x->txfm_search_info.tx_search_count = 0;
 #endif  // CONFIG_SPEED_STATS
 
+#if !CONFIG_REALTIME_ONLY
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, av1_compute_global_motion_time);
 #endif
@@ -1398,6 +1401,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
 #if CONFIG_COLLECT_COMPONENT_TIMING
   end_timing(cpi, av1_compute_global_motion_time);
 #endif
+#endif  // !CONFIG_REALTIME_ONLY
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, av1_setup_motion_field_time);

@@ -62,6 +62,26 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, MvCosts *const mv_costs,
   aom_clear_system_state();
 }
 
+// Return the end column for the current superblock, in unit of TPL blocks.
+static int get_superblock_tpl_column_end(const AV1_COMMON *const cm, int mi_col,
+                                         int num_mi_w) {
+  // Find the start column of this superblock.
+  const int sb_mi_col_start = (mi_col >> cm->seq_params.mib_size_log2)
+                              << cm->seq_params.mib_size_log2;
+  // Same but in superres upscaled dimension.
+  const int sb_mi_col_start_sr =
+      coded_to_superres_mi(sb_mi_col_start, cm->superres_scale_denominator);
+  // Width of this superblock in mi units.
+  const int sb_mi_width = mi_size_wide[cm->seq_params.sb_size];
+  // Same but in superres upscaled dimension.
+  const int sb_mi_width_sr =
+      coded_to_superres_mi(sb_mi_width, cm->superres_scale_denominator);
+  // Superblock end in mi units.
+  const int sb_mi_end = sb_mi_col_start_sr + sb_mi_width_sr;
+  // Superblock end in TPL units.
+  return (sb_mi_end + num_mi_w - 1) / num_mi_w;
+}
+
 int av1_get_hier_tpl_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
                             const BLOCK_SIZE bsize, const int mi_row,
                             const int mi_col, int orig_rdmult) {
@@ -75,24 +95,34 @@ int av1_get_hier_tpl_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   if (tpl_frame->is_valid == 0) return deltaq_rdmult;
   if (!is_frame_tpl_eligible(gf_group, gf_group->index)) return deltaq_rdmult;
   if (tpl_idx >= MAX_TPL_FRAME_IDX) return deltaq_rdmult;
-  if (cpi->superres_mode != AOM_SUPERRES_NONE) return deltaq_rdmult;
   if (cpi->oxcf.q_cfg.aq_mode != NO_AQ) return deltaq_rdmult;
+
+  const int mi_col_sr =
+      coded_to_superres_mi(mi_col, cm->superres_scale_denominator);
+  const int mi_cols_sr = av1_pixels_to_mi(cm->superres_upscaled_width);
+  const int block_mi_width_sr =
+      coded_to_superres_mi(mi_size_wide[bsize], cm->superres_scale_denominator);
 
   const int bsize_base = BLOCK_16X16;
   const int num_mi_w = mi_size_wide[bsize_base];
   const int num_mi_h = mi_size_high[bsize_base];
-  const int num_cols = (cm->mi_params.mi_cols + num_mi_w - 1) / num_mi_w;
+  const int num_cols = (mi_cols_sr + num_mi_w - 1) / num_mi_w;
   const int num_rows = (cm->mi_params.mi_rows + num_mi_h - 1) / num_mi_h;
-  const int num_bcols = (mi_size_wide[bsize] + num_mi_w - 1) / num_mi_w;
+  const int num_bcols = (block_mi_width_sr + num_mi_w - 1) / num_mi_w;
   const int num_brows = (mi_size_high[bsize] + num_mi_h - 1) / num_mi_h;
+  // This is required because the end col of superblock may be off by 1 in case
+  // of superres.
+  const int sb_bcol_end = get_superblock_tpl_column_end(cm, mi_col, num_mi_w);
   int row, col;
   double base_block_count = 0.0;
   double geom_mean_of_scale = 0.0;
   aom_clear_system_state();
   for (row = mi_row / num_mi_w;
        row < num_rows && row < mi_row / num_mi_w + num_brows; ++row) {
-    for (col = mi_col / num_mi_h;
-         col < num_cols && col < mi_col / num_mi_h + num_bcols; ++col) {
+    for (col = mi_col_sr / num_mi_h;
+         col < num_cols && col < mi_col_sr / num_mi_h + num_bcols &&
+         col < sb_bcol_end;
+         ++col) {
       const int index = row * num_cols + col;
       geom_mean_of_scale += log(cpi->tpl_sb_rdmult_scaling_factors[index]);
       base_block_count += 1.0;
@@ -673,8 +703,11 @@ int av1_get_rdmult_delta(AV1_COMP *cpi, BLOCK_SIZE bsize, int mi_row,
       coded_to_superres_mi(mi_col + mi_wide, cm->superres_scale_denominator);
   const int mi_cols_sr = av1_pixels_to_mi(cm->superres_upscaled_width);
   const int step = 1 << block_mis_log2;
-  for (int row = mi_row; row < mi_row + mi_high; row += step) {
-    for (int col = mi_col_sr; col < mi_col_end_sr; col += step) {
+  const int row_step = step;
+  const int col_step_sr =
+      coded_to_superres_mi(step, cm->superres_scale_denominator);
+  for (int row = mi_row; row < mi_row + mi_high; row += row_step) {
+    for (int col = mi_col_sr; col < mi_col_end_sr; col += col_step_sr) {
       if (row >= cm->mi_params.mi_rows || col >= mi_cols_sr) continue;
       TplDepStats *this_stats =
           &tpl_stats[av1_tpl_ptr_pos(row, col, tpl_stride, block_mis_log2)];
@@ -686,6 +719,7 @@ int av1_get_rdmult_delta(AV1_COMP *cpi, BLOCK_SIZE bsize, int mi_row,
       mi_count++;
     }
   }
+  assert(mi_count <= MAX_TPL_BLK_IN_SB * MAX_TPL_BLK_IN_SB);
 
   aom_clear_system_state();
 
@@ -773,7 +807,6 @@ void av1_get_tpl_stats_sb(AV1_COMP *cpi, BLOCK_SIZE bsize, int mi_row,
   sb_enc->tpl_data_count = 0;
 
   if (!cpi->oxcf.algo_cfg.enable_tpl_model) return;
-  if (cpi->superres_mode != AOM_SUPERRES_NONE) return;
   if (cpi->common.current_frame.frame_type == KEY_FRAME) return;
   const FRAME_UPDATE_TYPE update_type = get_frame_update_type(&cpi->gf_group);
   if (update_type == INTNL_OVERLAY_UPDATE || update_type == OVERLAY_UPDATE)
@@ -806,15 +839,18 @@ void av1_get_tpl_stats_sb(AV1_COMP *cpi, BLOCK_SIZE bsize, int mi_row,
   // Here always use motion estimation size to avoid getting repetitive inter/
   // intra cost.
   const BLOCK_SIZE tpl_bsize = convert_length_to_bsize(tpl_data->tpl_bsize_1d);
-  const int step = mi_size_wide[tpl_bsize];
   assert(mi_size_wide[tpl_bsize] == mi_size_high[tpl_bsize]);
+  const int row_step = mi_size_high[tpl_bsize];
+  const int col_step_sr = coded_to_superres_mi(mi_size_wide[tpl_bsize],
+                                               cm->superres_scale_denominator);
 
   // Stride is only based on SB size, and we fill in values for every 16x16
   // block in a SB.
-  sb_enc->tpl_stride = (mi_col_end_sr - mi_col_sr) / step;
+  sb_enc->tpl_stride = (mi_col_end_sr - mi_col_sr) / col_step_sr;
 
-  for (int row = mi_row; row < mi_row + mi_high; row += step) {
-    for (int col = mi_col_sr; col < mi_col_end_sr; col += step) {
+  for (int row = mi_row; row < mi_row + mi_high; row += row_step) {
+    for (int col = mi_col_sr; col < mi_col_end_sr; col += col_step_sr) {
+      assert(count < MAX_TPL_BLK_IN_SB * MAX_TPL_BLK_IN_SB);
       // Handle partial SB, so that no invalid values are used later.
       if (row >= cm->mi_params.mi_rows || col >= mi_cols_sr) {
         sb_enc->tpl_inter_cost[count] = INT64_MAX;
@@ -836,6 +872,7 @@ void av1_get_tpl_stats_sb(AV1_COMP *cpi, BLOCK_SIZE bsize, int mi_row,
     }
   }
 
+  assert(mi_count <= MAX_TPL_BLK_IN_SB * MAX_TPL_BLK_IN_SB);
   sb_enc->tpl_data_count = mi_count;
 }
 
@@ -874,8 +911,11 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, BLOCK_SIZE bsize,
       coded_to_superres_mi(mi_col + mi_wide, cm->superres_scale_denominator);
   const int mi_cols_sr = av1_pixels_to_mi(cm->superres_upscaled_width);
   const int step = 1 << block_mis_log2;
-  for (int row = mi_row; row < mi_row + mi_high; row += step) {
-    for (int col = mi_col_sr; col < mi_col_end_sr; col += step) {
+  const int row_step = step;
+  const int col_step_sr =
+      coded_to_superres_mi(step, cm->superres_scale_denominator);
+  for (int row = mi_row; row < mi_row + mi_high; row += row_step) {
+    for (int col = mi_col_sr; col < mi_col_end_sr; col += col_step_sr) {
       if (row >= cm->mi_params.mi_rows || col >= mi_cols_sr) continue;
       TplDepStats *this_stats =
           &tpl_stats[av1_tpl_ptr_pos(row, col, tpl_stride, block_mis_log2)];
@@ -887,6 +927,7 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, BLOCK_SIZE bsize,
       mi_count++;
     }
   }
+  assert(mi_count <= MAX_TPL_BLK_IN_SB * MAX_TPL_BLK_IN_SB);
 
   aom_clear_system_state();
 
@@ -1133,14 +1174,16 @@ void av1_source_content_sb(AV1_COMP *cpi, MACROBLOCK *x, int offset) {
   last_src_y += offset;
   tmp_variance = cpi->fn_ptr[bsize].vf(src_y, src_ystride, last_src_y,
                                        last_src_ystride, &tmp_sse);
-  // Note: tmp_sse - tmp_variance = ((sum * sum) >> 12)
-  // Detect large lighting change.
-  if (tmp_variance < (tmp_sse >> 1) && (tmp_sse - tmp_variance) > sum_sq_thresh)
-    x->content_state_sb = kLowVarHighSumdiff;
-  else if (tmp_sse < avg_source_sse_threshold)
-    x->content_state_sb = kLowSad;
+  if (tmp_sse < avg_source_sse_threshold)
+    x->content_state_sb.source_sad = kLowSad;
   else if (tmp_sse > avg_source_sse_threshold_high)
-    x->content_state_sb = kHighSad;
+    x->content_state_sb.source_sad = kHighSad;
+  // Detect large lighting change.
+  // Note: tmp_sse - tmp_variance = ((sum * sum) >> 12)
+  if (tmp_variance < (tmp_sse >> 1) && (tmp_sse - tmp_variance) > sum_sq_thresh)
+    x->content_state_sb.lighting_change = 1;
+  if ((tmp_sse - tmp_variance) < (sum_sq_thresh >> 1))
+    x->content_state_sb.low_sumdiff = 1;
 }
 
 // Memset the mbmis at the current superblock to 0

@@ -120,7 +120,7 @@ void av1_update_noise_estimate(AV1_COMP *const cpi) {
   const int low_res = (cm->width <= 352 && cm->height <= 288);
   // Estimate of noise level every frame_period frames.
   int frame_period = 8;
-  int thresh_consec_zeromv = 6;
+  int thresh_consec_zeromv = 2;
   int frame_counter = cm->current_frame.frame_number;
   // Estimate is between current source and last source.
   YV12_BUFFER_CONFIG *last_source = cpi->last_source;
@@ -278,7 +278,6 @@ void av1_update_noise_estimate(AV1_COMP *const cpi) {
         max_bin = bin_cnt;
       }
     }
-
     // Scale by 40 to work with existing thresholds
     ne->value = (int)((3 * ne->value + max_bin * 40) >> 2);
     // Quickly increase VNR strength when the noise level increases suddenly.

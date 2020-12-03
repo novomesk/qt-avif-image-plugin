@@ -133,7 +133,7 @@ const DecodeParam kAV1InvalidFileTests[] = {
   { 1, "invalid-google-142530197-1.ivf", NULL },
   { 4, "invalid-oss-fuzz-9463.ivf", "invalid-oss-fuzz-9463.ivf.res.2" },
   { 1, "invalid-oss-fuzz-9720.ivf", NULL },
-  { 1, "invalid-oss-fuzz-10389.ivf", "invalid-oss-fuzz-10389.ivf.res.3" },
+  { 1, "invalid-oss-fuzz-10389.ivf", "invalid-oss-fuzz-10389.ivf.res.4" },
   { 1, "invalid-oss-fuzz-11523.ivf", "invalid-oss-fuzz-11523.ivf.res.2" },
   { 4, "invalid-oss-fuzz-15363.ivf", NULL },
   { 1, "invalid-oss-fuzz-16437.ivf", "invalid-oss-fuzz-16437.ivf.res.2" },

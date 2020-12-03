@@ -472,10 +472,13 @@ static void process_tpl_stats_frame(AV1_COMP *cpi) {
     int64_t intra_cost_base = 0;
     int64_t mc_dep_cost_base = 0;
     const int step = 1 << tpl_data->tpl_stats_block_mis_log2;
+    const int row_step = step;
+    const int col_step_sr =
+        coded_to_superres_mi(step, cm->superres_scale_denominator);
     const int mi_cols_sr = av1_pixels_to_mi(cm->superres_upscaled_width);
 
-    for (int row = 0; row < cm->mi_params.mi_rows; row += step) {
-      for (int col = 0; col < mi_cols_sr; col += step) {
+    for (int row = 0; row < cm->mi_params.mi_rows; row += row_step) {
+      for (int col = 0; col < mi_cols_sr; col += col_step_sr) {
         TplDepStats *this_stats = &tpl_stats[av1_tpl_ptr_pos(
             row, col, tpl_stride, tpl_data->tpl_stats_block_mis_log2)];
         int64_t mc_dep_delta =
@@ -915,11 +918,11 @@ void av1_determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig) {
 
   cpi->source =
       av1_scale_if_required(cm, cpi->unscaled_source, &cpi->scaled_source,
-                            cm->features.interp_filter, 0, 0);
+                            cm->features.interp_filter, 0, false, false);
   if (cpi->unscaled_last_source != NULL) {
-    cpi->last_source = av1_scale_if_required(cm, cpi->unscaled_last_source,
-                                             &cpi->scaled_last_source,
-                                             cm->features.interp_filter, 0, 0);
+    cpi->last_source = av1_scale_if_required(
+        cm, cpi->unscaled_last_source, &cpi->scaled_last_source,
+        cm->features.interp_filter, 0, false, false);
   }
 
   av1_setup_frame(cpi);
@@ -1232,24 +1235,6 @@ void av1_set_mb_ssim_rdmult_scaling(AV1_COMP *cpi) {
   }
 }
 
-#if CONFIG_SUPERRES_IN_RECODE
-static void save_cur_buf(AV1_COMP *cpi) {
-  CODING_CONTEXT *const cc = &cpi->coding_context;
-  AV1_COMMON *cm = &cpi->common;
-  const YV12_BUFFER_CONFIG *ybf = &cm->cur_frame->buf;
-  memset(&cc->copy_buffer, 0, sizeof(cc->copy_buffer));
-  if (aom_alloc_frame_buffer(&cc->copy_buffer, ybf->y_crop_width,
-                             ybf->y_crop_height, ybf->subsampling_x,
-                             ybf->subsampling_y,
-                             ybf->flags & YV12_FLAG_HIGHBITDEPTH, ybf->border,
-                             cm->features.byte_alignment) != AOM_CODEC_OK) {
-    aom_internal_error(
-        &cm->error, AOM_CODEC_MEM_ERROR,
-        "Failed to allocate copy buffer for saving coding context");
-  }
-  aom_yv12_copy_frame(ybf, &cc->copy_buffer, av1_num_planes(cm));
-}
-
 // Coding context that only needs to be saved when recode loop includes
 // filtering (deblocking, CDEF, superres post-encode upscale and/or loop
 // restoraton).
@@ -1260,14 +1245,13 @@ static void save_extra_coding_context(AV1_COMP *cpi) {
   cc->lf = cm->lf;
   cc->cdef_info = cm->cdef_info;
   cc->rc = cpi->rc;
+  cc->mv_stats = cpi->mv_stats;
 }
 
 void av1_save_all_coding_context(AV1_COMP *cpi) {
-  save_cur_buf(cpi);
   save_extra_coding_context(cpi);
   if (!frame_is_intra_only(&cpi->common)) release_scaled_references(cpi);
 }
-#endif  // CONFIG_SUPERRES_IN_RECODE
 
 #if DUMP_RECON_FRAMES == 1
 

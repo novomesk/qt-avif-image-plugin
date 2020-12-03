@@ -250,12 +250,16 @@ VARIANCES(4, 4)
 VARIANCES(4, 2)
 VARIANCES(2, 4)
 VARIANCES(2, 2)
+
+// Realtime mode doesn't use rectangular blocks.
+#if !CONFIG_REALTIME_ONLY
 VARIANCES(4, 16)
 VARIANCES(16, 4)
 VARIANCES(8, 32)
 VARIANCES(32, 8)
 VARIANCES(16, 64)
 VARIANCES(64, 16)
+#endif
 
 GET_VAR(16, 16)
 GET_VAR(8, 8)
@@ -363,8 +367,9 @@ void aom_comp_avg_upsampled_pred_c(MACROBLOCKD *xd, const AV1_COMMON *const cm,
                                    int ref_stride, int subpel_search) {
   int i, j;
 
-  aom_upsampled_pred(xd, cm, mi_row, mi_col, mv, comp_pred, width, height,
-                     subpel_x_q3, subpel_y_q3, ref, ref_stride, subpel_search);
+  aom_upsampled_pred_c(xd, cm, mi_row, mi_col, mv, comp_pred, width, height,
+                       subpel_x_q3, subpel_y_q3, ref, ref_stride,
+                       subpel_search);
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
       comp_pred[j] = ROUND_POWER_OF_TWO(comp_pred[j] + pred[j], 1);
@@ -789,12 +794,16 @@ HIGHBD_VARIANCES(4, 4)
 HIGHBD_VARIANCES(4, 2)
 HIGHBD_VARIANCES(2, 4)
 HIGHBD_VARIANCES(2, 2)
+
+// Realtime mode doesn't use 4x rectangular blocks.
+#if !CONFIG_REALTIME_ONLY
 HIGHBD_VARIANCES(4, 16)
 HIGHBD_VARIANCES(16, 4)
 HIGHBD_VARIANCES(8, 32)
 HIGHBD_VARIANCES(32, 8)
 HIGHBD_VARIANCES(16, 64)
 HIGHBD_VARIANCES(64, 16)
+#endif
 
 HIGHBD_GET_VAR(8)
 HIGHBD_GET_VAR(16)
@@ -1048,12 +1057,16 @@ MASK_SUBPIX_VAR(64, 64)
 MASK_SUBPIX_VAR(64, 128)
 MASK_SUBPIX_VAR(128, 64)
 MASK_SUBPIX_VAR(128, 128)
+
+// Realtime mode doesn't use 4x rectangular blocks.
+#if !CONFIG_REALTIME_ONLY
 MASK_SUBPIX_VAR(4, 16)
 MASK_SUBPIX_VAR(16, 4)
 MASK_SUBPIX_VAR(8, 32)
 MASK_SUBPIX_VAR(32, 8)
 MASK_SUBPIX_VAR(16, 64)
 MASK_SUBPIX_VAR(64, 16)
+#endif
 
 #if CONFIG_AV1_HIGHBITDEPTH
 void aom_highbd_comp_mask_pred_c(uint8_t *comp_pred8, const uint8_t *pred8,
@@ -1174,14 +1187,17 @@ HIGHBD_MASK_SUBPIX_VAR(64, 64)
 HIGHBD_MASK_SUBPIX_VAR(64, 128)
 HIGHBD_MASK_SUBPIX_VAR(128, 64)
 HIGHBD_MASK_SUBPIX_VAR(128, 128)
+#if !CONFIG_REALTIME_ONLY
 HIGHBD_MASK_SUBPIX_VAR(4, 16)
 HIGHBD_MASK_SUBPIX_VAR(16, 4)
 HIGHBD_MASK_SUBPIX_VAR(8, 32)
 HIGHBD_MASK_SUBPIX_VAR(32, 8)
 HIGHBD_MASK_SUBPIX_VAR(16, 64)
 HIGHBD_MASK_SUBPIX_VAR(64, 16)
+#endif
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
+#if !CONFIG_REALTIME_ONLY
 static INLINE void obmc_variance(const uint8_t *pre, int pre_stride,
                                  const int32_t *wsrc, const int32_t *mask,
                                  int w, int h, unsigned int *sse, int *sum) {
@@ -1481,6 +1497,7 @@ HIGHBD_OBMC_SUBPIX_VAR(16, 64)
 HIGHBD_OBMC_VAR(64, 16)
 HIGHBD_OBMC_SUBPIX_VAR(64, 16)
 #endif  // CONFIG_AV1_HIGHBITDEPTH
+#endif  // !CONFIG_REALTIME_ONLY
 
 uint64_t aom_mse_wxh_16bit_c(uint8_t *dst, int dstride, uint16_t *src,
                              int sstride, int w, int h) {

@@ -86,7 +86,7 @@ int y4m_write_file_header(char *buf, size_t len, int width, int height,
                           unsigned int bit_depth) {
   const char *color = monochrome ? monochrome_colorspace(bit_depth)
                                  : colorspace(bit_depth, csp, fmt);
-  return snprintf(buf, len, "YUV4MPEG2 W%u H%u F%u:%u I%c %s\n", width, height,
+  return snprintf(buf, len, "YUV4MPEG2 W%d H%d F%d:%d I%c %s\n", width, height,
                   framerate->numerator, framerate->denominator, 'p', color);
 }
 

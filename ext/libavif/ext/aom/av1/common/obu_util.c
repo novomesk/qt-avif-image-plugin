@@ -14,24 +14,6 @@
 
 #include "aom_dsp/bitreader_buffer.h"
 
-// Returns 1 when OBU type is valid, and 0 otherwise.
-static int valid_obu_type(int obu_type) {
-  int valid_type = 0;
-  switch (obu_type) {
-    case OBU_SEQUENCE_HEADER:
-    case OBU_TEMPORAL_DELIMITER:
-    case OBU_FRAME_HEADER:
-    case OBU_TILE_GROUP:
-    case OBU_METADATA:
-    case OBU_FRAME:
-    case OBU_REDUNDANT_FRAME_HEADER:
-    case OBU_TILE_LIST:
-    case OBU_PADDING: valid_type = 1; break;
-    default: break;
-  }
-  return valid_type;
-}
-
 static aom_codec_err_t read_obu_size(const uint8_t *data,
                                      size_t bytes_available,
                                      size_t *const obu_size,
@@ -63,9 +45,6 @@ static aom_codec_err_t read_obu_header(struct aom_read_bit_buffer *rb,
   }
 
   header->type = (OBU_TYPE)aom_rb_read_literal(rb, 4);
-
-  if (!valid_obu_type(header->type)) return AOM_CODEC_CORRUPT_FRAME;
-
   header->has_extension = aom_rb_read_bit(rb);
   header->has_size_field = aom_rb_read_bit(rb);
 

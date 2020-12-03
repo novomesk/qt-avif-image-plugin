@@ -34,7 +34,6 @@ static AOM_INLINE void simple_motion_search_prune_part_features(
     AV1_COMP *const cpi, MACROBLOCK *x, SIMPLE_MOTION_DATA_TREE *sms_tree,
     int mi_row, int mi_col, BLOCK_SIZE bsize, float *features,
     int features_to_get);
-#endif
 
 static INLINE int convert_bsize_to_idx(BLOCK_SIZE bsize) {
   switch (bsize) {
@@ -46,6 +45,7 @@ static INLINE int convert_bsize_to_idx(BLOCK_SIZE bsize) {
     default: assert(0 && "Invalid bsize"); return -1;
   }
 }
+#endif
 
 #if !CONFIG_REALTIME_ONLY
 // TODO(chiyotsai@google.com): This is very much a work in progress. We still

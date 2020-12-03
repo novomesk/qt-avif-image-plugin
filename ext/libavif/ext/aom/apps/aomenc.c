@@ -430,8 +430,9 @@ static const arg_def_t enable_tpl_model =
 static const arg_def_t enable_keyframe_filtering =
     ARG_DEF(NULL, "enable-keyframe-filtering", 1,
             "Apply temporal filtering on key frame"
-            "(0: no filter, 1: filter without overlay (default),"
-            "2: filter with overlay)");
+            "(0: no filter, 1: filter without overlay (default), "
+            "2: filter with overlay - experimental, may break random access in "
+            "players.)");
 static const arg_def_t tile_width =
     ARG_DEF(NULL, "tile-width", 1, "Tile widths (comma separated)");
 static const arg_def_t tile_height =

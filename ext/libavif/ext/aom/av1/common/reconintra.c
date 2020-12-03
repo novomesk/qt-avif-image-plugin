@@ -464,6 +464,17 @@ static intra_high_pred_fn dc_pred_high[2][2][TX_SIZES_ALL];
 static void init_intra_predictors_internal(void) {
   assert(NELEMENTS(mode_to_angle_map) == INTRA_MODES);
 
+#if CONFIG_REALTIME_ONLY
+#define INIT_RECTANGULAR(p, type)             \
+  p[TX_4X8] = aom_##type##_predictor_4x8;     \
+  p[TX_8X4] = aom_##type##_predictor_8x4;     \
+  p[TX_8X16] = aom_##type##_predictor_8x16;   \
+  p[TX_16X8] = aom_##type##_predictor_16x8;   \
+  p[TX_16X32] = aom_##type##_predictor_16x32; \
+  p[TX_32X16] = aom_##type##_predictor_32x16; \
+  p[TX_32X64] = aom_##type##_predictor_32x64; \
+  p[TX_64X32] = aom_##type##_predictor_64x32;
+#else
 #define INIT_RECTANGULAR(p, type)             \
   p[TX_4X8] = aom_##type##_predictor_4x8;     \
   p[TX_8X4] = aom_##type##_predictor_8x4;     \
@@ -479,6 +490,7 @@ static void init_intra_predictors_internal(void) {
   p[TX_32X8] = aom_##type##_predictor_32x8;   \
   p[TX_16X64] = aom_##type##_predictor_16x64; \
   p[TX_64X16] = aom_##type##_predictor_64x16;
+#endif
 
 #define INIT_NO_4X4(p, type)                  \
   p[TX_8X8] = aom_##type##_predictor_8x8;     \
@@ -855,10 +867,6 @@ void av1_filter_intra_predictor_c(uint8_t *dst, ptrdiff_t stride,
 
   assert(bw <= 32 && bh <= 32);
 
-  // The initialization is just for silencing Jenkins static analysis warnings
-  for (r = 0; r < bh + 1; ++r)
-    memset(buffer[r], 0, (bw + 1) * sizeof(buffer[0][0]));
-
   for (r = 0; r < bh; ++r) buffer[r + 1][0] = left[r];
   memcpy(buffer[0], &above[-1], (bw + 1) * sizeof(uint8_t));
 
@@ -905,10 +913,6 @@ static void highbd_filter_intra_predictor(uint16_t *dst, ptrdiff_t stride,
   const int bh = tx_size_high[tx_size];
 
   assert(bw <= 32 && bh <= 32);
-
-  // The initialization is just for silencing Jenkins static analysis warnings
-  for (r = 0; r < bh + 1; ++r)
-    memset(buffer[r], 0, (bw + 1) * sizeof(buffer[0][0]));
 
   for (r = 0; r < bh; ++r) buffer[r + 1][0] = left[r];
   memcpy(buffer[0], &above[-1], (bw + 1) * sizeof(buffer[0][0]));

@@ -1,3 +1,13 @@
+2020-11-25 v2.0.1
+  This release includes two bug fixes.
+
+  - Bug fixes:
+    Issue 2723: Fix crash in chroma_check() when generating a monochrome
+    encoded stream in real-time mode.
+
+    Issue 2833: Fix crash on some input when reduced still picture header is
+    used in real-time mode and speed >=7.
+
 2020-05-07 v2.0.0 "Applejack"
   First official release of libaom.
   This release includes new real-time mode and SVC support.

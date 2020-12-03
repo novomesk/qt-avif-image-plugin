@@ -14,10 +14,16 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // Constants
 
+// AVIF_VERSION_DEVEL should always be 0 for official releases / version tags,
+// and non-zero during development of the next release. This should allow for
+// downstream projects to do greater-than preprocessor checks on AVIF_VERSION
+// to leverage in-development code without breaking their stable builds.
 #define AVIF_VERSION_MAJOR 0
 #define AVIF_VERSION_MINOR 8
-#define AVIF_VERSION_PATCH 3
-#define AVIF_VERSION (AVIF_VERSION_MAJOR * 10000) + (AVIF_VERSION_MINOR * 100) + AVIF_VERSION_PATCH
+#define AVIF_VERSION_PATCH 4
+#define AVIF_VERSION_DEVEL 0
+#define AVIF_VERSION \
+    ((AVIF_VERSION_MAJOR * 1000000) + (AVIF_VERSION_MINOR * 10000) + (AVIF_VERSION_PATCH * 100) + AVIF_VERSION_DEVEL)
 
 typedef int avifBool;
 #define AVIF_TRUE 1
@@ -95,7 +101,9 @@ typedef enum avifResult
     AVIF_RESULT_TRUNCATED_DATA,
     AVIF_RESULT_IO_NOT_SET, // the avifIO field of avifDecoder is not set
     AVIF_RESULT_IO_ERROR,
-    AVIF_RESULT_WAITING_ON_IO // similar to EAGAIN/EWOULDBLOCK, this means the avifIO doesn't have necessary data available yet
+    AVIF_RESULT_WAITING_ON_IO, // similar to EAGAIN/EWOULDBLOCK, this means the avifIO doesn't have necessary data available yet
+    AVIF_RESULT_INVALID_ARGUMENT, // an argument passed into this function is invalid
+    AVIF_RESULT_NOT_IMPLEMENTED   // a requested code path is not (yet) implemented
 } avifResult;
 
 const char * avifResultToString(avifResult result);
@@ -291,10 +299,14 @@ typedef struct avifImageRotation
 
 typedef struct avifImageMirror
 {
-    // 'imir' from ISO/IEC 23008-12:2017 6.5.12
-
-    // axis specifies a vertical (axis = 0) or horizontal (axis = 1) axis for the mirroring operation.
-    uint8_t axis; // legal values: [0, 1]
+    // 'imir' from ISO/IEC 23008-12:2017 6.5.12:
+    // "axis specifies a vertical (axis = 0) or horizontal (axis = 1) axis for the mirroring operation."
+    //
+    // Legal values: [0, 1]
+    //
+    // 0: flip along a vertical axis ("left-to-right")
+    // 1: flip along a horizontal axis ("top-to-bottom")
+    uint8_t axis;
 } avifImageMirror;
 
 // ---------------------------------------------------------------------------
@@ -450,7 +462,8 @@ int avifLimitedToFullUV(int depth, int v);
 typedef enum avifReformatMode
 {
     AVIF_REFORMAT_MODE_YUV_COEFFICIENTS = 0, // Normal YUV conversion using coefficients
-    AVIF_REFORMAT_MODE_IDENTITY              // Pack GBR directly into YUV planes (AVIF_MATRIX_COEFFICIENTS_IDENTITY)
+    AVIF_REFORMAT_MODE_IDENTITY,             // Pack GBR directly into YUV planes (AVIF_MATRIX_COEFFICIENTS_IDENTITY)
+    AVIF_REFORMAT_MODE_YCGCO                 // YUV conversion using AVIF_MATRIX_COEFFICIENTS_YCGCO
 } avifReformatMode;
 
 typedef struct avifReformatState
@@ -634,6 +647,9 @@ typedef struct avifDecoder
     // Defaults to AVIF_CODEC_CHOICE_AUTO: Preference determined by order in availableCodecs table (avif.c)
     avifCodecChoice codecChoice;
 
+    // Defaults to 1.
+    int maxThreads;
+
     // avifs can have multiple sets of images in them. This specifies which to decode.
     // Set this via avifDecoderSetSource().
     avifDecoderSource requestedSource;
@@ -704,6 +720,9 @@ avifResult avifDecoderReadFile(avifDecoder * decoder, avifImage * image, const c
 // * avifDecoderNextImage() - in a loop, using decoder->image after each successful call
 // * avifDecoderDestroy()
 //
+// NOTE: Until avifDecoderParse() returns AVIF_RESULT_OK, no data in avifDecoder should
+//       be considered valid, and no queries (such as Keyframe/Timing/MaxExtent) should be made.
+//
 // You can use avifDecoderReset() any time after a successful call to avifDecoderParse()
 // to reset the internal decoder back to before the first frame. Calling either
 // avifDecoderSetSource() or avifDecoderParse() will automatically Reset the decoder.
@@ -727,12 +746,39 @@ avifResult avifDecoderReset(avifDecoder * decoder);
 // Keyframe information
 // frameIndex - 0-based, matching avifDecoder->imageIndex, bound by avifDecoder->imageCount
 // "nearest" keyframe means the keyframe prior to this frame index (returns frameIndex if it is a keyframe)
+// These functions may be used after a successful call (AVIF_RESULT_OK) to avifDecoderParse().
 avifBool avifDecoderIsKeyframe(const avifDecoder * decoder, uint32_t frameIndex);
 uint32_t avifDecoderNearestKeyframe(const avifDecoder * decoder, uint32_t frameIndex);
 
 // Timing helper - This does not change the current image or invoke the codec (safe to call repeatedly)
-// This function may be used after a successful call to avifDecoderParse().
+// This function may be used after a successful call (AVIF_RESULT_OK) to avifDecoderParse().
 avifResult avifDecoderNthImageTiming(const avifDecoder * decoder, uint32_t frameIndex, avifImageTiming * outTiming);
+
+// ---------------------------------------------------------------------------
+// avifExtent
+
+typedef struct avifExtent
+{
+    uint64_t offset;
+    size_t size;
+} avifExtent;
+
+// Streaming data helper - Use this to calculate the maximal AVIF data extent encompassing all AV1
+// sample data needed to decode the Nth image. The offset will be the earliest offset of all
+// required AV1 extents for this frame, and the size will create a range including the last byte of
+// the last AV1 sample needed. Note that this extent may include non-sample data, as a frame's
+// sample data may be broken into multiple extents and interleaved with other data, or in
+// non-sequential order. This extent will also encompass all AV1 samples that this frame's sample
+// depends on to decode (such as samples for reference frames), from the nearest keyframe up to this
+// Nth frame.
+//
+// If avifDecoderNthImageMaxExtent() returns AVIF_RESULT_OK and the extent's size is 0 bytes, this
+// signals that libavif doesn't expect to call avifIO's Read for this frame's decode. This happens if
+// data for this frame was read as a part of avifDecoderParse() (typically in an idat box inside of
+// a meta box).
+//
+// This function may be used after a successful call (AVIF_RESULT_OK) to avifDecoderParse().
+avifResult avifDecoderNthImageMaxExtent(const avifDecoder * decoder, uint32_t frameIndex, avifExtent * outExtent);
 
 // ---------------------------------------------------------------------------
 // avifEncoder

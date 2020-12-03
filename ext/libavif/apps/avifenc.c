@@ -94,7 +94,7 @@ static void syntax(void)
     printf("    --pasp H,V                        : Add pasp property (aspect ratio). H=horizontal spacing, V=vertical spacing\n");
     printf("    --clap WN,WD,HN,HD,HON,HOD,VON,VOD: Add clap property (clean aperture). Width, Height, HOffset, VOffset (in num/denom pairs)\n");
     printf("    --irot ANGLE                      : Add irot property (rotation). [0-3], makes (90 * ANGLE) degree rotation anti-clockwise\n");
-    printf("    --imir AXIS                       : Add imir property (mirroring). 0=vertical, 1=horizontal\n");
+    printf("    --imir AXIS                       : Add imir property (mirroring). 0=vertical axis (\"left-to-right\"), 1=horizontal axis (\"top-to-bottom\")\n");
     printf("\n");
     if (avifCodecName(AVIF_CODEC_CHOICE_AOM, 0)) {
         printf("aom-specific advanced options:\n");
@@ -187,6 +187,13 @@ static avifInputFile * avifInputGetNextFile(avifInput * input)
         return NULL;
     }
     return &input->files[input->fileIndex];
+}
+static avifBool avifInputHasRemainingData(avifInput * input)
+{
+    if (input->useStdin) {
+        return !feof(stdin);
+    }
+    return (input->fileIndex < input->filesCount);
 }
 
 static avifAppFileFormat avifInputReadImage(avifInput * input, avifImage * image, uint32_t * outDepth)
@@ -623,7 +630,8 @@ int main(int argc, char * argv[])
 
         if (cicpExplicitlySet) {
             // Only warn if someone explicitly asked for identity.
-            printf("WARNING: matrixCoefficients may not be set to identity(0) when subsampling. Resetting MC to defaults.\n");
+            printf("WARNING: matrixCoefficients may not be set to identity (0) when subsampling. Resetting MC to defaults (%d).\n",
+                   image->matrixCoefficients);
         }
     }
 
@@ -776,7 +784,7 @@ int main(int argc, char * argv[])
     encoder->keyframeInterval = keyframeInterval;
 
     uint32_t addImageFlags = AVIF_ADD_IMAGE_FLAG_NONE;
-    if (input.filesCount == 1) {
+    if (!avifInputHasRemainingData(&input)) {
         addImageFlags |= AVIF_ADD_IMAGE_FLAG_SINGLE;
     }
 

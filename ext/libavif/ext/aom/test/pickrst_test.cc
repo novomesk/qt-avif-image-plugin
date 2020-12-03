@@ -534,6 +534,12 @@ TEST_P(GetProjSubspaceTest, ExtremeValues) {
 
 TEST_P(GetProjSubspaceTest, DISABLED_Speed) { RunGetProjSubspaceTest(200000); }
 
+#if HAVE_SSE4_1
+
+INSTANTIATE_TEST_SUITE_P(SSE4_1, GetProjSubspaceTest,
+                         ::testing::Values(av1_calc_proj_params_sse4_1));
+#endif  // HAVE_SSE4_1
+
 #if HAVE_AVX2
 
 INSTANTIATE_TEST_SUITE_P(AVX2, GetProjSubspaceTest,
@@ -708,6 +714,13 @@ TEST_P(GetProjSubspaceTestHBD, ExtremeValues) {
 TEST_P(GetProjSubspaceTestHBD, DISABLED_Speed) {
   RunGetProjSubspaceTestHBD(200000);
 }
+
+#if HAVE_SSE4_1
+
+INSTANTIATE_TEST_SUITE_P(
+    SSE4_1, GetProjSubspaceTestHBD,
+    ::testing::Values(av1_calc_proj_params_high_bd_sse4_1));
+#endif  // HAVE_SSE4_1
 
 #if HAVE_AVX2
 

@@ -196,8 +196,10 @@ void TemporalFilterTest::RunTest(int isRandom, int run_times,
     MACROBLOCKD *mbd = (MACROBLOCKD *)malloc(sizeof(MACROBLOCKD));
     mbd->bd = 8;
     for (int plane = AOM_PLANE_Y; plane < num_planes; plane++) {
+      int plane_height = plane ? height >> subsampling_y : height;
+      int plane_stride = plane ? stride >> subsampling_x : stride;
       ref_frame->buffers[plane] =
-          ref_frame->buffer_alloc + plane * width * height;
+          ref_frame->buffer_alloc + plane * plane_stride * plane_height;
       mbd->plane[plane].subsampling_x = plane ? subsampling_x : 0;
       mbd->plane[plane].subsampling_y = plane ? subsampling_y : 0;
     }
@@ -450,8 +452,10 @@ void HBDTemporalFilterTest::RunTest(int isRandom, int run_times, int BD,
     MACROBLOCKD *mbd = (MACROBLOCKD *)malloc(sizeof(MACROBLOCKD));
     mbd->bd = BD;
     for (int plane = AOM_PLANE_Y; plane < num_planes; plane++) {
+      int plane_height = plane ? height >> subsampling_y : height;
+      int plane_stride = plane ? stride >> subsampling_x : stride;
       ref_frame->buffers[plane] =
-          ref_frame->buffer_alloc + plane * width * height;
+          ref_frame->buffer_alloc + plane * plane_stride * plane_height;
       mbd->plane[plane].subsampling_x = plane ? subsampling_x : 0;
       mbd->plane[plane].subsampling_y = plane ? subsampling_y : 0;
     }

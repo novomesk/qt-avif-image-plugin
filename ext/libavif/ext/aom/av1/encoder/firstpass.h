@@ -169,12 +169,14 @@ enum {
 
 /*!\endcond */
 /*!
- * \brief  Data relating to the current GF/ARF group and the
+ * \brief  Data related to the current GF/ARF group and the
  * individual frames within the group
  */
 typedef struct {
   /*!\cond */
+  // The frame processing order within a GOP
   unsigned char index;
+  // Frame update type, e.g. ARF/GF/LF/Overlay
   FRAME_UPDATE_TYPE update_type[MAX_STATIC_GF_GROUP_LENGTH];
   unsigned char arf_src_offset[MAX_STATIC_GF_GROUP_LENGTH];
   // The number of frames displayed so far within the GOP at a given coding
@@ -187,10 +189,12 @@ typedef struct {
   // This is currently only populated for AOM_Q mode
   unsigned char q_val[MAX_STATIC_GF_GROUP_LENGTH];
   int bit_allocation[MAX_STATIC_GF_GROUP_LENGTH];
+  // The frame coding type - inter/intra frame
   FRAME_TYPE frame_type[MAX_STATIC_GF_GROUP_LENGTH];
+  // The reference frame buffer control - update or reset
   REFBUF_STATE refbuf_state[MAX_STATIC_GF_GROUP_LENGTH];
   int arf_index;  // the index in the gf group of ARF, if no arf, then -1
-  int size;
+  int size;       // The total length of a GOP
   /*!\endcond */
 } GF_GROUP;
 /*!\cond */

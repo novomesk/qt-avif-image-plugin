@@ -3441,6 +3441,10 @@ static int64_t select_tx_size_and_type(const AV1_COMP *cpi, MACROBLOCK *x,
   assert(bsize < BLOCK_SIZES_ALL);
   const int fast_tx_search = txfm_params->tx_size_search_method > USE_FULL_RD;
   int64_t rd_thresh = ref_best_rd;
+  if (rd_thresh == 0) {
+    av1_invalid_rd_stats(rd_stats);
+    return INT64_MAX;
+  }
   if (fast_tx_search && rd_thresh < INT64_MAX) {
     if (INT64_MAX - rd_thresh > (rd_thresh >> 3)) rd_thresh += (rd_thresh >> 3);
   }
@@ -3854,18 +3858,7 @@ int av1_txfm_search(const AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bsize,
   const int64_t skip_txfm_rdcosty =
       RDCOST(x->rdmult, mode_rate + skip_txfm_cost[1], rd_stats->sse);
   const int64_t min_rdcosty = AOMMIN(non_skip_txfm_rdcosty, skip_txfm_rdcosty);
-  if (min_rdcosty > ref_best_rd) {
-    const int64_t tokenonly_rdy =
-        AOMMIN(RDCOST(x->rdmult, rd_stats_y->rate, rd_stats_y->dist),
-               RDCOST(x->rdmult, 0, rd_stats_y->sse));
-    // Invalidate rd_stats_y to skip the rest of the motion modes search
-    if (tokenonly_rdy -
-            (tokenonly_rdy >> cpi->sf.inter_sf.prune_motion_mode_level) >
-        rd_thresh) {
-      av1_invalid_rd_stats(rd_stats_y);
-    }
-    return 0;
-  }
+  if (min_rdcosty > ref_best_rd) return 0;
 
   av1_init_rd_stats(rd_stats_uv);
   const int num_planes = av1_num_planes(cm);

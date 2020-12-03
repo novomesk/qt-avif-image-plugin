@@ -17,6 +17,7 @@
 #ifndef AOM_AV1_ENCODER_INTRA_MODE_SEARCH_UTILS_H_
 #define AOM_AV1_ENCODER_INTRA_MODE_SEARCH_UTILS_H_
 
+#include "av1/common/enums.h"
 #include "av1/common/pred_common.h"
 #include "av1/common/reconintra.h"
 
@@ -30,12 +31,12 @@ extern "C" {
 
 /*!\cond */
 #define BINS 32
-static const float intra_hog_model_bias[DIRECTIONAL_MODES] = {
+static const float av1_intra_hog_model_bias[DIRECTIONAL_MODES] = {
   0.450578f,  0.695518f,  -0.717944f, -0.639894f,
   -0.602019f, -0.453454f, 0.055857f,  -0.465480f,
 };
 
-static const float intra_hog_model_weights[BINS * DIRECTIONAL_MODES] = {
+static const float av1_intra_hog_model_weights[BINS * DIRECTIONAL_MODES] = {
   -3.076402f, -3.757063f, -3.275266f, -3.180665f, -3.452105f, -3.216593f,
   -2.871212f, -3.134296f, -1.822324f, -2.401411f, -1.541016f, -1.195322f,
   -0.434156f, 0.322868f,  2.260546f,  3.368715f,  3.989290f,  3.308487f,
@@ -79,6 +80,19 @@ static const float intra_hog_model_weights[BINS * DIRECTIONAL_MODES] = {
   -1.430687f, 0.872896f,  2.766550f,  3.610080f,  3.578041f,  3.334928f,
   2.586680f,  1.895721f,  1.122195f,  0.488519f,  -0.140689f, -0.799076f,
   -1.222860f, -1.502437f, -1.900969f, -3.206816f,
+};
+
+static const NN_CONFIG av1_intra_hog_model_nnconfig = {
+  BINS,               // num_inputs
+  DIRECTIONAL_MODES,  // num_outputs
+  0,                  // num_hidden_layers
+  { 0 },
+  {
+      av1_intra_hog_model_weights,
+  },
+  {
+      av1_intra_hog_model_bias,
+  },
 };
 
 #define FIX_PREC_BITS (16)
@@ -189,34 +203,52 @@ static AOM_INLINE void generate_hog_hbd(const uint8_t *src8, int stride,
   for (int i = 0; i < BINS; ++i) hist[i] /= total;
 }
 
-static AOM_INLINE void prune_intra_mode_with_hog(
-    const MACROBLOCK *x, BLOCK_SIZE bsize, float th,
-    uint8_t *directional_mode_skip_mask) {
-  aom_clear_system_state();
-
+static INLINE void collect_hog_data(const MACROBLOCK *x, BLOCK_SIZE bsize,
+                                    int plane, float *hog) {
+  const MACROBLOCKD *xd = &x->e_mbd;
+  const struct macroblockd_plane *const pd = &xd->plane[plane];
+  const int ss_x = pd->subsampling_x;
+  const int ss_y = pd->subsampling_y;
   const int bh = block_size_high[bsize];
   const int bw = block_size_wide[bsize];
-  const MACROBLOCKD *xd = &x->e_mbd;
   const int rows =
-      (xd->mb_to_bottom_edge >= 0) ? bh : (xd->mb_to_bottom_edge >> 3) + bh;
+      ((xd->mb_to_bottom_edge >= 0) ? bh : (xd->mb_to_bottom_edge >> 3) + bh) >>
+      ss_y;
   const int cols =
-      (xd->mb_to_right_edge >= 0) ? bw : (xd->mb_to_right_edge >> 3) + bw;
-  const int src_stride = x->plane[0].src.stride;
-  const uint8_t *src = x->plane[0].src.buf;
-  float hist[BINS] = { 0.0f };
+      ((xd->mb_to_right_edge >= 0) ? bw : (xd->mb_to_right_edge >> 3) + bw) >>
+      ss_x;
+  const int src_stride = x->plane[plane].src.stride;
+  const uint8_t *src = x->plane[plane].src.buf;
   if (is_cur_buf_hbd(xd)) {
-    generate_hog_hbd(src, src_stride, rows, cols, hist);
+    generate_hog_hbd(src, src_stride, rows, cols, hog);
   } else {
-    generate_hog(src, src_stride, rows, cols, hist);
+    generate_hog(src, src_stride, rows, cols, hog);
   }
 
-  for (int i = 0; i < DIRECTIONAL_MODES; ++i) {
-    float this_score = intra_hog_model_bias[i];
-    const float *weights = &intra_hog_model_weights[i * BINS];
-    for (int j = 0; j < BINS; ++j) {
-      this_score += weights[j] * hist[j];
+  // Scale the hog so the luma and chroma are on the same scale
+  for (int b = 0; b < BINS; ++b) {
+    hog[b] *= (1 + ss_x) * (1 + ss_y);
+  }
+}
+
+static AOM_INLINE void prune_intra_mode_with_hog(
+    const MACROBLOCK *x, BLOCK_SIZE bsize, float th,
+    uint8_t *directional_mode_skip_mask, int is_chroma) {
+  aom_clear_system_state();
+
+  const int plane = is_chroma ? AOM_PLANE_U : AOM_PLANE_Y;
+  float hist[BINS] = { 0.0f };
+  collect_hog_data(x, bsize, plane, hist);
+
+  // Make prediction for each of the mode
+  float scores[DIRECTIONAL_MODES] = { 0.0f };
+  aom_clear_system_state();
+  av1_nn_predict(hist, &av1_intra_hog_model_nnconfig, 1, scores);
+  for (UV_PREDICTION_MODE uv_mode = UV_V_PRED; uv_mode <= UV_D67_PRED;
+       uv_mode++) {
+    if (scores[uv_mode - UV_V_PRED] <= th) {
+      directional_mode_skip_mask[uv_mode] = 1;
     }
-    if (this_score < th) directional_mode_skip_mask[i + 1] = 1;
   }
 
   aom_clear_system_state();

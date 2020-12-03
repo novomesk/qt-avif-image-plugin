@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 
+#include "av1/common/blockd.h"
 #include "config/aom_config.h"
 #include "config/aom_scale_rtcd.h"
 
@@ -73,7 +74,11 @@ void av1_configure_buffer_updates(
       break;
 
     case OVERLAY_UPDATE:
-      set_refresh_frame_flags(refresh_frame_flags, true, false, false);
+      if (frame_type == KEY_FRAME && cpi->rc.frames_to_key == 0) {
+        set_refresh_frame_flags(refresh_frame_flags, true, true, true);
+      } else {
+        set_refresh_frame_flags(refresh_frame_flags, true, false, false);
+      }
       cpi->rc.is_src_frame_alt_ref = 1;
       break;
 
@@ -304,14 +309,14 @@ static void adjust_frame_rate(AV1_COMP *cpi, int64_t ts_start, int64_t ts_end) {
     return;
   }
 
-  if (ts_start == time_stamps->first_ever) {
+  if (ts_start == time_stamps->first_ts_start) {
     this_duration = ts_end - ts_start;
     step = 1;
   } else {
     int64_t last_duration =
-        time_stamps->prev_end_seen - time_stamps->prev_start_seen;
+        time_stamps->prev_ts_end - time_stamps->prev_ts_start;
 
-    this_duration = ts_end - time_stamps->prev_end_seen;
+    this_duration = ts_end - time_stamps->prev_ts_end;
 
     // do a step update if the duration changes by 10%
     if (last_duration)
@@ -326,7 +331,7 @@ static void adjust_frame_rate(AV1_COMP *cpi, int64_t ts_start, int64_t ts_end) {
       // frame rate. If we haven't seen 1 second yet, then average
       // over the whole interval seen.
       const double interval =
-          AOMMIN((double)(ts_end - time_stamps->first_ever), 10000000.0);
+          AOMMIN((double)(ts_end - time_stamps->first_ts_start), 10000000.0);
       double avg_duration = 10000000.0 / cpi->framerate;
       avg_duration *= (interval - avg_duration + this_duration);
       avg_duration /= interval;
@@ -334,8 +339,8 @@ static void adjust_frame_rate(AV1_COMP *cpi, int64_t ts_start, int64_t ts_end) {
       av1_new_framerate(cpi, 10000000.0 / avg_duration);
     }
   }
-  time_stamps->prev_start_seen = ts_start;
-  time_stamps->prev_end_seen = ts_end;
+  time_stamps->prev_ts_start = ts_start;
+  time_stamps->prev_ts_end = ts_end;
 }
 
 // Determine whether there is a forced keyframe pending in the lookahead buffer
@@ -637,15 +642,28 @@ void av1_update_ref_frame_map(AV1_COMP *cpi,
                  ref_map_index);
       break;
     case OVERLAY_UPDATE:
-      if (ref_map_index != INVALID_IDX) {
-        update_arf_stack(ref_map_index, ref_buffer_stack);
-        stack_push(ref_buffer_stack->lst_stack,
-                   &ref_buffer_stack->lst_stack_size, ref_map_index);
+      if (frame_type == KEY_FRAME) {
+        ref_map_index = stack_pop(ref_buffer_stack->arf_stack,
+                                  &ref_buffer_stack->arf_stack_size);
+        stack_reset(ref_buffer_stack->lst_stack,
+                    &ref_buffer_stack->lst_stack_size);
+        stack_reset(ref_buffer_stack->gld_stack,
+                    &ref_buffer_stack->gld_stack_size);
+        stack_reset(ref_buffer_stack->arf_stack,
+                    &ref_buffer_stack->arf_stack_size);
+        stack_push(ref_buffer_stack->gld_stack,
+                   &ref_buffer_stack->gld_stack_size, ref_map_index);
+      } else {
+        if (ref_map_index != INVALID_IDX) {
+          update_arf_stack(ref_map_index, ref_buffer_stack);
+          stack_push(ref_buffer_stack->lst_stack,
+                     &ref_buffer_stack->lst_stack_size, ref_map_index);
+        }
+        ref_map_index = stack_pop(ref_buffer_stack->arf_stack,
+                                  &ref_buffer_stack->arf_stack_size);
+        stack_push(ref_buffer_stack->gld_stack,
+                   &ref_buffer_stack->gld_stack_size, ref_map_index);
       }
-      ref_map_index = stack_pop(ref_buffer_stack->arf_stack,
-                                &ref_buffer_stack->arf_stack_size);
-      stack_push(ref_buffer_stack->gld_stack, &ref_buffer_stack->gld_stack_size,
-                 ref_map_index);
       break;
     case INTNL_OVERLAY_UPDATE:
       ref_map_index = stack_pop(ref_buffer_stack->arf_stack,
@@ -848,6 +866,9 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
                               EncodeFrameInput *const frame_input,
                               EncodeFrameParams *const frame_params,
                               EncodeFrameResults *const frame_results) {
+#if CONFIG_COLLECT_COMPONENT_TIMING
+  if (cpi->oxcf.pass == 2) start_timing(cpi, denoise_and_encode_time);
+#endif
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   AV1_COMMON *const cm = &cpi->common;
   const GF_GROUP *const gf_group = &cpi->gf_group;
@@ -890,6 +911,10 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
       arf_src_index = gf_group->arf_src_offset[gf_group->index];
     }
   }
+
+#if CONFIG_COLLECT_COMPONENT_TIMING
+  if (cpi->oxcf.pass == 2) start_timing(cpi, apply_filtering_time);
+#endif
   // Save the pointer to the original source image.
   YV12_BUFFER_CONFIG *source_buffer = frame_input->source;
   // apply filtering to frame
@@ -906,10 +931,14 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
                                         source_buffer->metadata);
     }
     // Currently INTNL_ARF_UPDATE only do show_existing.
-    if (get_frame_update_type(&cpi->gf_group) == ARF_UPDATE) {
+    if (get_frame_update_type(&cpi->gf_group) == ARF_UPDATE &&
+        !cpi->no_show_fwd_kf) {
       cpi->show_existing_alt_ref = show_existing_alt_ref;
     }
   }
+#if CONFIG_COLLECT_COMPONENT_TIMING
+  if (cpi->oxcf.pass == 2) end_timing(cpi, apply_filtering_time);
+#endif
 
   // perform tpl after filtering
   int allow_tpl = oxcf->gf_cfg.lag_in_frames > 1 &&
@@ -929,12 +958,18 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
     if (allow_tpl) {
       // Need to set the size for TPL for ARF
       // TODO(bohanli): Why is this? what part of it is necessary?
-      av1_set_frame_size(cpi, cm->width, cm->height);
+      av1_set_frame_size(cpi, cm->superres_upscaled_width,
+                         cm->superres_upscaled_height);
     }
   }
 
-  if (gf_group->index == 0) av1_init_tpl_stats(&cpi->tpl_data);
-  if (allow_tpl) av1_tpl_setup_stats(cpi, 0, frame_params, frame_input);
+  if (allow_tpl == 0) {
+    // Avoid the use of unintended TPL stats from previous GOP's results.
+    if (gf_group->index == 0) av1_init_tpl_stats(&cpi->tpl_data);
+  } else {
+    if (!cpi->tpl_data.skip_tpl_setup_stats)
+      av1_tpl_setup_stats(cpi, 0, frame_params, frame_input);
+  }
 
   if (av1_encode(cpi, dest, frame_input, frame_params, frame_results) !=
       AOM_CODEC_OK) {
@@ -943,11 +978,14 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
 
   // Set frame_input source to true source for psnr calculation.
   if (apply_filtering && is_psnr_calc_enabled(cpi)) {
-    cpi->source = av1_scale_if_required(cm, source_buffer, &cpi->scaled_source,
-                                        cm->features.interp_filter, 0, 0);
+    cpi->source =
+        av1_scale_if_required(cm, source_buffer, &cpi->scaled_source,
+                              cm->features.interp_filter, 0, false, true);
     cpi->unscaled_source = source_buffer;
   }
-
+#if CONFIG_COLLECT_COMPONENT_TIMING
+  if (cpi->oxcf.pass == 2) end_timing(cpi, denoise_and_encode_time);
+#endif
   return AOM_CODEC_OK;
 }
 #endif  // !CONFIG_REALTIME_ONLY
@@ -1092,12 +1130,19 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
         AOMMIN(gf_cfg->gf_min_pyr_height, gf_cfg->gf_max_pyr_height);
   }
 
+  cpi->tpl_data.skip_tpl_setup_stats = 0;
 #if !CONFIG_REALTIME_ONLY
   const int use_one_pass_rt_params = has_no_stats_stage(cpi) &&
                                      oxcf->mode == REALTIME &&
                                      gf_cfg->lag_in_frames == 0;
   if (!use_one_pass_rt_params && !is_stat_generation_stage(cpi)) {
+#if CONFIG_COLLECT_COMPONENT_TIMING
+    start_timing(cpi, av1_get_second_pass_params_time);
+#endif
     av1_get_second_pass_params(cpi, &frame_params, &frame_input, *frame_flags);
+#if CONFIG_COLLECT_COMPONENT_TIMING
+    end_timing(cpi, av1_get_second_pass_params_time);
+#endif
   }
 #endif
 
@@ -1151,9 +1196,9 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
 
   *time_stamp = source->ts_start;
   *time_end = source->ts_end;
-  if (source->ts_start < cpi->time_stamps.first_ever) {
-    cpi->time_stamps.first_ever = source->ts_start;
-    cpi->time_stamps.prev_end_seen = source->ts_start;
+  if (source->ts_start < cpi->time_stamps.first_ts_start) {
+    cpi->time_stamps.first_ts_start = source->ts_start;
+    cpi->time_stamps.prev_ts_end = source->ts_start;
   }
 
   av1_apply_encoding_flags(cpi, source->flags);

@@ -186,19 +186,22 @@ static INLINE void variance128_avx2(const uint8_t *src, const int src_stride,
     return *sse - (uint32_t)(((int64_t)sum * sum) >> bits);                   \
   }
 
-AOM_VAR_NO_LOOP_AVX2(16, 4, 6, 512);
 AOM_VAR_NO_LOOP_AVX2(16, 8, 7, 512);
 AOM_VAR_NO_LOOP_AVX2(16, 16, 8, 512);
 AOM_VAR_NO_LOOP_AVX2(16, 32, 9, 512);
-AOM_VAR_NO_LOOP_AVX2(16, 64, 10, 1024);
 
-AOM_VAR_NO_LOOP_AVX2(32, 8, 8, 512);
 AOM_VAR_NO_LOOP_AVX2(32, 16, 9, 512);
 AOM_VAR_NO_LOOP_AVX2(32, 32, 10, 1024);
 AOM_VAR_NO_LOOP_AVX2(32, 64, 11, 2048);
 
-AOM_VAR_NO_LOOP_AVX2(64, 16, 10, 1024);
 AOM_VAR_NO_LOOP_AVX2(64, 32, 11, 2048);
+
+#if !CONFIG_REALTIME_ONLY
+AOM_VAR_NO_LOOP_AVX2(64, 16, 10, 1024);
+AOM_VAR_NO_LOOP_AVX2(32, 8, 8, 512);
+AOM_VAR_NO_LOOP_AVX2(16, 64, 10, 1024);
+AOM_VAR_NO_LOOP_AVX2(16, 4, 6, 512);
+#endif
 
 #define AOM_VAR_LOOP_AVX2(bw, bh, bits, uh)                                   \
   unsigned int aom_variance##bw##x##bh##_avx2(                                \
@@ -281,11 +284,13 @@ AOM_SUB_PIXEL_VAR_AVX2(64, 32, 32, 6, 5);
 AOM_SUB_PIXEL_VAR_AVX2(32, 64, 32, 5, 6);
 AOM_SUB_PIXEL_VAR_AVX2(32, 32, 32, 5, 5);
 AOM_SUB_PIXEL_VAR_AVX2(32, 16, 32, 5, 4);
-AOM_SUB_PIXEL_VAR_AVX2(16, 64, 16, 4, 6);
 AOM_SUB_PIXEL_VAR_AVX2(16, 32, 16, 4, 5);
 AOM_SUB_PIXEL_VAR_AVX2(16, 16, 16, 4, 4);
 AOM_SUB_PIXEL_VAR_AVX2(16, 8, 16, 4, 3);
+#if !CONFIG_REALTIME_ONLY
+AOM_SUB_PIXEL_VAR_AVX2(16, 64, 16, 4, 6);
 AOM_SUB_PIXEL_VAR_AVX2(16, 4, 16, 4, 2);
+#endif
 
 #define AOM_SUB_PIXEL_AVG_VAR_AVX2(w, h, wf, wlog2, hlog2)                \
   unsigned int aom_sub_pixel_avg_variance##w##x##h##_avx2(                \
@@ -395,25 +400,20 @@ void aom_comp_mask_pred_avx2(uint8_t *comp_pred, const uint8_t *pred, int width,
       comp_pred += (16 << 2);
       i += 4;
     } while (i < height);
-  } else {  // for width == 32
+  } else {
     do {
-      const __m256i sA0 = _mm256_lddqu_si256((const __m256i *)(src0));
-      const __m256i sA1 = _mm256_lddqu_si256((const __m256i *)(src1));
-      const __m256i aA = _mm256_lddqu_si256((const __m256i *)(mask));
+      for (int x = 0; x < width; x += 32) {
+        const __m256i sA0 = _mm256_lddqu_si256((const __m256i *)(src0 + x));
+        const __m256i sA1 = _mm256_lddqu_si256((const __m256i *)(src1 + x));
+        const __m256i aA = _mm256_lddqu_si256((const __m256i *)(mask + x));
 
-      const __m256i sB0 = _mm256_lddqu_si256((const __m256i *)(src0 + stride0));
-      const __m256i sB1 = _mm256_lddqu_si256((const __m256i *)(src1 + stride1));
-      const __m256i aB =
-          _mm256_lddqu_si256((const __m256i *)(mask + mask_stride));
-
-      comp_mask_pred_line_avx2(sA0, sA1, aA, comp_pred);
-      comp_mask_pred_line_avx2(sB0, sB1, aB, comp_pred + 32);
-      comp_pred += (32 << 1);
-
-      src0 += (stride0 << 1);
-      src1 += (stride1 << 1);
-      mask += (mask_stride << 1);
-      i += 2;
+        comp_mask_pred_line_avx2(sA0, sA1, aA, comp_pred);
+        comp_pred += 32;
+      }
+      src0 += stride0;
+      src1 += stride1;
+      mask += mask_stride;
+      i++;
     } while (i < height);
   }
 }
@@ -499,28 +499,30 @@ void aom_highbd_comp_mask_pred_avx2(uint8_t *comp_pred8, const uint8_t *pred8,
       comp_pred += width;
       i += 1;
     } while (i < height);
-  } else if (width == 32) {
+  } else {
     do {
-      const __m256i s0 = _mm256_loadu_si256((const __m256i *)src0);
-      const __m256i s2 = _mm256_loadu_si256((const __m256i *)(src0 + 16));
-      const __m256i s1 = _mm256_loadu_si256((const __m256i *)src1);
-      const __m256i s3 = _mm256_loadu_si256((const __m256i *)(src1 + 16));
+      for (int x = 0; x < width; x += 32) {
+        const __m256i s0 = _mm256_loadu_si256((const __m256i *)(src0 + x));
+        const __m256i s2 = _mm256_loadu_si256((const __m256i *)(src0 + x + 16));
+        const __m256i s1 = _mm256_loadu_si256((const __m256i *)(src1 + x));
+        const __m256i s3 = _mm256_loadu_si256((const __m256i *)(src1 + x + 16));
 
-      const __m256i m01_16 =
-          _mm256_cvtepu8_epi16(_mm_loadu_si128((const __m128i *)mask));
-      const __m256i m23_16 =
-          _mm256_cvtepu8_epi16(_mm_loadu_si128((const __m128i *)(mask + 16)));
+        const __m256i m01_16 =
+            _mm256_cvtepu8_epi16(_mm_loadu_si128((const __m128i *)(mask + x)));
+        const __m256i m23_16 = _mm256_cvtepu8_epi16(
+            _mm_loadu_si128((const __m128i *)(mask + x + 16)));
 
-      const __m256i comp = highbd_comp_mask_pred_line_avx2(s0, s1, m01_16);
-      const __m256i comp1 = highbd_comp_mask_pred_line_avx2(s2, s3, m23_16);
+        const __m256i comp = highbd_comp_mask_pred_line_avx2(s0, s1, m01_16);
+        const __m256i comp1 = highbd_comp_mask_pred_line_avx2(s2, s3, m23_16);
 
-      _mm256_storeu_si256((__m256i *)comp_pred, comp);
-      _mm256_storeu_si256((__m256i *)(comp_pred + 16), comp1);
+        _mm256_storeu_si256((__m256i *)comp_pred, comp);
+        _mm256_storeu_si256((__m256i *)(comp_pred + 16), comp1);
 
+        comp_pred += 32;
+      }
       src0 += stride0;
       src1 += stride1;
       mask += mask_stride;
-      comp_pred += width;
       i += 1;
     } while (i < height);
   }

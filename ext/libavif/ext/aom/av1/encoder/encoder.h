@@ -40,10 +40,12 @@
 #include "av1/encoder/level.h"
 #include "av1/encoder/lookahead.h"
 #include "av1/encoder/mcomp.h"
+#include "av1/encoder/pickcdef.h"
 #include "av1/encoder/ratectrl.h"
 #include "av1/encoder/rd.h"
 #include "av1/encoder/speed_features.h"
 #include "av1/encoder/svc_layercontext.h"
+#include "av1/encoder/temporal_filter.h"
 #include "av1/encoder/tokenize.h"
 #include "av1/encoder/tpl_model.h"
 #include "av1/encoder/av1_noise_estimate.h"
@@ -78,15 +80,6 @@ typedef struct aom_rational64 {
   int64_t num;       // fraction numerator
   int den;           // fraction denominator
 } aom_rational64_t;  // alias for struct aom_rational
-
-typedef struct {
-#if CONFIG_SUPERRES_IN_RECODE
-  struct loopfilter lf;
-  CdefInfo cdef_info;
-  YV12_BUFFER_CONFIG copy_buffer;
-  RATE_CONTROL rc;
-#endif  // CONFIG_SUPERRES_IN_RECODE
-} CODING_CONTEXT;
 
 enum {
   NORMAL = 0,
@@ -139,13 +132,6 @@ enum {
   RESIZE_DYNAMIC = 3,  // Frames coded at lower scale based on rate control.
   RESIZE_MODES
 } UENUM1BYTE(RESIZE_MODE);
-
-typedef enum {
-  kInvalid = 0,
-  kLowSad = 1,
-  kHighSad = 2,
-  kLowVarHighSumdiff = 3,
-} CONTENT_STATE_SB;
 
 enum {
   SS_CFG_SRC = 0,
@@ -1288,6 +1274,7 @@ typedef struct ThreadData {
   VP64x64 *vt64x64;
   int32_t num_64x64_blocks;
   PICK_MODE_CONTEXT *firstpass_ctx;
+  TemporalFilterData tf_data;
 } ThreadData;
 
 struct EncWorkerData;
@@ -1351,7 +1338,7 @@ typedef struct {
 /*!
  * \brief Encoder parameters related to multi-threading.
  */
-typedef struct {
+typedef struct MultiThreadInfo {
   /*!
    * Number of workers created for multi-threading.
    */
@@ -1408,6 +1395,16 @@ typedef struct {
    * Global Motion multi-threading object.
    */
   AV1GlobalMotionSync gm_sync;
+
+  /*!
+   * Temporal Filter multi-threading object.
+   */
+  AV1TemporalFilterSync tf_sync;
+
+  /*!
+   * CDEF search multi-threading object.
+   */
+  AV1CdefSync cdef_sync;
 } MultiThreadInfo;
 
 /*!\cond */
@@ -1501,6 +1498,11 @@ typedef struct PartitionStats {
 #include "aom_ports/aom_timer.h"
 // Adjust the following to add new components.
 enum {
+  av1_encode_strategy_time,
+  av1_get_second_pass_params_time,
+  denoise_and_encode_time,
+  apply_filtering_time,
+  av1_tpl_setup_stats_time,
   encode_frame_to_data_rate_time,
   encode_with_recode_loop_time,
   loop_filter_time,
@@ -1510,13 +1512,25 @@ enum {
   av1_encode_frame_time,
   av1_compute_global_motion_time,
   av1_setup_motion_field_time,
-  encode_sb_time,
+  encode_sb_row_time,
+
   rd_pick_partition_time,
+  av1_prune_partitions_time,
+  none_partition_search_time,
+  split_partition_search_time,
+  rectangular_partition_search_time,
+  ab_partitions_search_time,
+  rd_pick_4partition_time,
+  encode_sb_time,
+
   rd_pick_sb_modes_time,
   av1_rd_pick_intra_mode_sb_time,
   av1_rd_pick_inter_mode_sb_time,
+  handle_inter_mode_time,
+  evaluate_motion_mode_for_winner_candidates_time,
   handle_intra_mode_time,
   do_tx_search_time,
+  av1_search_palette_mode_time,
   handle_newmv_time,
   compound_type_rd_time,
   interpolation_filter_search_time,
@@ -1526,6 +1540,12 @@ enum {
 
 static INLINE char const *get_component_name(int index) {
   switch (index) {
+    case av1_encode_strategy_time: return "av1_encode_strategy_time";
+    case av1_get_second_pass_params_time:
+      return "av1_get_second_pass_params_time";
+    case denoise_and_encode_time: return "denoise_and_encode_time";
+    case apply_filtering_time: return "apply_filtering_time";
+    case av1_tpl_setup_stats_time: return "av1_tpl_setup_stats_time";
     case encode_frame_to_data_rate_time:
       return "encode_frame_to_data_rate_time";
     case encode_with_recode_loop_time: return "encode_with_recode_loop_time";
@@ -1537,15 +1557,29 @@ static INLINE char const *get_component_name(int index) {
     case av1_compute_global_motion_time:
       return "av1_compute_global_motion_time";
     case av1_setup_motion_field_time: return "av1_setup_motion_field_time";
-    case encode_sb_time: return "encode_sb_time";
+    case encode_sb_row_time: return "encode_sb_row_time";
+
     case rd_pick_partition_time: return "rd_pick_partition_time";
+    case av1_prune_partitions_time: return "av1_prune_partitions_time";
+    case none_partition_search_time: return "none_partition_search_time";
+    case split_partition_search_time: return "split_partition_search_time";
+    case rectangular_partition_search_time:
+      return "rectangular_partition_search_time";
+    case ab_partitions_search_time: return "ab_partitions_search_time";
+    case rd_pick_4partition_time: return "rd_pick_4partition_time";
+    case encode_sb_time: return "encode_sb_time";
+
     case rd_pick_sb_modes_time: return "rd_pick_sb_modes_time";
     case av1_rd_pick_intra_mode_sb_time:
       return "av1_rd_pick_intra_mode_sb_time";
     case av1_rd_pick_inter_mode_sb_time:
       return "av1_rd_pick_inter_mode_sb_time";
+    case handle_inter_mode_time: return "handle_inter_mode_time";
+    case evaluate_motion_mode_for_winner_candidates_time:
+      return "evaluate_motion_mode_for_winner_candidates_time";
     case handle_intra_mode_time: return "handle_intra_mode_time";
     case do_tx_search_time: return "do_tx_search_time";
+    case av1_search_palette_mode_time: return "av1_search_palette_mode_time";
     case handle_newmv_time: return "handle_newmv_time";
     case compound_type_rd_time: return "compound_type_rd_time";
     case interpolation_filter_search_time:
@@ -1681,7 +1715,6 @@ typedef struct {
    * In encoder: av1_find_best_sub_pixel_tree
    *             av1_find_best_sub_pixel_tree_pruned
    *             av1_find_best_sub_pixel_tree_pruned_more
-   *             av1_find_best_sub_pixel_tree_pruned_evenmore
    * In MV unit test: av1_return_max_sub_pixel_mv
    *                  av1_return_min_sub_pixel_mv
    */
@@ -1911,6 +1944,14 @@ typedef struct {
 } MV_STATS;
 
 typedef struct {
+  struct loopfilter lf;
+  CdefInfo cdef_info;
+  YV12_BUFFER_CONFIG copy_buffer;
+  RATE_CONTROL rc;
+  MV_STATS mv_stats;
+} CODING_CONTEXT;
+
+typedef struct {
   int frame_width;
   int frame_height;
   int mi_rows;
@@ -1950,15 +1991,15 @@ typedef struct {
   /*!
    * Start time stamp of the previous frame
    */
-  int64_t prev_start_seen;
+  int64_t prev_ts_start;
   /*!
    * End time stamp of the previous frame
    */
-  int64_t prev_end_seen;
+  int64_t prev_ts_end;
   /*!
    * Start time stamp of the first frame
    */
-  int64_t first_ever;
+  int64_t first_ts_start;
 } TimeStamps;
 
 /*!
@@ -2088,6 +2129,11 @@ typedef struct AV1_COMP {
    * Parameters related to tpl.
    */
   TplParams tpl_data;
+
+  /*!
+   * Temporal filter context.
+   */
+  TemporalFilterCtx tf_ctx;
 
   /*!
    * For a still frame, this flag is set to 1 to skip partition search.

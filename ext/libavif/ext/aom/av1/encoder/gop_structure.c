@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 
+#include "av1/common/blockd.h"
 #include "config/aom_config.h"
 #include "config/aom_scale_rtcd.h"
 
@@ -166,7 +167,7 @@ static int construct_multi_layer_gf_structure(
     gf_group->cur_frame_idx[frame_index] = cur_frame_index;
     gf_group->layer_depth[frame_index] = MAX_ARF_LAYERS;
     gf_group->arf_boost[frame_index] = NORMAL_BOOST;
-    gf_group->frame_type[frame_index] = INTER_FRAME;
+    gf_group->frame_type[frame_index] = is_fwd_kf ? KEY_FRAME : INTER_FRAME;
     gf_group->refbuf_state[frame_index] =
         is_fwd_kf ? REFBUF_RESET : REFBUF_UPDATE;
     ++frame_index;

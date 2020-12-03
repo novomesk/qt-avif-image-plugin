@@ -368,7 +368,6 @@ typedef int(fractional_mv_step_fp)(MACROBLOCKD *xd, const AV1_COMMON *const cm,
 extern fractional_mv_step_fp av1_find_best_sub_pixel_tree;
 extern fractional_mv_step_fp av1_find_best_sub_pixel_tree_pruned;
 extern fractional_mv_step_fp av1_find_best_sub_pixel_tree_pruned_more;
-extern fractional_mv_step_fp av1_find_best_sub_pixel_tree_pruned_evenmore;
 extern fractional_mv_step_fp av1_return_max_sub_pixel_mv;
 extern fractional_mv_step_fp av1_return_min_sub_pixel_mv;
 extern fractional_mv_step_fp av1_find_best_obmc_sub_pixel_tree_up;

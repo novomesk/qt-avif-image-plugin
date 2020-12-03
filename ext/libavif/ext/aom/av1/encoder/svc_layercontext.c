@@ -38,7 +38,6 @@ void av1_init_layer_context(AV1_COMP *const cpi) {
       RATE_CONTROL *const lrc = &lc->rc;
       lrc->ni_av_qi = oxcf->rc_cfg.worst_allowed_q;
       lrc->total_actual_bits = 0;
-      lrc->total_target_vs_actual = 0;
       lrc->ni_tot_qi = 0;
       lrc->tot_q = 0.0;
       lrc->avg_q = 0.0;

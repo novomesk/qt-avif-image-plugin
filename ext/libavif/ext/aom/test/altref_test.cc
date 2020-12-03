@@ -184,7 +184,8 @@ class GoldenFrameIntervalTestLarge
     }
     if (frame_num_ > 0) {
       encoder->Control(AV1E_GET_BASELINE_GF_INTERVAL, &baseline_gf_interval_);
-      ASSERT_LE(baseline_gf_interval_, (int)gf_interval_param_.max_gf_interval);
+      ASSERT_LE(baseline_gf_interval_,
+                (int)gf_interval_param_.max_gf_interval + 1);
       if ((frame_num_ + (int)gf_interval_param_.min_gf_interval) <= limit_) {
         ASSERT_GE(baseline_gf_interval_,
                   (int)gf_interval_param_.min_gf_interval);

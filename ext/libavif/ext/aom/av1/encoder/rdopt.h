@@ -90,11 +90,10 @@ void av1_rd_pick_intra_mode_sb(const struct AV1_COMP *cpi, struct macroblock *x,
  * in this function. The rd_cost struct is also updated with the RD stats
  * corresponding to the best mode found.
  */
-void av1_rd_pick_inter_mode_sb(struct AV1_COMP *cpi,
-                               struct TileDataEnc *tile_data,
-                               struct macroblock *x, struct RD_STATS *rd_cost,
-                               BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx,
-                               int64_t best_rd_so_far);
+void av1_rd_pick_inter_mode(struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
+                            struct macroblock *x, struct RD_STATS *rd_cost,
+                            BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx,
+                            int64_t best_rd_so_far);
 
 /*!\brief AV1 intra mode selection based on Non-RD optimized model.
  *
@@ -205,16 +204,11 @@ sobel_xy av1_sobel(const uint8_t *input, int stride, int i, int j,
 void av1_inter_mode_data_init(struct TileDataEnc *tile_data);
 void av1_inter_mode_data_fit(TileDataEnc *tile_data, int rdmult);
 
-#if !CONFIG_REALTIME_ONLY
 static INLINE int coded_to_superres_mi(int mi_col, int denom) {
   return (mi_col * denom + SCALE_NUMERATOR / 2) / SCALE_NUMERATOR;
 }
-#endif
 
-static INLINE int av1_encoder_get_relative_dist(const OrderHintInfo *oh, int a,
-                                                int b) {
-  if (!oh->enable_order_hint) return 0;
-
+static INLINE int av1_encoder_get_relative_dist(int a, int b) {
   assert(a >= 0 && b >= 0);
   return (a - b);
 }
@@ -247,7 +241,6 @@ static INLINE void av1_copy_usable_ref_mv_stack_and_weight(
 // This function prunes the mode if either of the reference frame falls in the
 // pruning list
 static INLINE int prune_ref(const MV_REFERENCE_FRAME *const ref_frame,
-                            const OrderHintInfo *const order_hint_info,
                             const unsigned int *const ref_display_order_hint,
                             const unsigned int frame_display_order_hint,
                             const int *ref_frame_list) {
@@ -257,7 +250,6 @@ static INLINE int prune_ref(const MV_REFERENCE_FRAME *const ref_frame,
     if (ref_frame[0] == ref_frame_list[i] ||
         ref_frame[1] == ref_frame_list[i]) {
       if (av1_encoder_get_relative_dist(
-              order_hint_info,
               ref_display_order_hint[ref_frame_list[i] - LAST_FRAME],
               frame_display_order_hint) < 0)
         return 1;
@@ -273,8 +265,6 @@ static INLINE int prune_ref_by_selective_ref_frame(
   const SPEED_FEATURES *const sf = &cpi->sf;
   if (!sf->inter_sf.selective_ref_frame) return 0;
 
-  const AV1_COMMON *const cm = &cpi->common;
-  const OrderHintInfo *const order_hint_info = &cm->seq_params.order_hint_info;
   const int comp_pred = ref_frame[1] > INTRA_FRAME;
 
   if (sf->inter_sf.selective_ref_frame >= 2 ||
@@ -286,7 +276,7 @@ static INLINE int prune_ref_by_selective_ref_frame(
       if (x->tpl_keep_ref_frame[LAST2_FRAME]) ref_frame_list[1] = NONE_FRAME;
     }
 
-    if (prune_ref(ref_frame, order_hint_info, ref_display_order_hint,
+    if (prune_ref(ref_frame, ref_display_order_hint,
                   ref_display_order_hint[GOLDEN_FRAME - LAST_FRAME],
                   ref_frame_list))
       return 1;
@@ -300,7 +290,7 @@ static INLINE int prune_ref_by_selective_ref_frame(
       if (x->tpl_keep_ref_frame[BWDREF_FRAME]) ref_frame_list[1] = NONE_FRAME;
     }
 
-    if (prune_ref(ref_frame, order_hint_info, ref_display_order_hint,
+    if (prune_ref(ref_frame, ref_display_order_hint,
                   ref_display_order_hint[LAST_FRAME - LAST_FRAME],
                   ref_frame_list))
       return 1;

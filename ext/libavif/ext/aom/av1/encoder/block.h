@@ -15,6 +15,7 @@
 #ifndef AOM_AV1_ENCODER_BLOCK_H_
 #define AOM_AV1_ENCODER_BLOCK_H_
 
+#include "av1/common/blockd.h"
 #include "av1/common/entropymv.h"
 #include "av1/common/entropy.h"
 #include "av1/common/enums.h"
@@ -785,6 +786,32 @@ typedef struct {
 /*!\endcond */
 struct inter_modes_info;
 
+/*! \brief Holds the motion samples for warp motion model estimation
+ */
+typedef struct {
+  //! Number of samples.
+  int num;
+  //! Sample locations in current frame.
+  int pts[16];
+  //! Sample location in the reference frame.
+  int pts_inref[16];
+} WARP_SAMPLE_INFO;
+
+/*!\cond */
+typedef enum {
+  kInvalid = 0,
+  kLowSad = 1,
+  kMedSad = 2,
+  kHighSad = 3
+} SOURCE_SAD;
+
+typedef struct {
+  SOURCE_SAD source_sad;
+  int lighting_change;
+  int low_sumdiff;
+} CONTENT_STATE_SB;
+/*!\endcond */
+
 /*! \brief Encoder's parameters related to the current coding block.
  *
  * This struct contains most of the information the encoder needs to encode the
@@ -940,7 +967,7 @@ typedef struct macroblock {
    *  Characteristics like whether the block has high sad, low sad, etc. This is
    *  only used by av1 realtime mode.
    */
-  uint8_t content_state_sb;
+  CONTENT_STATE_SB content_state_sb;
   /**@}*/
 
   /*****************************************************************************
@@ -962,6 +989,12 @@ typedef struct macroblock {
    * frame at block level.
    */
   uint8_t tpl_keep_ref_frame[REF_FRAMES];
+
+  /*! \brief Warp motion samples buffer.
+   *
+   * Store the motion samples used for warp motion.
+   */
+  WARP_SAMPLE_INFO warp_sample_info[REF_FRAMES];
 
   /*! \brief Reference frames picked by the square subblocks in a superblock.
    *
@@ -1083,8 +1116,8 @@ typedef struct macroblock {
 
   /*! \brief Whether to reuse the mode stored in intermode_cache. */
   int use_intermode_cache;
-  /*! \brief The mode to reuse during \ref av1_rd_pick_inter_mode_sb. */
-  PREDICTION_MODE intermode_cache;
+  /*! \brief The mode to reuse during \ref av1_rd_pick_inter_mode. */
+  const MB_MODE_INFO *intermode_cache;
   /**@}*/
 
   /*****************************************************************************

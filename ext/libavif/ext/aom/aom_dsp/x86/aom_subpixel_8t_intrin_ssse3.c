@@ -826,7 +826,7 @@ static void filter_horiz_w4_ssse3(const uint8_t *const src,
                                   const ptrdiff_t src_stride,
                                   uint8_t *const dst,
                                   const int16_t *const filter) {
-  __m128i s[4], ss[2];
+  __m128i s[4], ss[4];
   __m128i temp;
 
   load_8bit_8x4(src, src_stride, s);

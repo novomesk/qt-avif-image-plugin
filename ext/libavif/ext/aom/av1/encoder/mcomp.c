@@ -660,9 +660,9 @@ static INLINE int get_mvpred_compound_var_cost(
   int bestsme;
 
   if (mask) {
-    bestsme = vfp->msvf(src_buf, src_stride, 0, 0,
-                        get_buf_from_fullmv(ref, this_mv), ref_stride,
-                        second_pred, mask, mask_stride, invert_mask, &unused);
+    bestsme = vfp->msvf(get_buf_from_fullmv(ref, this_mv), ref_stride, 0, 0,
+                        src_buf, src_stride, second_pred, mask, mask_stride,
+                        invert_mask, &unused);
   } else if (second_pred) {
     bestsme = vfp->svaf(get_buf_from_fullmv(ref, this_mv), ref_stride, 0, 0,
                         src_buf, src_stride, &unused, second_pred);
@@ -1645,10 +1645,6 @@ int av1_full_pixel_search(const FULLPEL_MV start_mv,
   if (second_best_mv) {
     MARK_MV_INVALID(second_best_mv);
   }
-
-  assert(ms_params->ms_buffers.second_pred == NULL &&
-         ms_params->ms_buffers.mask == NULL &&
-         "av1_full_pixel_search does not support compound pred");
 
   if (cost_list) {
     cost_list[0] = INT_MAX;
@@ -2793,90 +2789,6 @@ static AOM_INLINE int setup_center_error_facade(
   }
 }
 
-int av1_find_best_sub_pixel_tree_pruned_evenmore(
-    MACROBLOCKD *xd, const AV1_COMMON *const cm,
-    const SUBPEL_MOTION_SEARCH_PARAMS *ms_params, MV start_mv, MV *bestmv,
-    int *distortion, unsigned int *sse1, int_mv *last_mv_search_list) {
-  (void)cm;
-  const int allow_hp = ms_params->allow_hp;
-  const int forced_stop = ms_params->forced_stop;
-  const int iters_per_step = ms_params->iters_per_step;
-  const int *cost_list = ms_params->cost_list;
-  const SubpelMvLimits *mv_limits = &ms_params->mv_limits;
-  const MV_COST_PARAMS *mv_cost_params = &ms_params->mv_cost_params;
-  const SUBPEL_SEARCH_VAR_PARAMS *var_params = &ms_params->var_params;
-
-  // The iteration we are current searching for. Iter 0 corresponds to fullpel
-  // mv, iter 1 to half pel, and so on
-  int iter = 0;
-  int hstep = INIT_SUBPEL_STEP_SIZE;  // Step size, initialized to 4/8=1/2 pel
-  unsigned int besterr = INT_MAX;
-  *bestmv = start_mv;
-
-  const struct scale_factors *const sf = is_intrabc_block(xd->mi[0])
-                                             ? &cm->sf_identity
-                                             : xd->block_ref_scale_factors[0];
-  const int is_scaled = av1_is_scaled(sf);
-  besterr = setup_center_error_facade(
-      xd, cm, bestmv, var_params, mv_cost_params, sse1, distortion, is_scaled);
-
-  // If forced_stop is FULL_PEL, return.
-  if (forced_stop == FULL_PEL) return besterr;
-
-  if (check_repeated_mv_and_update(last_mv_search_list, *bestmv, iter)) {
-    return INT_MAX;
-  }
-  iter++;
-
-  if (cost_list && cost_list[0] != INT_MAX && cost_list[1] != INT_MAX &&
-      cost_list[2] != INT_MAX && cost_list[3] != INT_MAX &&
-      cost_list[4] != INT_MAX && is_cost_list_wellbehaved(cost_list)) {
-    int ir, ic;
-    int dummy = 0;
-    get_cost_surf_min(cost_list, &ir, &ic, 2);
-    if (ir != 0 || ic != 0) {
-      const MV this_mv = { start_mv.row + 2 * ir, start_mv.col + 2 * ic };
-      check_better_fast(xd, cm, &this_mv, bestmv, mv_limits, var_params,
-                        mv_cost_params, &besterr, sse1, distortion, &dummy,
-                        is_scaled);
-    }
-  } else {
-    two_level_checks_fast(xd, cm, start_mv, bestmv, hstep, mv_limits,
-                          var_params, mv_cost_params, &besterr, sse1,
-                          distortion, iters_per_step, is_scaled);
-
-    // Each subsequent iteration checks at least one point in common with
-    // the last iteration could be 2 ( if diag selected) 1/4 pel
-    if (forced_stop < HALF_PEL) {
-      if (check_repeated_mv_and_update(last_mv_search_list, *bestmv, iter)) {
-        return INT_MAX;
-      }
-      iter++;
-
-      hstep >>= 1;
-      start_mv = *bestmv;
-      two_level_checks_fast(xd, cm, start_mv, bestmv, hstep, mv_limits,
-                            var_params, mv_cost_params, &besterr, sse1,
-                            distortion, iters_per_step, is_scaled);
-    }
-  }
-
-  if (allow_hp && forced_stop == EIGHTH_PEL) {
-    if (check_repeated_mv_and_update(last_mv_search_list, *bestmv, iter)) {
-      return INT_MAX;
-    }
-    iter++;
-
-    hstep >>= 1;
-    start_mv = *bestmv;
-    two_level_checks_fast(xd, cm, start_mv, bestmv, hstep, mv_limits,
-                          var_params, mv_cost_params, &besterr, sse1,
-                          distortion, iters_per_step, is_scaled);
-  }
-
-  return besterr;
-}
-
 int av1_find_best_sub_pixel_tree_pruned_more(
     MACROBLOCKD *xd, const AV1_COMMON *const cm,
     const SUBPEL_MOTION_SEARCH_PARAMS *ms_params, MV start_mv, MV *bestmv,
@@ -3224,6 +3136,7 @@ int av1_return_min_sub_pixel_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   return besterr;
 }
 
+#if !CONFIG_REALTIME_ONLY
 // Computes the cost of the current predictor by going through the whole
 // av1_enc_build_inter_predictor pipeline. This is mainly used by warped mv
 // during motion_mode_rd. We are going through the whole
@@ -3323,6 +3236,7 @@ unsigned int av1_refine_warped_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   mbmi->num_proj_ref = best_num_proj_ref;
   return bestmse;
 }
+#endif  // !CONFIG_REALTIME_ONLY
 // =============================================================================
 //  Subpixel Motion Search: OBMC
 // =============================================================================
@@ -3704,9 +3618,9 @@ static INLINE int get_mvpred_mask_var(
   const MV mv = get_mv_from_fullmv(&best_mv);
   unsigned int unused;
 
-  return vfp->msvf(src->buf, src->stride, 0, 0,
-                   get_buf_from_fullmv(pre, &best_mv), pre->stride, second_pred,
-                   mask, mask_stride, invert_mask, &unused) +
+  return vfp->msvf(get_buf_from_fullmv(pre, &best_mv), pre->stride, 0, 0,
+                   src->buf, src->stride, second_pred, mask, mask_stride,
+                   invert_mask, &unused) +
          mv_err_cost_(&mv, mv_cost_params);
 }
 

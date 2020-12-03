@@ -302,7 +302,6 @@ static AOM_INLINE void update_valid_ref_frames_for_gm(
     FrameDistPair reference_frames[MAX_DIRECTIONS][REF_FRAMES - 1],
     int *num_ref_frames) {
   AV1_COMMON *const cm = &cpi->common;
-  const OrderHintInfo *const order_hint_info = &cm->seq_params.order_hint_info;
   int *num_past_ref_frames = &num_ref_frames[0];
   int *num_future_ref_frames = &num_ref_frames[1];
   const GF_GROUP *gf_group = &cpi->gf_group;
@@ -335,9 +334,8 @@ static AOM_INLINE void update_valid_ref_frames_for_gm(
         do_gm_search_logic(&cpi->sf, frame) && !prune_ref_frames &&
         !(cpi->sf.gm_sf.selective_ref_gm && skip_gm_frame(cm, frame))) {
       assert(ref_buf[frame] != NULL);
-      int relative_frame_dist = av1_encoder_get_relative_dist(
-          order_hint_info, buf->display_order_hint,
-          cm->cur_frame->display_order_hint);
+      const int relative_frame_dist = av1_encoder_get_relative_dist(
+          buf->display_order_hint, cm->cur_frame->display_order_hint);
       // Populate past and future ref frames.
       // reference_frames[0][] indicates past direction and
       // reference_frames[1][] indicates future direction.

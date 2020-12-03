@@ -363,6 +363,10 @@ int64_t aom_get_sse_plane(const YV12_BUFFER_CONFIG *a,
 void aom_calc_highbd_psnr(const YV12_BUFFER_CONFIG *a,
                           const YV12_BUFFER_CONFIG *b, PSNR_STATS *psnr,
                           uint32_t bit_depth, uint32_t in_bit_depth) {
+  assert(a->y_crop_width == b->y_crop_width);
+  assert(a->y_crop_height == b->y_crop_height);
+  assert(a->uv_crop_width == b->uv_crop_width);
+  assert(a->uv_crop_height == b->uv_crop_height);
   const int widths[3] = { a->y_crop_width, a->uv_crop_width, a->uv_crop_width };
   const int heights[3] = { a->y_crop_height, a->uv_crop_height,
                            a->uv_crop_height };
@@ -433,6 +437,10 @@ void aom_calc_highbd_psnr(const YV12_BUFFER_CONFIG *a,
 
 void aom_calc_psnr(const YV12_BUFFER_CONFIG *a, const YV12_BUFFER_CONFIG *b,
                    PSNR_STATS *psnr) {
+  assert(a->y_crop_width == b->y_crop_width);
+  assert(a->y_crop_height == b->y_crop_height);
+  assert(a->uv_crop_width == b->uv_crop_width);
+  assert(a->uv_crop_height == b->uv_crop_height);
   static const double peak = 255.0;
   const int widths[3] = { a->y_crop_width, a->uv_crop_width, a->uv_crop_width };
   const int heights[3] = { a->y_crop_height, a->uv_crop_height,

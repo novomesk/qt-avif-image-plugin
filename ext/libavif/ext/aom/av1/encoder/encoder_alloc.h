@@ -110,7 +110,8 @@ static AOM_INLINE void set_tpl_stats_block_size(uint8_t *block_mis_log2,
 }
 
 static AOM_INLINE void setup_tpl_buffers(AV1_COMMON *const cm,
-                                         TplParams *const tpl_data) {
+                                         TplParams *const tpl_data,
+                                         int lag_in_frames) {
   CommonModeInfoParams *const mi_params = &cm->mi_params;
   set_tpl_stats_block_size(&tpl_data->tpl_stats_block_mis_log2,
                            &tpl_data->tpl_bsize_1d);
@@ -132,7 +133,14 @@ static AOM_INLINE void setup_tpl_buffers(AV1_COMMON *const cm,
     tpl_data->tpl_stats_buffer[frame].mi_rows = mi_params->mi_rows;
     tpl_data->tpl_stats_buffer[frame].mi_cols = mi_params->mi_cols;
   }
+  tpl_data->tpl_frame = &tpl_data->tpl_stats_buffer[REF_FRAMES + 1];
 
+  // If lag_in_frames <= 1, TPL module is not invoked. Hence tpl recon and
+  // stats buffers are not allocated.
+  if (lag_in_frames <= 1) return;
+
+  // TODO(aomedia:2873): Explore the allocation of tpl buffers based on
+  // lag_in_frames.
   for (int frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
     CHECK_MEM_ERROR(
         cm, tpl_data->tpl_stats_pool[frame],
@@ -147,8 +155,6 @@ static AOM_INLINE void setup_tpl_buffers(AV1_COMMON *const cm,
       aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                          "Failed to allocate frame buffer");
   }
-
-  tpl_data->tpl_frame = &tpl_data->tpl_stats_buffer[REF_FRAMES + 1];
 }
 
 static AOM_INLINE void alloc_obmc_buffers(OBMCBuffer *obmc_buffer,
@@ -274,7 +280,9 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
   av1_free_context_buffers(cm);
 
   aom_free_frame_buffer(&cpi->last_frame_uf);
+#if !CONFIG_REALTIME_ONLY
   av1_free_restoration_buffers(cm);
+#endif
   aom_free_frame_buffer(&cpi->trial_frame_rst);
   aom_free_frame_buffer(&cpi->scaled_source);
   aom_free_frame_buffer(&cpi->scaled_last_source);

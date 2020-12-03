@@ -251,7 +251,7 @@ typedef struct MB_MODE_INFO {
   uint8_t num_proj_ref;
   /*! \brief The number of overlapped neighbors above/left for obmc/warp motion
    * mode. */
-  uint8_t overlappable_neighbors[2];
+  uint8_t overlappable_neighbors;
   /*! \brief The parameters used in warp motion mode. */
   WarpedMotionParams wm_params;
   /*! \brief The type of intra mode used by inter-intra */
@@ -1422,8 +1422,7 @@ static INLINE int is_motion_variation_allowed_compound(
 static const int max_neighbor_obmc[6] = { 0, 1, 2, 3, 4, 4 };
 
 static INLINE int check_num_overlappable_neighbors(const MB_MODE_INFO *mbmi) {
-  return !(mbmi->overlappable_neighbors[0] == 0 &&
-           mbmi->overlappable_neighbors[1] == 0);
+  return mbmi->overlappable_neighbors != 0;
 }
 
 static INLINE MOTION_MODE

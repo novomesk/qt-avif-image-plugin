@@ -22,6 +22,7 @@
 static void extend_plane(uint8_t *const src, int src_stride, int width,
                          int height, int extend_top, int extend_left,
                          int extend_bottom, int extend_right) {
+  assert(src != NULL);
   int i;
   const int linesize = extend_left + extend_right + width;
 
@@ -220,13 +221,8 @@ static void memcpy_short_addr(uint8_t *dst8, const uint8_t *src8, int num) {
 // Note: The frames are assumed to be identical in size.
 void aom_yv12_copy_frame_c(const YV12_BUFFER_CONFIG *src_bc,
                            YV12_BUFFER_CONFIG *dst_bc, const int num_planes) {
-#if 0
-  /* These assertions are valid in the codec, but the libaom-tester uses
-   * this code slightly differently.
-   */
   assert(src_bc->y_width == dst_bc->y_width);
   assert(src_bc->y_height == dst_bc->y_height);
-#endif
 
 #if CONFIG_AV1_HIGHBITDEPTH
   assert((src_bc->flags & YV12_FLAG_HIGHBITDEPTH) ==

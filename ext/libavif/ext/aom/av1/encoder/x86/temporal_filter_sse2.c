@@ -207,7 +207,6 @@ void av1_apply_temporal_filter_sse2(
 
   const int mb_height = block_size_high[block_size];
   const int mb_width = block_size_wide[block_size];
-  const int mb_pels = mb_height * mb_width;
   const int frame_height = frame_to_filter->y_crop_height;
   const int frame_width = frame_to_filter->y_crop_width;
   const int min_frame_size = AOMMIN(frame_height, frame_width);
@@ -237,6 +236,8 @@ void av1_apply_temporal_filter_sse2(
     d_factor[subblock_idx] = AOMMAX(d_factor[subblock_idx], 1);
   }
 
+  // Handle planes in sequence.
+  int plane_offset = 0;
   for (int plane = 0; plane < num_planes; ++plane) {
     const uint32_t plane_h = mb_height >> mbd->plane[plane].subsampling_y;
     const uint32_t plane_w = mb_width >> mbd->plane[plane].subsampling_x;
@@ -273,10 +274,11 @@ void av1_apply_temporal_filter_sse2(
       }
     }
 
-    apply_temporal_filter(ref, frame_stride, pred + mb_pels * plane, plane_w,
-                          plane_w, plane_h, subblock_mses,
-                          accum + mb_pels * plane, count + mb_pels * plane,
-                          frame_sse, luma_sse_sum, inv_num_ref_pixels,
-                          decay_factor, inv_factor, weight_factor, d_factor);
+    apply_temporal_filter(ref, frame_stride, pred + plane_offset, plane_w,
+                          plane_w, plane_h, subblock_mses, accum + plane_offset,
+                          count + plane_offset, frame_sse, luma_sse_sum,
+                          inv_num_ref_pixels, decay_factor, inv_factor,
+                          weight_factor, d_factor);
+    plane_offset += plane_h * plane_w;
   }
 }

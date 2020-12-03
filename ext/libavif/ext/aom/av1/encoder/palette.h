@@ -26,11 +26,8 @@ struct PICK_MODE_CONTEXT;
 struct macroblock;
 
 /*!\cond */
-#define AV1_K_MEANS_RENAME(func, dim) func##_dim##dim
+#define AV1_K_MEANS_RENAME(func, dim) func##_dim##dim##_c
 
-void AV1_K_MEANS_RENAME(av1_calc_indices, 1)(const int *data,
-                                             const int *centroids,
-                                             uint8_t *indices, int n, int k);
 void AV1_K_MEANS_RENAME(av1_calc_indices, 2)(const int *data,
                                              const int *centroids,
                                              uint8_t *indices, int n, int k);
@@ -62,9 +59,9 @@ static INLINE void av1_calc_indices(const int *data, const int *centroids,
   assert(n > 0);
   assert(k > 0);
   if (dim == 1) {
-    AV1_K_MEANS_RENAME(av1_calc_indices, 1)(data, centroids, indices, n, k);
+    av1_calc_indices_dim1(data, centroids, indices, n, k);
   } else if (dim == 2) {
-    AV1_K_MEANS_RENAME(av1_calc_indices, 2)(data, centroids, indices, n, k);
+    av1_calc_indices_dim2_c(data, centroids, indices, n, k);
   } else {
     assert(0 && "Untemplated k means dimension");
   }

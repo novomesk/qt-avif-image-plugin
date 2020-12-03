@@ -56,6 +56,10 @@ class DatarateTest : public ::libaom_test::EncoderTest {
       encoder->Control(AV1E_SET_AQ_MODE, aq_mode_);
       encoder->Control(AV1E_SET_TILE_COLUMNS, 0);
       if (cfg_.g_usage == AOM_USAGE_REALTIME) {
+        encoder->Control(AV1E_SET_ENABLE_GLOBAL_MOTION, 0);
+        encoder->Control(AV1E_SET_ENABLE_WARPED_MOTION, 0);
+        encoder->Control(AV1E_SET_ENABLE_RESTORATION, 0);
+        encoder->Control(AV1E_SET_ENABLE_OBMC, 0);
         encoder->Control(AV1E_SET_DELTAQ_MODE, 0);
         encoder->Control(AV1E_SET_ENABLE_TPL_MODEL, 0);
         encoder->Control(AV1E_SET_ENABLE_CDEF, 1);

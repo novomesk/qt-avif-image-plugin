@@ -30,8 +30,6 @@ list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
             "${AOM_ROOT}/test/block_test.cc"
             "${AOM_ROOT}/test/clear_system_state.h"
             "${AOM_ROOT}/test/codec_factory.h"
-            "${AOM_ROOT}/test/decode_test_driver.cc"
-            "${AOM_ROOT}/test/decode_test_driver.h"
             "${AOM_ROOT}/test/function_equivalence_test.h"
             "${AOM_ROOT}/test/log2_test.cc"
             "${AOM_ROOT}/test/md5_helper.h"
@@ -42,6 +40,12 @@ list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
             "${AOM_ROOT}/test/transform_test_base.h"
             "${AOM_ROOT}/test/util.h"
             "${AOM_ROOT}/test/video_source.h")
+
+if(CONFIG_AV1_DECODER)
+  list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
+              "${AOM_ROOT}/test/decode_test_driver.cc"
+              "${AOM_ROOT}/test/decode_test_driver.h")
+endif()
 
 if(CONFIG_INTERNAL_STATS)
   list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
@@ -139,7 +143,8 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/temporal_filter_test.cc")
     if(CONFIG_REALTIME_ONLY)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
-                       "${AOM_ROOT}/test/cnn_test.cc")
+                       "${AOM_ROOT}/test/cnn_test.cc"
+                       "${AOM_ROOT}/test/selfguided_filter_test.cc")
     endif()
     if(NOT CONFIG_AV1_HIGHBITDEPTH)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
@@ -230,7 +235,20 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/warp_filter_test.cc"
               "${AOM_ROOT}/test/warp_filter_test_util.cc"
               "${AOM_ROOT}/test/warp_filter_test_util.h"
-              "${AOM_ROOT}/test/webmenc_test.cc")
+              "${AOM_ROOT}/test/webmenc_test.cc"
+              "${AOM_ROOT}/test/av1_k_means_test.cc")
+
+  if(CONFIG_REALTIME_ONLY)
+    list(REMOVE_ITEM AOM_UNIT_TEST_ENCODER_SOURCES
+                     "${AOM_ROOT}/test/frame_error_test.cc"
+                     "${AOM_ROOT}/test/obmc_sad_test.cc"
+                     "${AOM_ROOT}/test/obmc_variance_test.cc"
+                     "${AOM_ROOT}/test/pickrst_test.cc"
+                     "${AOM_ROOT}/test/warp_filter_test.cc"
+                     "${AOM_ROOT}/test/warp_filter_test_util.cc"
+                     "${AOM_ROOT}/test/warp_filter_test_util.h"
+                     "${AOM_ROOT}/test/wiener_test.cc")
+  endif()
 
   if((HAVE_SSE4_1 OR HAVE_NEON))
     list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES

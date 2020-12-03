@@ -113,6 +113,7 @@ typedef struct avifEncoderData
     avifEncoderItem * alphaItem;
     uint16_t lastItemID;
     uint16_t primaryItemID;
+    avifBool singleImage; // if true, the AVIF_ADD_IMAGE_FLAG_SINGLE flag was set on the first call to avifEncoderAddImage()
 } avifEncoderData;
 
 static avifEncoderData * avifEncoderDataCreate()
@@ -204,18 +205,20 @@ static void avifEncoderWriteColorProperties(avifRWStream * s, const avifImage * 
         if (ipma && itemPropertyIndex) {
             ipmaPush(ipma, ++(*itemPropertyIndex), AVIF_FALSE);
         }
-    } else {
-        avifBoxMarker colr = avifRWStreamWriteBox(s, "colr", AVIF_BOX_SIZE_TBD);
-        avifRWStreamWriteChars(s, "nclx", 4);                                      // unsigned int(32) colour_type;
-        avifRWStreamWriteU16(s, (uint16_t)imageMetadata->colorPrimaries);          // unsigned int(16) colour_primaries;
-        avifRWStreamWriteU16(s, (uint16_t)imageMetadata->transferCharacteristics); // unsigned int(16) transfer_characteristics;
-        avifRWStreamWriteU16(s, (uint16_t)imageMetadata->matrixCoefficients);      // unsigned int(16) matrix_coefficients;
-        avifRWStreamWriteU8(s, (imageMetadata->yuvRange == AVIF_RANGE_FULL) ? 0x80 : 0); // unsigned int(1) full_range_flag;
-                                                                                         // unsigned int(7) reserved = 0;
-        avifRWStreamFinishBox(s, colr);
-        if (ipma && itemPropertyIndex) {
-            ipmaPush(ipma, ++(*itemPropertyIndex), AVIF_FALSE);
-        }
+    }
+
+    // HEIF 6.5.5.1, from Amendment 3 allows multiple colr boxes: "at most one for a given value of colour type"
+    // Therefore, *always* writing an nclx box, even if an a prof box was already written above.
+    avifBoxMarker colr = avifRWStreamWriteBox(s, "colr", AVIF_BOX_SIZE_TBD);
+    avifRWStreamWriteChars(s, "nclx", 4);                                            // unsigned int(32) colour_type;
+    avifRWStreamWriteU16(s, (uint16_t)imageMetadata->colorPrimaries);                // unsigned int(16) colour_primaries;
+    avifRWStreamWriteU16(s, (uint16_t)imageMetadata->transferCharacteristics);       // unsigned int(16) transfer_characteristics;
+    avifRWStreamWriteU16(s, (uint16_t)imageMetadata->matrixCoefficients);            // unsigned int(16) matrix_coefficients;
+    avifRWStreamWriteU8(s, (imageMetadata->yuvRange == AVIF_RANGE_FULL) ? 0x80 : 0); // unsigned int(1) full_range_flag;
+                                                                                     // unsigned int(7) reserved = 0;
+    avifRWStreamFinishBox(s, colr);
+    if (ipma && itemPropertyIndex) {
+        ipmaPush(ipma, ++(*itemPropertyIndex), AVIF_FALSE);
     }
 
     // Write (Optional) Transformations
@@ -357,6 +360,24 @@ avifResult avifEncoderAddImage(avifEncoder * encoder, const avifImage * image, u
 
     if (image->yuvFormat == AVIF_PIXEL_FORMAT_NONE) {
         return AVIF_RESULT_NO_YUV_FORMAT_SELECTED;
+    }
+
+    // -----------------------------------------------------------------------
+    // Validate flags
+
+    if (encoder->data->singleImage) {
+        // The previous call to avifEncoderAddImage() set AVIF_ADD_IMAGE_FLAG_SINGLE.
+        // avifEncoderAddImage() cannot be called again for this encode.
+        return AVIF_RESULT_ENCODE_COLOR_FAILED;
+    }
+
+    if (addImageFlags & AVIF_ADD_IMAGE_FLAG_SINGLE) {
+        encoder->data->singleImage = AVIF_TRUE;
+
+        if (encoder->data->items.count > 0) {
+            // AVIF_ADD_IMAGE_FLAG_SINGLE may only be set on the first and only image.
+            return AVIF_RESULT_INVALID_ARGUMENT;
+        }
     }
 
     // -----------------------------------------------------------------------

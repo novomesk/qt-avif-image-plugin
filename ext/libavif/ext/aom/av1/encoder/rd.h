@@ -243,7 +243,7 @@ void av1_model_rd_surffit(BLOCK_SIZE bsize, double sse_norm, double xm,
                           double yl, double *rate_f, double *distbysse_f);
 
 int av1_get_switchable_rate(const MACROBLOCK *x, const MACROBLOCKD *xd,
-                            InterpFilter interp_filter);
+                            InterpFilter interp_filter, int dual_filter);
 
 YV12_BUFFER_CONFIG *av1_get_scaled_ref_frame(const struct AV1_COMP *cpi,
                                              int ref_frame);
@@ -271,9 +271,9 @@ static INLINE void reset_thresh_freq_fact(MACROBLOCK *const x) {
   }
 }
 
-static INLINE int rd_less_than_thresh(int64_t best_rd, int thresh,
+static INLINE int rd_less_than_thresh(int64_t best_rd, int64_t thresh,
                                       int thresh_fact) {
-  return best_rd < ((int64_t)thresh * thresh_fact >> 5) || thresh == INT_MAX;
+  return best_rd < (thresh * thresh_fact >> 5) || thresh == INT_MAX;
 }
 
 void av1_mv_pred(const struct AV1_COMP *cpi, MACROBLOCK *x,

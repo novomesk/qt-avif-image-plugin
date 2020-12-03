@@ -180,18 +180,28 @@ static double calc_correction_factor(double err_per_mb, int q) {
   return fclamp(pow(error_term, power_term), 0.05, 5.0);
 }
 
-static void twopass_update_bpm_factor(TWO_PASS *twopass) {
+static void twopass_update_bpm_factor(TWO_PASS *twopass, int err_estimate,
+                                      int rate_err_tol) {
   // Based on recent history adjust expectations of bits per macroblock.
   double last_group_rate_err =
       (double)twopass->rolling_arf_group_actual_bits /
       DOUBLE_DIVIDE_CHECK((double)twopass->rolling_arf_group_target_bits);
-  last_group_rate_err = AOMMAX(0.25, AOMMIN(4.0, last_group_rate_err));
-  twopass->bpm_factor *= (3.0 + last_group_rate_err) / 4.0;
-  twopass->bpm_factor = AOMMAX(0.25, AOMMIN(4.0, twopass->bpm_factor));
+  double damp_fac = AOMMAX(5.0, rate_err_tol / 10.0);
+
+  last_group_rate_err = AOMMAX(0.75, AOMMIN(1.25, last_group_rate_err));
+  last_group_rate_err = 1.0 + ((last_group_rate_err - 1.0) / damp_fac);
+
+  // Is the last GOP error making the total error worse or better? Only make
+  // an adjustment if things are getting worse.
+  if ((last_group_rate_err < 1.0 && err_estimate > 0) ||
+      (last_group_rate_err > 1.0 && err_estimate < 0)) {
+    twopass->bpm_factor *= last_group_rate_err;
+    twopass->bpm_factor = AOMMAX(0.75, AOMMIN(1.25, twopass->bpm_factor));
+  }
 }
 
 static int qbpm_enumerator(int rate_err_tol) {
-  return 1250000 + ((300000 * AOMMIN(75, AOMMAX(rate_err_tol - 25, 0))) / 75);
+  return 1200000 + ((300000 * AOMMIN(75, AOMMAX(rate_err_tol - 25, 0))) / 75);
 }
 
 // Similar to find_qindex_by_rate() function in ratectrl.c, but includes
@@ -240,15 +250,12 @@ static int find_qindex_by_rate_with_correction(
  *                                   Here we want to ignore the bands at the
  *                                   top and bottom.
  * \param[in]    av_target_bandwidth The target bits per frame
- * \param[in]    group_weight_factor A correction factor allowing the algorithm
- *                                   to correct for errors over time.
  *
  * \return The maximum Q for frames in the group.
  */
 static int get_twopass_worst_quality(AV1_COMP *cpi, const double av_frame_err,
                                      double inactive_zone,
-                                     int av_target_bandwidth,
-                                     double group_weight_factor) {
+                                     int av_target_bandwidth) {
   const RATE_CONTROL *const rc = &cpi->rc;
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   const RateControlCfg *const rc_cfg = &oxcf->rc_cfg;
@@ -266,12 +273,15 @@ static int get_twopass_worst_quality(AV1_COMP *cpi, const double av_frame_err,
         (int)((uint64_t)av_target_bandwidth << BPER_MB_NORMBITS) / active_mbs;
     int rate_err_tol = AOMMIN(rc_cfg->under_shoot_pct, rc_cfg->over_shoot_pct);
 
-    twopass_update_bpm_factor(&cpi->twopass);
+    // Update bpm correction factor based on previous GOP rate error.
+    twopass_update_bpm_factor(&cpi->twopass, rc->rate_error_estimate,
+                              rate_err_tol);
+
     // Try and pick a max Q that will be high enough to encode the
     // content at the given rate.
     int q = find_qindex_by_rate_with_correction(
         target_norm_bits_per_mb, cpi->common.seq_params.bit_depth,
-        av_err_per_mb, group_weight_factor, rate_err_tol, rc->best_quality,
+        av_err_per_mb, cpi->twopass.bpm_factor, rate_err_tol, rc->best_quality,
         rc->worst_quality);
 
     // Restriction on active max q for constrained quality mode.
@@ -971,243 +981,903 @@ static INLINE int detect_gf_cut(AV1_COMP *cpi, int frame_index, int cur_start,
   return 0;
 }
 
-#define MAX_PAD_GF_CHECK 6  // padding length to check for gf length
-#define AVG_SI_THRES 0.6    // thres for average silouette
-#define GF_SHRINK_OUTPUT 0  // print output for gf length decision
-int determine_high_err_gf(double *errs, int *is_high, double *si, int len,
-                          double *ratio, int gf_start, int gf_end,
-                          int before_pad) {
-  (void)gf_start;
-  (void)gf_end;
-  (void)before_pad;
-  // alpha and beta controls the threshold placement
-  // e.g. a smaller alpha makes the lower group more rigid
-  const double alpha = 0.5;
-  const double beta = 1 - alpha;
-  double mean = 0;
-  double mean_low = 0;
-  double mean_high = 0;
-  double prev_mean_low = 0;
-  double prev_mean_high = 0;
-  int count_low = 0;
-  int count_high = 0;
-  // calculate mean of errs
-  for (int i = 0; i < len; i++) {
-    mean += errs[i];
-  }
-  mean /= len;
-  // separate into two initial groups with greater / lower than mean
-  for (int i = 0; i < len; i++) {
-    if (errs[i] <= mean) {
-      is_high[i] = 0;
-      count_low++;
-      prev_mean_low += errs[i];
+#define MIN_FWD_KF_INTERVAL 8
+#define MIN_SHRINK_LEN 6  // the minimum length of gf if we are shrinking
+#define SMOOTH_FILT_LEN 7
+#define HALF_FILT_LEN (SMOOTH_FILT_LEN / 2)
+#define WINDOW_SIZE 7
+#define HALF_WIN (WINDOW_SIZE / 2)
+// A 7-tap gaussian smooth filter
+const double smooth_filt[SMOOTH_FILT_LEN] = { 0.006, 0.061, 0.242, 0.383,
+                                              0.242, 0.061, 0.006 };
+
+// Smooth filter intra_error and coded_error in firstpass stats.
+// If ignore[i]==1, the ith element should not be used in the filtering.
+static void smooth_filter_stats(const FIRSTPASS_STATS *stats, const int *ignore,
+                                int start_idx, int last_idx,
+                                double *filt_intra_err,
+                                double *filt_coded_err) {
+  int i, j;
+  for (i = start_idx; i <= last_idx; i++) {
+    double total_wt = 0;
+    for (j = -HALF_FILT_LEN; j <= HALF_FILT_LEN; j++) {
+      int idx = AOMMIN(AOMMAX(i + j, start_idx), last_idx);
+      if (ignore[idx]) continue;
+
+      filt_intra_err[i] +=
+          smooth_filt[j + HALF_FILT_LEN] * stats[idx].intra_error;
+      total_wt += smooth_filt[j + HALF_FILT_LEN];
+    }
+    if (total_wt > 0.01) {
+      filt_intra_err[i] /= total_wt;
     } else {
-      is_high[i] = 1;
-      count_high++;
-      prev_mean_high += errs[i];
+      filt_intra_err[i] = stats[i].intra_error;
     }
   }
-  prev_mean_low /= count_low;
-  prev_mean_high /= count_high;
-  // kmeans to refine
-  int count = 0;
-  while (count < 10) {
-    // re-group
-    mean_low = 0;
-    mean_high = 0;
-    count_low = 0;
-    count_high = 0;
-    double thres = prev_mean_low * alpha + prev_mean_high * beta;
-    for (int i = 0; i < len; i++) {
-      if (errs[i] <= thres) {
-        is_high[i] = 0;
-        count_low++;
-        mean_low += errs[i];
-      } else {
-        is_high[i] = 1;
-        count_high++;
-        mean_high += errs[i];
-      }
+  for (i = start_idx; i <= last_idx; i++) {
+    double total_wt = 0;
+    for (j = -HALF_FILT_LEN; j <= HALF_FILT_LEN; j++) {
+      int idx = AOMMIN(AOMMAX(i + j, start_idx), last_idx);
+      // Coded error involves idx and idx - 1.
+      if (ignore[idx] || (idx > 0 && ignore[idx - 1])) continue;
+
+      filt_coded_err[i] +=
+          smooth_filt[j + HALF_FILT_LEN] * stats[idx].coded_error;
+      total_wt += smooth_filt[j + HALF_FILT_LEN];
     }
-    mean_low /= count_low;
-    mean_high /= count_high;
-
-    // break if not changed much
-    if (fabs((mean_low - prev_mean_low) / (prev_mean_low + 0.00001)) <
-            0.00001 &&
-        fabs((mean_high - prev_mean_high) / (prev_mean_high + 0.00001)) <
-            0.00001)
-      break;
-
-    // update means
-    prev_mean_high = mean_high;
-    prev_mean_low = mean_low;
-
-    count++;
-  }
-
-  // count how many jumps of group changes
-  int num_change = 0;
-  for (int i = 0; i < len - 1; i++) {
-    if (is_high[i] != is_high[i + 1]) num_change++;
-  }
-
-  // get silhouette as a measure of the classification quality
-  double avg_si = 0;
-  // ai: avg dist of its own class, bi: avg dist to the other class
-  double ai, bi;
-  if (count_low > 1 && count_high > 1) {
-    for (int i = 0; i < len; i++) {
-      ai = 0;
-      bi = 0;
-      // calculate average distance to everyone in the same group
-      // and in the other group
-      for (int j = 0; j < len; j++) {
-        if (i == j) continue;
-        if (is_high[i] == is_high[j]) {
-          ai += fabs(errs[i] - errs[j]);
-        } else {
-          bi += fabs(errs[i] - errs[j]);
-        }
-      }
-      if (is_high[i] == 0) {
-        ai = ai / (count_low - 1);
-        bi = bi / count_high;
-      } else {
-        ai = ai / (count_high - 1);
-        bi = bi / count_low;
-      }
-      if (ai <= bi) {
-        si[i] = 1 - ai / (bi + 0.00001);
-      } else {
-        si[i] = bi / (ai + 0.00001) - 1;
-      }
-      avg_si += si[i];
+    if (total_wt > 0.01) {
+      filt_coded_err[i] /= total_wt;
+    } else {
+      filt_coded_err[i] = stats[i].coded_error;
     }
-    avg_si /= len;
   }
-
-  int reset = 0;
-  *ratio = mean_high / (mean_low + 0.00001);
-  // if the two groups too similar, or
-  // if too many numbers of changes, or
-  // silhouette is too small, not confident
-  // reset everything to 0 later so we fallback to the original decision
-  if (*ratio < 1.3 || num_change > AOMMAX(len / 3, 6) ||
-      avg_si < AVG_SI_THRES) {
-    reset = 1;
-  }
-
-#if GF_SHRINK_OUTPUT
-  printf("\n");
-  for (int i = 0; i < len; i++) {
-    printf("%d: err %.1f, ishigh %d, si %.2f, (i=%d)\n",
-           gf_start + i - before_pad, errs[i], is_high[i], si[i], gf_end);
-  }
-  printf(
-      "count: %d, mean_high: %.1f, mean_low: %.1f, avg_si: %.2f, num_change: "
-      "%d, ratio %.2f, reset: %d\n",
-      count, mean_high, mean_low, avg_si, num_change,
-      mean_high / (mean_low + 0.000001), reset);
-#endif
-
-  if (reset) {
-    memset(is_high, 0, sizeof(is_high[0]) * len);
-    memset(si, 0, sizeof(si[0]) * len);
-  }
-  return reset;
 }
 
-#if GROUP_ADAPTIVE_MAXQ
-#define RC_FACTOR_MIN 0.75
-#define RC_FACTOR_MAX 1.25
-#endif  // GROUP_ADAPTIVE_MAXQ
-#define MIN_FWD_KF_INTERVAL 8
-#define MIN_SHRINK_LEN 6      // the minimum length of gf if we are shrinking
-#define SI_HIGH AVG_SI_THRES  // high quality classification
-#define SI_LOW 0.3            // very unsure classification
-// this function finds an low error frame previously to the current last frame
-// in the gf group, and set the last frame to it.
-// The resulting last frame is then returned by *cur_last_ptr
-// *cur_start_ptr and cut_pos[n] could also change due to shrinking
-// previous gf groups
-void set_last_prev_low_err(int *cur_start_ptr, int *cur_last_ptr, int *cut_pos,
-                           int count_cuts, int before_pad, double ratio,
-                           int *is_high, double *si, int prev_lows,
-                           int min_shrink_len) {
-  int n;
-  int cur_start = *cur_start_ptr;
-  int cur_last = *cur_last_ptr;
-  for (n = cur_last; n >= cur_start + min_shrink_len; n--) {
-    // try to find a point that is very probable to be good
-    if (is_high[n - cur_start + before_pad] == 0 &&
-        si[n - cur_start + before_pad] > SI_HIGH) {
-      *cur_last_ptr = n;
-      return;
-    }
+// Calculate gradient
+static void get_gradient(const double *values, int start, int last,
+                         double *grad) {
+  if (start == last) {
+    grad[start] = 0;
+    return;
   }
-  // could not find a low-err point, then let's try find an "unsure"
-  // point at least
-  for (n = cur_last; n >= cur_start + min_shrink_len; n--) {
-    if ((is_high[n - cur_start + before_pad] == 0) ||
-        (is_high[n - cur_start + before_pad] &&
-         si[n - cur_start + before_pad] < SI_LOW)) {
-      *cur_last_ptr = n;
-      return;
-    }
+  for (int i = start; i <= last; i++) {
+    int prev = AOMMAX(i - 1, start);
+    int next = AOMMIN(i + 1, last);
+    grad[i] = (values[next] - values[prev]) / (next - prev);
   }
-  if (prev_lows) {
-    // try with shrinking previous all_zero interval
-    for (n = cur_start + min_shrink_len - 1; n > cur_start; n--) {
-      if (is_high[n - cur_start + before_pad] == 0 &&
-          si[n - cur_start + before_pad] > SI_HIGH) {
-        int tentative_start = n - min_shrink_len;
-        // check if the previous interval can shrink this much
-        int available =
-            tentative_start - cut_pos[count_cuts - 2] > min_shrink_len &&
-            cur_start - tentative_start < prev_lows;
-        // shrinking too agressively may worsen performance
-        // set stricter thres for shorter length
-        double ratio_thres =
-            1.0 * (cur_start - tentative_start) / (double)(min_shrink_len) +
-            1.0;
+}
 
-        if (available && (ratio > ratio_thres)) {
-          cut_pos[count_cuts - 1] = tentative_start;
-          *cur_start_ptr = tentative_start;
-          *cur_last_ptr = n;
-          return;
+static int find_next_scenecut(const FIRSTPASS_STATS *const stats_start,
+                              int first, int last, int *ignore) {
+  // Identify unstable areas caused by scenecuts.
+  // Find the max and 2nd max coded error, and the average of the rest frames.
+  // If there is only one frame that yields a huge coded error, it is likely a
+  // scenecut.
+  double this_ratio, max_prev_ratio, max_next_ratio, max_prev_coded,
+      max_next_coded;
+
+  if (last - first == 0) return -1;
+
+  for (int i = first; i <= last; i++) {
+    if (ignore[i] || (i > 0 && ignore[i - 1])) continue;
+    double temp_intra = AOMMAX(stats_start[i].intra_error, 0.01);
+    this_ratio = stats_start[i].coded_error / temp_intra;
+    // find the avg ratio in the preceding neighborhood
+    max_prev_ratio = 0;
+    max_prev_coded = 0;
+    for (int j = AOMMAX(first, i - HALF_WIN); j < i; j++) {
+      if (ignore[j] || (j > 0 && ignore[j - 1])) continue;
+      temp_intra = AOMMAX(stats_start[j].intra_error, 0.01);
+      double temp_ratio = stats_start[j].coded_error / temp_intra;
+      if (temp_ratio > max_prev_ratio) {
+        max_prev_ratio = temp_ratio;
+      }
+      if (stats_start[j].coded_error > max_prev_coded) {
+        max_prev_coded = stats_start[j].coded_error;
+      }
+    }
+    // find the avg ratio in the following neighborhood
+    max_next_ratio = 0;
+    max_next_coded = 0;
+    for (int j = i + 1; j <= AOMMIN(i + HALF_WIN, last); j++) {
+      if (ignore[j] || (j > 0 && ignore[j - 1])) continue;
+      temp_intra = AOMMAX(stats_start[j].intra_error, 0.01);
+      double temp_ratio = stats_start[j].coded_error / temp_intra;
+      if (temp_ratio > max_next_ratio) {
+        max_next_ratio = temp_ratio;
+      }
+      if (stats_start[j].coded_error > max_next_coded) {
+        max_next_coded = stats_start[j].coded_error;
+      }
+    }
+
+    if (max_prev_ratio < 0.001 && max_next_ratio < 0.001) {
+      // the ratios are very small, only check a small fixed threshold
+      if (this_ratio < 0.02) continue;
+    } else {
+      // check if this frame has a larger ratio than the neighborhood
+      double max_sr = stats_start[i].sr_coded_error;
+      if (i < last) max_sr = AOMMAX(max_sr, stats_start[i + 1].sr_coded_error);
+      double max_sr_fr_ratio =
+          max_sr / AOMMAX(stats_start[i].coded_error, 0.01);
+
+      if (max_sr_fr_ratio > 1.2) continue;
+      if (this_ratio < 2 * AOMMAX(max_prev_ratio, max_next_ratio) &&
+          stats_start[i].coded_error <
+              2 * AOMMAX(max_prev_coded, max_next_coded)) {
+        continue;
+      }
+    }
+    return i;
+  }
+  return -1;
+}
+
+static void mark_flashes(const FIRSTPASS_STATS *stats, int start_idx,
+                         int last_idx, int *is_flash) {
+  int i;
+  for (i = start_idx; i < last_idx; i++) {
+    if (stats[i + 1].pcnt_second_ref > stats[i + 1].pcnt_inter &&
+        stats[i + 1].pcnt_second_ref >= 0.5) {
+      // this is a new flash frame
+      is_flash[i] = 1;
+      continue;
+    }
+  }
+}
+
+// Remove the region with index next_region.
+// parameter merge: 0: merge with previous; 1: merge with next; 2:
+// merge with both, take type from previous if possible
+// After removing, next_region will be the index of the next region.
+static void remove_region(int merge, REGIONS *regions, int *num_regions,
+                          int *next_region) {
+  int k = *next_region;
+  assert(k < *num_regions);
+  if (*num_regions == 1) {
+    *num_regions = 0;
+    return;
+  }
+  if (k == 0) {
+    merge = 1;
+  } else if (k == *num_regions - 1) {
+    merge = 0;
+  }
+  int num_merge = (merge == 2) ? 2 : 1;
+  switch (merge) {
+    case 0:
+      regions[k - 1].last = regions[k].last;
+      *next_region = k;
+      break;
+    case 1:
+      regions[k + 1].start = regions[k].start;
+      *next_region = k + 1;
+      break;
+    case 2:
+      regions[k - 1].last = regions[k + 1].last;
+      *next_region = k;
+      break;
+    default: assert(0);
+  }
+  *num_regions -= num_merge;
+  for (k = *next_region - (merge == 1); k < *num_regions; k++) {
+    regions[k] = regions[k + num_merge];
+  }
+}
+
+// Insert a region in the cur_region_idx. The start and last should both be in
+// the current region. After insertion, the cur_region_idx will point to the
+// last region that was splitted from the original region.
+static void insert_region(int start, int last, REGION_TYPES type,
+                          REGIONS *regions, int *num_regions,
+                          int *cur_region_idx) {
+  int k = *cur_region_idx;
+  REGION_TYPES this_region_type = regions[k].type;
+  int this_region_last = regions[k].last;
+  int num_add = (start != regions[k].start) + (last != regions[k].last);
+  // move the following regions further to the back
+  for (int r = *num_regions - 1; r > k; r--) {
+    regions[r + num_add] = regions[r];
+  }
+  *num_regions += num_add;
+  if (start > regions[k].start) {
+    regions[k].last = start - 1;
+    k++;
+    regions[k].start = start;
+  }
+  regions[k].type = type;
+  if (last < this_region_last) {
+    regions[k].last = last;
+    k++;
+    regions[k].start = last + 1;
+    regions[k].last = this_region_last;
+    regions[k].type = this_region_type;
+  } else {
+    regions[k].last = this_region_last;
+  }
+  *cur_region_idx = k;
+}
+
+// Estimate the noise variance of each frame from the first pass stats
+static void estimate_region_noise(const FIRSTPASS_STATS *stats,
+                                  const int *is_flash, REGIONS *region) {
+  double C1, C2, C3, noise;
+  int count = 0;
+  region->avg_noise_var = -1;
+  for (int i = region->start + 2; i <= region->last; i++) {
+    if (is_flash[i] || is_flash[i - 1] || is_flash[i - 2]) continue;
+
+    C1 = stats[i - 1].intra_error *
+         (stats[i].intra_error - stats[i].coded_error);
+    C2 = stats[i - 2].intra_error *
+         (stats[i - 1].intra_error - stats[i - 1].coded_error);
+    C3 = stats[i - 2].intra_error *
+         (stats[i].intra_error - stats[i].sr_coded_error);
+    if (C1 <= 0 || C2 <= 0 || C3 <= 0) continue;
+    C1 = sqrt(C1);
+    C2 = sqrt(C2);
+    C3 = sqrt(C3);
+
+    noise = stats[i - 1].intra_error - C1 * C2 / C3;
+    noise = AOMMAX(noise, 0.01);
+    region->avg_noise_var = (region->avg_noise_var == -1)
+                                ? noise
+                                : AOMMIN(noise, region->avg_noise_var);
+    count++;
+  }
+  if (count == 0) {
+    region->avg_noise_var = 0;
+  }
+}
+
+// Analyze the corrrelation coefficient of each frame with its previous frame in
+// a region. Also get the average of stats inside a region.
+// Before calling this function, the region's noise variance is needed.
+static void analyze_region(const FIRSTPASS_STATS *stats, int region_idx,
+                           REGIONS *regions, double *coeff) {
+  double cor_coeff;
+
+  int i, k = region_idx;
+  regions[k].avg_cor_coeff = 0;
+  regions[k].avg_sr_fr_ratio = 0;
+  regions[k].avg_intra_err = 0;
+  regions[k].avg_coded_err = 0;
+
+  int check_first_sr = (k != 0);
+
+  for (i = regions[k].start; i <= regions[k].last; i++) {
+    double C = sqrt(AOMMAX(stats[i - 1].intra_error *
+                               (stats[i].intra_error - stats[i].coded_error),
+                           0.001));
+    cor_coeff =
+        C / AOMMAX(stats[i - 1].intra_error - regions[k].avg_noise_var, 0.001);
+
+    if (i > regions[k].start || check_first_sr) {
+      double num_frames =
+          (double)(regions[k].last - regions[k].start + check_first_sr);
+      double max_coded_error =
+          AOMMAX(stats[i].coded_error, stats[i - 1].coded_error);
+      double this_ratio =
+          stats[i].sr_coded_error / AOMMAX(max_coded_error, 0.001);
+      regions[k].avg_sr_fr_ratio += this_ratio / num_frames;
+    }
+
+    regions[k].avg_intra_err +=
+        stats[i].intra_error / (double)(regions[k].last - regions[k].start + 1);
+    regions[k].avg_coded_err +=
+        stats[i].coded_error / (double)(regions[k].last - regions[k].start + 1);
+
+    coeff[i] =
+        cor_coeff *
+        sqrt(
+            AOMMAX(stats[i - 1].intra_error - regions[k].avg_noise_var, 0.001) /
+            AOMMAX(stats[i].intra_error - regions[k].avg_noise_var, 0.001));
+    // clip correlation coefficient.
+    coeff[i] = AOMMIN(AOMMAX(coeff[i], 0), 1);
+
+    regions[k].avg_cor_coeff +=
+        coeff[i] / (double)(regions[k].last - regions[k].start + 1);
+  }
+}
+
+// Calculate the regions stats of every region. Uses the stable regions to
+// estimate noise variance of other regions. Then call analyze_region for each.
+static void get_region_stats(const FIRSTPASS_STATS *stats, const int *is_flash,
+                             REGIONS *regions, double *coeff, int num_regions) {
+  int k, count_stable = 0;
+  // Analyze stable regions.
+  for (k = 0; k < num_regions; k++) {
+    if (regions[k].type == STABLE_REGION) {
+      estimate_region_noise(stats, is_flash, regions + k);
+      analyze_region(stats, k, regions, coeff);
+      count_stable++;
+    }
+  }
+
+  if (count_stable == 0) {
+    // no stable region, just use the lowest noise variance estimated.
+    double lowest_noise = -1;
+    for (k = 0; k < num_regions; k++) {
+      if (regions[k].type == SCENECUT_REGION) continue;
+      estimate_region_noise(stats, is_flash, regions + k);
+      if (regions[k].avg_noise_var < 0.01) continue;
+      if (lowest_noise < 0 || lowest_noise > regions[k].avg_noise_var) {
+        lowest_noise = regions[k].avg_noise_var;
+      }
+    }
+    lowest_noise = AOMMAX(lowest_noise, 0);
+    for (k = 0; k < num_regions; k++) {
+      regions[k].avg_noise_var = lowest_noise;
+      analyze_region(stats, k, regions, coeff);
+    }
+    return;
+  }
+
+  // Analyze other regions
+  for (k = 0; k < num_regions; k++) {
+    if (regions[k].type != STABLE_REGION) {
+      // use the average of the nearest previous and next stable regions
+      int count = 0;
+      regions[k].avg_noise_var = 0;
+      for (int r = k - 1; r >= 0; r--) {
+        if (regions[r].type == STABLE_REGION) {
+          count++;
+          regions[k].avg_noise_var += regions[r].avg_noise_var;
+          break;
+        }
+      }
+      for (int r = k + 1; r < num_regions; r++) {
+        if (regions[r].type == STABLE_REGION) {
+          count++;
+          regions[k].avg_noise_var += regions[r].avg_noise_var;
+          break;
+        }
+      }
+      if (count) {
+        regions[k].avg_noise_var /= (double)count;
+      }
+      analyze_region(stats, k, regions, coeff);
+    }
+  }
+}
+
+// Find tentative stable regions
+static int find_stable_regions(const FIRSTPASS_STATS *stats,
+                               const double *grad_coded, const int *ignore,
+                               int this_start, int this_last,
+                               REGIONS *regions) {
+  int i, j, k = 0;
+  regions[k].start = this_start;
+  for (i = this_start; i <= this_last; i++) {
+    // Check mean and variance of stats in a window
+    double mean_intra = 0.001, var_intra = 0.001;
+    double mean_coded = 0.001, var_coded = 0.001;
+    int count = 0;
+    for (j = -HALF_WIN; j <= HALF_WIN; j++) {
+      int idx = AOMMIN(AOMMAX(i + j, this_start), this_last);
+      if (ignore[idx] || (idx > 0 && ignore[idx - 1])) continue;
+      mean_intra += stats[idx].intra_error;
+      var_intra += stats[idx].intra_error * stats[idx].intra_error;
+      mean_coded += stats[idx].coded_error;
+      var_coded += stats[idx].coded_error * stats[idx].coded_error;
+      count++;
+    }
+
+    REGION_TYPES cur_type;
+    if (count > 0) {
+      mean_intra /= (double)count;
+      var_intra /= (double)count;
+      mean_coded /= (double)count;
+      var_coded /= (double)count;
+      int is_intra_stable = (var_intra / (mean_intra * mean_intra) < 1.03);
+      int is_coded_stable = (var_coded / (mean_coded * mean_coded) < 1.04 &&
+                             fabs(grad_coded[i]) / mean_coded < 0.05) ||
+                            mean_coded / mean_intra < 0.05;
+      int is_coded_small = mean_coded < 0.5 * mean_intra;
+      cur_type = (is_intra_stable && is_coded_stable && is_coded_small)
+                     ? STABLE_REGION
+                     : HIGH_VAR_REGION;
+    } else {
+      cur_type = HIGH_VAR_REGION;
+    }
+
+    // mark a new region if type changes
+    if (i == regions[k].start) {
+      // first frame in the region
+      regions[k].type = cur_type;
+    } else if (cur_type != regions[k].type) {
+      // Append a new region
+      regions[k].last = i - 1;
+      regions[k + 1].start = i;
+      regions[k + 1].type = cur_type;
+      k++;
+    }
+  }
+  regions[k].last = this_last;
+  return k + 1;
+}
+
+// Clean up regions that should be removed or merged.
+static void cleanup_regions(REGIONS *regions, int *num_regions) {
+  int k = 0;
+  while (k < *num_regions) {
+    if ((k > 0 && regions[k - 1].type == regions[k].type &&
+         regions[k].type != SCENECUT_REGION) ||
+        regions[k].last < regions[k].start) {
+      remove_region(0, regions, num_regions, &k);
+    } else {
+      k++;
+    }
+  }
+}
+
+// Remove regions that are of type and shorter than length.
+// Merge it with its neighboring regions.
+static void remove_short_regions(REGIONS *regions, int *num_regions,
+                                 REGION_TYPES type, int length) {
+  int k = 0;
+  while (k < *num_regions && (*num_regions) > 1) {
+    if ((regions[k].last - regions[k].start + 1 < length &&
+         regions[k].type == type)) {
+      // merge current region with the previous and next regions
+      remove_region(2, regions, num_regions, &k);
+    } else {
+      k++;
+    }
+  }
+  cleanup_regions(regions, num_regions);
+}
+
+static void adjust_unstable_region_bounds(const FIRSTPASS_STATS *stats,
+                                          const int *is_flash,
+                                          const double *grad, REGIONS *regions,
+                                          double *coeff, int *num_regions) {
+  int i, j, k;
+  // Remove regions that are too short. Likely noise.
+  remove_short_regions(regions, num_regions, STABLE_REGION, HALF_WIN);
+  remove_short_regions(regions, num_regions, HIGH_VAR_REGION, HALF_WIN);
+
+  get_region_stats(stats, is_flash, regions, coeff, *num_regions);
+
+  // Adjust region boundaries. The thresholds are empirically obtained, but
+  // overall the performance is not very sensitive to small changes to them.
+  for (k = 0; k < *num_regions; k++) {
+    if (regions[k].type == STABLE_REGION) continue;
+    if (k > 0) {
+      // Adjust previous boundary.
+      // First find the average intra/coded error in the previous
+      // neighborhood.
+      double avg_intra_err = 0, avg_coded_err = 0, avg_coeff = 0;
+      int starti = AOMMAX(regions[k - 1].last - WINDOW_SIZE + 1,
+                          regions[k - 1].start + 1);
+      int lasti = regions[k - 1].last;
+      int counti = 0;
+      for (i = starti; i <= lasti; i++) {
+        avg_intra_err += stats[i].intra_error;
+        avg_coded_err += stats[i].coded_error;
+        avg_coeff += coeff[i];
+        counti++;
+      }
+      if (counti > 0) {
+        avg_intra_err = AOMMAX(avg_intra_err / (double)counti, 0.001);
+        avg_coded_err /= AOMMAX(avg_coded_err / (double)counti, 0.001);
+        avg_coeff /= AOMMIN(avg_intra_err / (double)counti, 0.99999);
+        int count_coded = 0, count_grad = 0;
+        for (j = lasti + 1; j <= regions[k].last; j++) {
+          int intra_close =
+              fabs(stats[j].intra_error - avg_intra_err) / avg_intra_err < 0.1;
+          int coded_close =
+              fabs(stats[j].coded_error - avg_coded_err) / avg_coded_err < 0.15;
+          int grad_small = fabs(grad[j]) / avg_coded_err < 0.05;
+          int coded_small = stats[j].coded_error / avg_intra_err < 0.03;
+          int coeff_close =
+              (1 - coeff[j]) / (1 - avg_coeff) < 1.5 || coeff[j] > 0.995;
+          if (!coeff_close || (!coded_close && !coded_small)) count_coded--;
+          if (!grad_small && !coded_small) count_grad--;
+
+          if (intra_close && count_coded >= 0 && count_grad >= 0) {
+            // this frame probably belongs to the previous stable region
+            regions[k - 1].last = j;
+            regions[k].start = j + 1;
+          } else {
+            break;
+          }
+        }
+      }
+    }  // if k > 0
+    if (k < *num_regions - 1) {
+      // Adjust next boundary.
+      // First find the average intra/coded error in the next neighborhood.
+      double avg_intra_err = 0, avg_coded_err = 0, avg_coeff = 0;
+      int starti = regions[k + 1].start;
+      int lasti = AOMMIN(regions[k + 1].last - 1,
+                         regions[k + 1].start + WINDOW_SIZE - 1);
+      int counti = 0;
+      for (i = starti; i <= lasti; i++) {
+        avg_intra_err += stats[i].intra_error;
+        avg_coded_err += stats[i + 1].coded_error;
+        avg_coeff += coeff[i];
+        counti++;
+      }
+      if (counti > 0) {
+        avg_intra_err = AOMMAX(avg_intra_err / (double)counti, 0.001);
+        avg_coded_err /= AOMMAX(avg_coded_err / (double)counti, 0.001);
+        avg_coeff /= AOMMIN(avg_intra_err / (double)counti, 0.99999);
+        // At the boundary, coded error is large, but still the frame is stable
+        int count_coded = 1, count_grad = 1;
+        for (j = starti - 1; j >= regions[k].start; j--) {
+          int intra_close =
+              fabs(stats[j].intra_error - avg_intra_err) / avg_intra_err < 0.1;
+          int coded_close =
+              fabs(stats[j + 1].coded_error - avg_coded_err) / avg_coded_err <
+              0.15;
+          int grad_small = fabs(grad[j + 1]) / avg_coded_err < 0.05;
+          int coded_small = stats[j + 1].coded_error / avg_intra_err < 0.03;
+          int coeff_close =
+              (1 - coeff[j + 1]) / (1 - avg_coeff) < 1.5 || coeff[j] > 0.995;
+          if (!coeff_close || (!coded_close && !coded_small)) count_coded--;
+          if (!grad_small && !coded_small) count_grad--;
+          if (intra_close && count_coded >= 0 && count_grad >= 0) {
+            // this frame probably belongs to the next stable region
+            regions[k + 1].start = j;
+            regions[k].last = j - 1;
+          } else {
+            break;
+          }
+        }
+      }
+    }  // if k < *num_regions - 1
+  }    // end of loop over all regions
+
+  cleanup_regions(regions, num_regions);
+  remove_short_regions(regions, num_regions, HIGH_VAR_REGION, HALF_WIN);
+  get_region_stats(stats, is_flash, regions, coeff, *num_regions);
+
+  // If a stable regions has higher error than neighboring high var regions,
+  // or if the stable region has a lower average correlation,
+  // then it should be merged with them
+  k = 0;
+  while (k < *num_regions && (*num_regions) > 1) {
+    if (regions[k].type == STABLE_REGION &&
+        ((k > 0 &&  // previous regions
+          (regions[k].avg_coded_err > regions[k - 1].avg_coded_err ||
+           regions[k].avg_cor_coeff < regions[k - 1].avg_cor_coeff)) &&
+         (k < *num_regions - 1 &&  // next region
+          (regions[k].avg_coded_err > regions[k + 1].avg_coded_err ||
+           regions[k].avg_cor_coeff < regions[k + 1].avg_cor_coeff)))) {
+      // merge current region with the previous and next regions
+      remove_region(2, regions, num_regions, &k);
+      analyze_region(stats, k - 1, regions, coeff);
+    } else if (regions[k].type == HIGH_VAR_REGION &&
+               ((k > 0 &&  // previous regions
+                 (regions[k].avg_coded_err < regions[k - 1].avg_coded_err ||
+                  regions[k].avg_cor_coeff > regions[k - 1].avg_cor_coeff)) &&
+                (k < *num_regions - 1 &&  // next region
+                 (regions[k].avg_coded_err < regions[k + 1].avg_coded_err ||
+                  regions[k].avg_cor_coeff > regions[k + 1].avg_cor_coeff)))) {
+      // merge current region with the previous and next regions
+      remove_region(2, regions, num_regions, &k);
+      analyze_region(stats, k - 1, regions, coeff);
+    } else {
+      k++;
+    }
+  }
+
+  remove_short_regions(regions, num_regions, STABLE_REGION, WINDOW_SIZE);
+  remove_short_regions(regions, num_regions, HIGH_VAR_REGION, HALF_WIN);
+}
+
+// Identify blending regions.
+static void find_blending_regions(const FIRSTPASS_STATS *stats,
+                                  const int *is_flash, REGIONS *regions,
+                                  int *num_regions, double *coeff) {
+  int i, k = 0;
+  // Blending regions will have large content change, therefore will have a
+  // large consistent change in intra error.
+  int count_stable = 0;
+  while (k < *num_regions) {
+    if (regions[k].type == STABLE_REGION) {
+      k++;
+      count_stable++;
+      continue;
+    }
+    int dir = 0;
+    int start = 0, last;
+    for (i = regions[k].start; i <= regions[k].last; i++) {
+      // First mark the regions that has consistent large change of intra error.
+      if (is_flash[i] || (i > 0 && is_flash[i - 1])) continue;
+      double grad = stats[i].intra_error - stats[i - 1].intra_error;
+      int large_change = fabs(grad) / AOMMAX(stats[i].intra_error, 0.01) > 0.05;
+      int this_dir = 0;
+      if (large_change) {
+        this_dir = (grad > 0) ? 1 : -1;
+      }
+      // the current trend continues
+      if (dir == this_dir) continue;
+      if (dir != 0) {
+        // Mark the end of a new large change group and add it
+        last = i - 1;
+        insert_region(start, last, BLENDING_REGION, regions, num_regions, &k);
+      }
+      dir = this_dir;
+      start = i;
+    }
+    if (dir != 0) {
+      last = regions[k].last;
+      insert_region(start, last, BLENDING_REGION, regions, num_regions, &k);
+    }
+    k++;
+  }
+
+  // If the blending region has very low correlation, mark it as high variance
+  // since we probably cannot benefit from it anyways.
+  get_region_stats(stats, is_flash, regions, coeff, *num_regions);
+  for (k = 0; k < *num_regions; k++) {
+    if (regions[k].type != BLENDING_REGION) continue;
+    if (regions[k].last == regions[k].start || regions[k].avg_cor_coeff < 0.6 ||
+        count_stable == 0)
+      regions[k].type = HIGH_VAR_REGION;
+  }
+  get_region_stats(stats, is_flash, regions, coeff, *num_regions);
+
+  // It is possible for blending to result in a "dip" in intra error (first
+  // decrease then increase). Therefore we need to find the dip and combine the
+  // two regions.
+  k = 1;
+  while (k < *num_regions) {
+    if (k < *num_regions - 1 && regions[k].type == HIGH_VAR_REGION) {
+      // Check if this short high variance regions is actually in the middle of
+      // a blending region.
+      if (regions[k - 1].type == BLENDING_REGION &&
+          regions[k + 1].type == BLENDING_REGION &&
+          regions[k].last - regions[k].start < 3) {
+        int prev_dir = (stats[regions[k - 1].last].intra_error -
+                        stats[regions[k - 1].last - 1].intra_error) > 0
+                           ? 1
+                           : -1;
+        int next_dir = (stats[regions[k + 1].last].intra_error -
+                        stats[regions[k + 1].last - 1].intra_error) > 0
+                           ? 1
+                           : -1;
+        if (prev_dir < 0 && next_dir > 0) {
+          // This is possibly a mid region of blending. Check the ratios
+          double ratio_thres = AOMMIN(regions[k - 1].avg_sr_fr_ratio,
+                                      regions[k + 1].avg_sr_fr_ratio) *
+                               0.95;
+          if (regions[k].avg_sr_fr_ratio > ratio_thres) {
+            regions[k].type = BLENDING_REGION;
+            remove_region(2, regions, num_regions, &k);
+            analyze_region(stats, k - 1, regions, coeff);
+            continue;
+          }
         }
       }
     }
-  }
-  if (prev_lows) {
-    // try with shrinking previous all_zero interval with unsure points
-    for (n = cur_start + min_shrink_len - 1; n > cur_start; n--) {
-      if ((is_high[n - cur_start + before_pad] == 0) ||
-          (is_high[n - cur_start + before_pad] &&
-           si[n - cur_start + before_pad] < SI_LOW)) {
-        int tentative_start = n - min_shrink_len;
-        // check if the previous interval can shrink this much
-        int available =
-            tentative_start - cut_pos[count_cuts - 2] > min_shrink_len &&
-            cur_start - tentative_start < prev_lows;
-        // shrinking too agressively may worsen performance
-        double ratio_thres =
-            1.0 * (cur_start - tentative_start) / (double)(min_shrink_len) +
-            1.0;
+    // Check if we have a pair of consecutive blending regions.
+    if (regions[k - 1].type == BLENDING_REGION &&
+        regions[k].type == BLENDING_REGION) {
+      int prev_dir = (stats[regions[k - 1].last].intra_error -
+                      stats[regions[k - 1].last - 1].intra_error) > 0
+                         ? 1
+                         : -1;
+      int next_dir = (stats[regions[k].last].intra_error -
+                      stats[regions[k].last - 1].intra_error) > 0
+                         ? 1
+                         : -1;
 
-        if (available && (ratio > ratio_thres)) {
-          cut_pos[count_cuts - 1] = tentative_start;
-          *cur_start_ptr = tentative_start;
-          *cur_last_ptr = n;
-          return;
+      // if both are too short, no need to check
+      int total_length = regions[k].last - regions[k - 1].start + 1;
+      if (total_length < 4) {
+        regions[k - 1].type = HIGH_VAR_REGION;
+        k++;
+        continue;
+      }
+
+      int to_merge = 0;
+      if (prev_dir < 0 && next_dir > 0) {
+        // In this case we check the last frame in the previous region.
+        double prev_length =
+            (double)(regions[k - 1].last - regions[k - 1].start + 1);
+        double last_ratio, ratio_thres;
+        if (prev_length < 2.01) {
+          // if the previous region is very short
+          double max_coded_error =
+              AOMMAX(stats[regions[k - 1].last].coded_error,
+                     stats[regions[k - 1].last - 1].coded_error);
+          last_ratio = stats[regions[k - 1].last].sr_coded_error /
+                       AOMMAX(max_coded_error, 0.001);
+          ratio_thres = regions[k].avg_sr_fr_ratio * 0.95;
+        } else {
+          double max_coded_error =
+              AOMMAX(stats[regions[k - 1].last].coded_error,
+                     stats[regions[k - 1].last - 1].coded_error);
+          last_ratio = stats[regions[k - 1].last].sr_coded_error /
+                       AOMMAX(max_coded_error, 0.001);
+          double prev_ratio =
+              (regions[k - 1].avg_sr_fr_ratio * prev_length - last_ratio) /
+              (prev_length - 1.0);
+          ratio_thres = AOMMIN(prev_ratio, regions[k].avg_sr_fr_ratio) * 0.95;
+        }
+        if (last_ratio > ratio_thres) {
+          to_merge = 1;
         }
       }
+
+      if (to_merge) {
+        remove_region(0, regions, num_regions, &k);
+        analyze_region(stats, k - 1, regions, coeff);
+        continue;
+      } else {
+        // These are possibly two separate blending regions. Mark the boundary
+        // frame as HIGH_VAR_REGION to separate the two.
+        int prev_k = k - 1;
+        insert_region(regions[prev_k].last, regions[prev_k].last,
+                      HIGH_VAR_REGION, regions, num_regions, &prev_k);
+        analyze_region(stats, prev_k, regions, coeff);
+        k = prev_k + 1;
+        analyze_region(stats, k, regions, coeff);
+      }
     }
-  }  // prev_lows
-  return;
+    k++;
+  }
+  cleanup_regions(regions, num_regions);
+}
+
+// Clean up decision for blendings. Remove blending regions that are too short.
+// Also if a very short high var region is between a blending and a stable
+// region, just merge it with one of them.
+static void cleanup_blendings(REGIONS *regions, int *num_regions) {
+  int k = 0;
+  while (k<*num_regions && * num_regions> 1) {
+    int is_short_blending = regions[k].type == BLENDING_REGION &&
+                            regions[k].last - regions[k].start + 1 < 5;
+    int is_short_hv = regions[k].type == HIGH_VAR_REGION &&
+                      regions[k].last - regions[k].start + 1 < 5;
+    int has_stable_neighbor =
+        ((k > 0 && regions[k - 1].type == STABLE_REGION) ||
+         (k < *num_regions - 1 && regions[k + 1].type == STABLE_REGION));
+    int has_blend_neighbor =
+        ((k > 0 && regions[k - 1].type == BLENDING_REGION) ||
+         (k < *num_regions - 1 && regions[k + 1].type == BLENDING_REGION));
+    int total_neighbors = (k > 0) + (k < *num_regions - 1);
+
+    if (is_short_blending ||
+        (is_short_hv &&
+         has_stable_neighbor + has_blend_neighbor >= total_neighbors)) {
+      // Remove this region.Try to determine whether to combine it with the
+      // previous or next region.
+      int merge;
+      double prev_diff =
+          (k > 0)
+              ? fabs(regions[k].avg_cor_coeff - regions[k - 1].avg_cor_coeff)
+              : 1;
+      double next_diff =
+          (k < *num_regions - 1)
+              ? fabs(regions[k].avg_cor_coeff - regions[k + 1].avg_cor_coeff)
+              : 1;
+      // merge == 0 means to merge with previous, 1 means to merge with next
+      merge = prev_diff > next_diff;
+      remove_region(merge, regions, num_regions, &k);
+    } else {
+      k++;
+    }
+  }
+  cleanup_regions(regions, num_regions);
+}
+
+// Identify stable and unstable regions from first pass stats.
+// Stats_start points to the first frame to analyze.
+// Offset is the offset from the current frame to the frame stats_start is
+// pointing to.
+static void identify_regions(const FIRSTPASS_STATS *const stats_start,
+                             int total_frames, int offset, REGIONS *regions,
+                             int *total_regions, double *cor_coeff) {
+  int k;
+  if (total_frames <= 1) return;
+
+  double *coeff = cor_coeff + offset;
+
+  // store the initial decisions
+  REGIONS temp_regions[MAX_FIRSTPASS_ANALYSIS_FRAMES];
+  av1_zero_array(temp_regions, MAX_FIRSTPASS_ANALYSIS_FRAMES);
+  int is_flash[MAX_FIRSTPASS_ANALYSIS_FRAMES] = { 0 };
+  // buffers for filtered stats
+  double filt_intra_err[MAX_FIRSTPASS_ANALYSIS_FRAMES] = { 0 };
+  double filt_coded_err[MAX_FIRSTPASS_ANALYSIS_FRAMES] = { 0 };
+  double grad_coded[MAX_FIRSTPASS_ANALYSIS_FRAMES] = { 0 };
+
+  int cur_region = 0, this_start = 0, this_last;
+
+  // find possible flash frames
+  mark_flashes(stats_start, 0, total_frames - 1, is_flash);
+
+  // first get the obvious scenecuts
+  int next_scenecut = -1;
+
+  do {
+    next_scenecut =
+        find_next_scenecut(stats_start, this_start, total_frames - 1, is_flash);
+    this_last = (next_scenecut >= 0) ? (next_scenecut - 1) : total_frames - 1;
+    // low-pass filter the needed stats
+    smooth_filter_stats(stats_start, is_flash, this_start, this_last,
+                        filt_intra_err, filt_coded_err);
+    get_gradient(filt_coded_err, this_start, this_last, grad_coded);
+
+    // find tentative stable regions and unstable regions
+    int num_regions = find_stable_regions(stats_start, grad_coded, is_flash,
+                                          this_start, this_last, temp_regions);
+    adjust_unstable_region_bounds(stats_start, is_flash, grad_coded,
+                                  temp_regions, coeff, &num_regions);
+
+    get_region_stats(stats_start, is_flash, temp_regions, coeff, num_regions);
+
+    // Try to identify blending regions in the unstable regions
+    find_blending_regions(stats_start, is_flash, temp_regions, &num_regions,
+                          coeff);
+    cleanup_blendings(temp_regions, &num_regions);
+
+    // The flash points should all be considered high variance points
+    k = 0;
+    while (k < num_regions) {
+      if (temp_regions[k].type != STABLE_REGION) {
+        k++;
+        continue;
+      }
+      int start = temp_regions[k].start;
+      int last = temp_regions[k].last;
+      for (int i = start; i <= last; i++) {
+        if (is_flash[i]) {
+          insert_region(i, i, HIGH_VAR_REGION, temp_regions, &num_regions, &k);
+        }
+      }
+      k++;
+    }
+    cleanup_regions(temp_regions, &num_regions);
+
+    // copy the regions in the scenecut group
+    for (k = 0; k < num_regions; k++) {
+      regions[k + cur_region] = temp_regions[k];
+    }
+    cur_region += num_regions;
+
+    // add the scenecut region
+    if (next_scenecut > -1) {
+      // add the scenecut region, and find the next scenecut
+      regions[cur_region].type = SCENECUT_REGION;
+      regions[cur_region].start = next_scenecut;
+      regions[cur_region].last = next_scenecut;
+      cur_region++;
+      this_start = next_scenecut + 1;
+    }
+  } while (next_scenecut >= 0);
+
+  *total_regions = cur_region;
+  get_region_stats(stats_start, is_flash, regions, coeff, *total_regions);
+
+  for (k = 0; k < *total_regions; k++) {
+    // If scenecuts are very minor, mark them as high variance.
+    if (regions[k].type != SCENECUT_REGION || regions[k].avg_cor_coeff < 0.8) {
+      continue;
+    }
+    regions[k].type = HIGH_VAR_REGION;
+  }
+  cleanup_regions(regions, total_regions);
+  get_region_stats(stats_start, is_flash, regions, coeff, *total_regions);
+
+  for (k = 0; k < *total_regions; k++) {
+    regions[k].start += offset;
+    regions[k].last += offset;
+  }
+}
+
+static int find_regions_index(const REGIONS *regions, int num_regions,
+                              int frame_idx) {
+  for (int k = 0; k < num_regions; k++) {
+    if (regions[k].start <= frame_idx && regions[k].last >= frame_idx) {
+      return k;
+    }
+  }
+  return -1;
 }
 
 /*!\brief Determine the length of future GF groups.
@@ -1245,9 +1915,6 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
     return;
   }
 
-  if (rc->frames_since_key > 0)
-    max_gop_length += !cpi->gf_state.arf_gf_boost_lst;
-
   // TODO(urvang): Try logic to vary min and max interval based on q.
   const int active_min_gf_interval = rc->min_gf_interval;
   const int active_max_gf_interval =
@@ -1257,31 +1924,24 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
   i = (rc->frames_since_key == 0);
   max_intervals = cpi->lap_enabled ? 1 : max_intervals;
   int count_cuts = 1;
-  int cur_start = -1 + (rc->frames_since_key == 0), cur_last;
+  // If cpi->gf_state.arf_gf_boost_lst is 0, we are starting with a KF or GF.
+  int cur_start = -1 + !cpi->gf_state.arf_gf_boost_lst, cur_last;
   int cut_pos[MAX_NUM_GF_INTERVALS + 1] = { -1 };
   int cut_here;
-  int prev_lows = 0;
   GF_GROUP_STATS gf_stats;
   init_gf_stats(&gf_stats);
   while (count_cuts < max_intervals + 1) {
     // reaches next key frame, break here
-    if (i >= rc->frames_to_key) {
-      cut_pos[count_cuts] = i - 1;
-      count_cuts++;
-      break;
-    }
-
-    // reached maximum len, but nothing special yet (almost static)
-    // let's look at the next interval
-    if (i - cur_start >= rc->static_scene_max_gf_interval) {
+    if (i >= rc->frames_to_key + rc->next_is_fwd_key) {
+      cut_here = 2;
+    } else if (i - cur_start >= rc->static_scene_max_gf_interval) {
+      // reached maximum len, but nothing special yet (almost static)
+      // let's look at the next interval
       cut_here = 1;
-    } else {
+    } else if (EOF == input_stats(twopass, &next_frame)) {
       // reaches last frame, break
-      if (EOF == input_stats(twopass, &next_frame)) {
-        cut_pos[count_cuts] = i - 1;
-        count_cuts++;
-        break;
-      }
+      cut_here = 2;
+    } else {
       // Test for the case where there is a brief flash but the prediction
       // quality back to an earlier frame is then restored.
       flash_detected = detect_flash(twopass, 0);
@@ -1296,60 +1956,100 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
     }
     if (cut_here) {
       cur_last = i - 1;  // the current last frame in the gf group
+      int ori_last = cur_last;
+      // The region frame idx does not start from the same frame as cur_start
+      // and cur_last. Need to offset them.
+      int offset = rc->frames_since_key - rc->regions_offset;
+      REGIONS *regions = rc->regions;
+      int num_regions = rc->num_regions;
       if (cpi->oxcf.kf_cfg.fwd_kf_enabled && rc->next_is_fwd_key) {
         const int frames_left = rc->frames_to_key - i;
         const int min_int = AOMMIN(MIN_FWD_KF_INTERVAL, active_min_gf_interval);
-        if (frames_left < min_int) {
+        if (frames_left < min_int && frames_left > 0) {
           cur_last = rc->frames_to_key - min_int - 1;
         }
       }
 
+      int scenecut_idx = -1;
       // only try shrinking if interval smaller than active_max_gf_interval
-      if (cur_last - cur_start <= active_max_gf_interval) {
-        // determine in the current decided gop the higher and lower errs
-        int n;
-        double ratio;
+      if (cur_last - cur_start <= active_max_gf_interval &&
+          cur_last > cur_start) {
+        // find the region indices of where the first and last frame belong.
+        int k_start =
+            find_regions_index(regions, num_regions, cur_start + offset);
+        int k_last =
+            find_regions_index(regions, num_regions, cur_last + offset);
+        if (cur_start + offset == 0) k_start = 0;
 
-        // load neighboring coded errs
-        int is_high[MAX_GF_INTERVAL + 1 + MAX_PAD_GF_CHECK * 2] = { 0 };
-        double errs[MAX_GF_INTERVAL + 1 + MAX_PAD_GF_CHECK * 2] = { 0 };
-        double si[MAX_GF_INTERVAL + 1 + MAX_PAD_GF_CHECK * 2] = { 0 };
-        int before_pad =
-            AOMMIN(MAX_PAD_GF_CHECK, rc->frames_since_key + cur_start - 1);
-        int after_pad =
-            AOMMIN(MAX_PAD_GF_CHECK, rc->frames_to_key - cur_last - 1);
-        for (n = cur_start - before_pad; n <= cur_last + after_pad; n++) {
-          if (start_pos + n > twopass->stats_buf_ctx->stats_in_end) {
-            after_pad = n - cur_last - 1;
-            assert(after_pad >= 0);
+        // See if we have a scenecut in between
+        for (int r = k_start + 1; r <= k_last; r++) {
+          if (regions[r].type == SCENECUT_REGION &&
+              regions[r].last - offset - cur_start > active_min_gf_interval) {
+            scenecut_idx = r;
             break;
-          } else if (start_pos + n < twopass->stats_buf_ctx->stats_in_start) {
-            before_pad = cur_start - n - 1;
-            continue;
           }
-          errs[n + before_pad - cur_start] = (start_pos + n)->coded_error;
         }
-        const int len = before_pad + after_pad + cur_last - cur_start + 1;
-        const int reset = determine_high_err_gf(
-            errs, is_high, si, len, &ratio, cur_start, cur_last, before_pad);
 
-        // if the current frame may have high error, try shrinking
-        if (is_high[cur_last - cur_start + before_pad] == 1 ||
-            (!reset && si[cur_last - cur_start + before_pad] < SI_LOW)) {
-          // try not to cut in high err area
-          set_last_prev_low_err(&cur_start, &cur_last, cut_pos, count_cuts,
-                                before_pad, ratio, is_high, si, prev_lows,
-                                min_shrink_int);
-        }  // if current frame high error
-        // count how many trailing lower error frames we have in this decided
-        // gf group
-        prev_lows = 0;
-        for (n = cur_last - 1; n > cur_start + min_shrink_int; n--) {
-          if (is_high[n - cur_start + before_pad] == 0 &&
-              (si[n - cur_start + before_pad] > SI_HIGH || reset)) {
-            prev_lows++;
-          } else {
-            break;
+        // if the found scenecut is very close to the end, ignore it.
+        if (regions[num_regions - 1].last - regions[scenecut_idx].last < 4) {
+          scenecut_idx = -1;
+        }
+
+        if (scenecut_idx != -1) {
+          // If we have a scenecut, then stop at it.
+          // TODO(bohanli): add logic here to stop before the scenecut and for
+          // the next gop start from the scenecut with GF
+          int is_minor_sc = (regions[scenecut_idx].avg_cor_coeff > 0.6);
+          cur_last = regions[scenecut_idx].last - offset - !is_minor_sc;
+        } else {
+          int is_last_analysed = (k_last == num_regions - 1) &&
+                                 (cur_last + offset == regions[k_last].last);
+          int not_enough_regions =
+              k_last - k_start <=
+              1 + (regions[k_start].type == SCENECUT_REGION);
+          // if we are very close to the end, then do not shrink since it may
+          // introduce intervals that are too short
+          if (!(is_last_analysed && not_enough_regions)) {
+            int found = 0;
+            // first try to end at a stable area
+            for (int j = cur_last; j >= cur_start + min_shrink_int; j--) {
+              if (regions[find_regions_index(regions, num_regions, j + offset)]
+                      .type == STABLE_REGION) {
+                cur_last = j;
+                found = 1;
+                break;
+              }
+            }
+            if (!found) {
+              // Could not find stable point,
+              // try to find an OK point (high correlation, not blending)
+              for (int j = cur_last; j >= cur_start + min_shrink_int; j--) {
+                REGIONS *cur_region =
+                    regions +
+                    find_regions_index(regions, num_regions, j + offset);
+                double avg_coeff = cur_region->avg_cor_coeff;
+                if (rc->cor_coeff[j + offset] > avg_coeff &&
+                    cur_region->type != BLENDING_REGION) {
+                  cur_last = j;
+                  found = 1;
+                  break;
+                }
+              }
+            }
+            if (!found) {
+              // Could not find a better point,
+              // try not to cut in blending areas
+              for (int j = cur_last; j >= cur_start + min_shrink_int; j--) {
+                REGIONS *cur_region =
+                    regions +
+                    find_regions_index(regions, num_regions, j + offset);
+                if (cur_region->type != BLENDING_REGION) {
+                  cur_last = j;
+                  break;
+                }
+              }
+            }
+            // if cannot find anything, just cut at the original place.
           }
         }
       }
@@ -1359,7 +2059,14 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
       // reset pointers to the shrinked location
       twopass->stats_in = start_pos + cur_last;
       cur_start = cur_last;
+      if (regions[find_regions_index(regions, num_regions,
+                                     cur_start + 1 + offset)]
+              .type == SCENECUT_REGION) {
+        cur_start++;
+      }
       i = cur_last;
+
+      if (cut_here > 1 && cur_last == ori_last) break;
 
       // reset accumulators
       init_gf_stats(&gf_stats);
@@ -1374,19 +2081,6 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
   }
   rc->cur_gf_index = 0;
   twopass->stats_in = start_pos;
-
-#if GF_SHRINK_OUTPUT
-  printf("\nf_to_key: %d, count_cut: %d. ", rc->frames_to_key, count_cuts);
-  for (int n = 0; n < count_cuts; n++) {
-    printf("%d ", cut_pos[n]);
-  }
-  printf("\n");
-
-  for (int n = 0; n < rc->intervals_till_gf_calculate_due; n++) {
-    printf("%d ", rc->gf_intervals[n]);
-  }
-  printf("\n\n");
-#endif
 }
 
 static void correct_frames_to_key(AV1_COMP *cpi) {
@@ -1487,20 +2181,19 @@ static INLINE void set_baseline_gf_interval(AV1_COMP *cpi, int arf_position,
 
   if (cpi->oxcf.kf_cfg.fwd_kf_enabled && use_alt_ref && !is_last_kf &&
       cpi->rc.next_is_fwd_key) {
-    if (arf_position == rc->frames_to_key) {
+    if (arf_position == rc->frames_to_key + 1) {
       rc->baseline_gf_interval = arf_position;
       // if the last gf group will be smaller than MIN_FWD_KF_INTERVAL
-    } else if ((rc->frames_to_key - arf_position <
-                AOMMAX(MIN_FWD_KF_INTERVAL, rc->min_gf_interval)) &&
-               (rc->frames_to_key != arf_position)) {
+    } else if (rc->frames_to_key + 1 - arf_position <
+               AOMMAX(MIN_FWD_KF_INTERVAL, rc->min_gf_interval)) {
       // if possible, merge the last two gf groups
-      if (rc->frames_to_key <= active_max_gf_interval) {
-        rc->baseline_gf_interval = rc->frames_to_key;
+      if (rc->frames_to_key + 1 <= active_max_gf_interval) {
+        rc->baseline_gf_interval = rc->frames_to_key + 1;
         if (is_final_pass) rc->intervals_till_gf_calculate_due = 0;
         // if merging the last two gf groups creates a group that is too long,
         // split them and force the last gf group to be the MIN_FWD_KF_INTERVAL
       } else {
-        rc->baseline_gf_interval = rc->frames_to_key - MIN_FWD_KF_INTERVAL;
+        rc->baseline_gf_interval = rc->frames_to_key + 1 - MIN_FWD_KF_INTERVAL;
         if (is_final_pass) rc->intervals_till_gf_calculate_due = 0;
       }
     } else {
@@ -1787,15 +2480,6 @@ static void define_gf_group(AV1_COMP *cpi, FIRSTPASS_STATS *this_frame,
             cpi->lap_enabled ? &rc->num_stats_required_for_gfu_boost : NULL));
   }
 
-  // rc->gf_intervals assumes the usage of alt_ref, therefore adding one overlay
-  // frame to the next gf. If no alt_ref is used, should substract 1 frame from
-  // the next gf group.
-  // TODO(bohanli): should incorporate the usage of alt_ref into
-  // calculate_gf_length
-  if (is_final_pass && rc->intervals_till_gf_calculate_due > 0) {
-    rc->gf_intervals[rc->cur_gf_index]--;
-  }
-
 #define LAST_ALR_BOOST_FACTOR 0.2f
   rc->arf_boost_factor = 1.0;
   if (use_alt_ref && !is_lossless_requested(rc_cfg)) {
@@ -1840,25 +2524,9 @@ static void define_gf_group(AV1_COMP *cpi, FIRSTPASS_STATS *this_frame,
          (rc->baseline_gf_interval * (double)cm->mi_params.mb_rows));
 
     int tmp_q;
-    // rc factor is a weight factor that corrects for local rate control drift.
-    double rc_factor = 1.0;
-    int64_t bits = rc_cfg->target_bandwidth;
-
-    if (bits > 0) {
-      int rate_error;
-
-      rate_error = (int)((rc->vbr_bits_off_target * 100) / bits);
-      rate_error = clamp(rate_error, -100, 100);
-      if (rate_error > 0) {
-        rc_factor = AOMMAX(RC_FACTOR_MIN, (double)(100 - rate_error) / 100.0);
-      } else {
-        rc_factor = AOMMIN(RC_FACTOR_MAX, (double)(100 - rate_error) / 100.0);
-      }
-    }
-
     tmp_q = get_twopass_worst_quality(
         cpi, group_av_err, (group_av_skip_pct + group_av_inactive_zone),
-        vbr_group_bits_per_frame, rc_factor);
+        vbr_group_bits_per_frame);
     rc->active_worst_quality = AOMMAX(tmp_q, rc->active_worst_quality >> 1);
   }
 #endif
@@ -1880,10 +2548,6 @@ static void define_gf_group(AV1_COMP *cpi, FIRSTPASS_STATS *this_frame,
         rc->baseline_gf_interval);
   }
 
-  // Reset rolling actual and target bits counters for ARF groups.
-  twopass->rolling_arf_group_target_bits = 1;
-  twopass->rolling_arf_group_actual_bits = 1;
-
   av1_gop_bit_allocation(cpi, rc, gf_group, rc->frames_since_key == 0,
                          use_alt_ref, gf_group_bits);
 
@@ -1896,6 +2560,10 @@ static void define_gf_group(AV1_COMP *cpi, FIRSTPASS_STATS *this_frame,
   // TODO(jingning): Generalize this condition.
   if (is_final_pass) {
     cpi->gf_state.arf_gf_boost_lst = use_alt_ref;
+
+    // Reset rolling actual and target bits counters for ARF groups.
+    twopass->rolling_arf_group_target_bits = 1;
+    twopass->rolling_arf_group_actual_bits = 1;
   }
 }
 
@@ -2222,7 +2890,9 @@ static int define_kf_interval(AV1_COMP *cpi, FIRSTPASS_STATS *this_frame,
   if (cpi->lap_enabled && !scenecut_detected)
     frames_to_key = num_frames_to_next_key;
 
-  if (kf_cfg->fwd_kf_enabled && scenecut_detected) rc->next_is_fwd_key = 0;
+  if (!kf_cfg->fwd_kf_enabled || scenecut_detected ||
+      twopass->stats_in >= twopass->stats_buf_ctx->stats_in_end)
+    rc->next_is_fwd_key = 0;
 
   return frames_to_key;
 }
@@ -2494,6 +3164,7 @@ static void find_next_key_frame(AV1_COMP *cpi, FIRSTPASS_STATS *this_frame) {
     // Accumulate kf group error.
     kf_group_err +=
         calculate_modified_err(frame_info, twopass, oxcf, this_frame);
+    rc->next_is_fwd_key = 0;
   }
 
   // Calculate the number of bits that should be assigned to the kf group.
@@ -2639,7 +3310,6 @@ static int is_skippable_frame(const AV1_COMP *cpi) {
 #if ARF_STATS_OUTPUT
 unsigned int arf_count = 0;
 #endif
-#define DEFAULT_GRP_WEIGHT 1.0
 
 static int get_section_target_bandwidth(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
@@ -2688,7 +3358,7 @@ static void process_first_pass_stats(AV1_COMP *cpi,
         ((double)cm->mi_params.mb_rows * section_length);
     const int tmp_q = get_twopass_worst_quality(
         cpi, section_error, section_intra_skip + section_inactive_zone,
-        section_target_bandwidth, DEFAULT_GRP_WEIGHT);
+        section_target_bandwidth);
 
     rc->active_worst_quality = tmp_q;
     rc->ni_av_qi = tmp_q;
@@ -2755,8 +3425,6 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
   const int update_type = gf_group->update_type[gf_group->index];
   frame_params->frame_type = gf_group->frame_type[gf_group->index];
 
-  if (rc->frames_since_key > 0) frame_params->frame_type = INTER_FRAME;
-
   if (gf_group->index < gf_group->size && !(frame_flags & FRAMEFLAGS_KEY)) {
     assert(gf_group->index < gf_group->size);
 
@@ -2791,11 +3459,21 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
   // Keyframe and section processing.
   FIRSTPASS_STATS this_frame_copy;
   this_frame_copy = this_frame;
-  if (rc->frames_to_key <= 0) {
+  int is_overlay_forward_kf =
+      rc->frames_to_key == 0 &&
+      gf_group->update_type[gf_group->index] == OVERLAY_UPDATE;
+  if (rc->frames_to_key <= 0 && !is_overlay_forward_kf) {
     assert(rc->frames_to_key >= -1);
-    frame_params->frame_type = KEY_FRAME;
     // Define next KF group and assign bits to it.
+    int kf_offset = rc->frames_to_key;
+    if (rc->frames_to_key < 0) {
+      this_frame = *(twopass->stats_in - 1);
+    } else {
+      frame_params->frame_type = KEY_FRAME;
+    }
     find_next_key_frame(cpi, &this_frame);
+    rc->frames_since_key -= kf_offset;
+    rc->frames_to_key += kf_offset;
     this_frame = this_frame_copy;
   } else {
     const int altref_enabled = is_altref_enabled(oxcf->gf_cfg.lag_in_frames,
@@ -2856,6 +3534,44 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
                                           oxcf->algo_cfg.arnr_max_frames / 2)
             : MAX_GF_LENGTH_LAP;
 
+    // Identify regions if needed.
+    if (rc->frames_since_key == 0 || rc->frames_since_key == 1 ||
+        (rc->frames_till_regions_update - rc->frames_since_key <
+             rc->frames_to_key &&
+         rc->frames_till_regions_update - rc->frames_since_key <
+             max_gop_length + 1)) {
+      int is_first_stat =
+          twopass->stats_in == twopass->stats_buf_ctx->stats_in_start;
+      const FIRSTPASS_STATS *stats_start = twopass->stats_in + is_first_stat;
+      // offset of stats_start from the current frame
+      int offset = is_first_stat || (rc->frames_since_key == 0);
+      // offset of the region indices from the previous key frame
+      rc->regions_offset = rc->frames_since_key;
+      // how many frames we can analyze from this frame
+      int rest_frames = AOMMIN(rc->frames_to_key + rc->next_is_fwd_key,
+                               MAX_FIRSTPASS_ANALYSIS_FRAMES);
+      rest_frames =
+          AOMMIN(rest_frames,
+                 (int)(twopass->stats_buf_ctx->stats_in_end - stats_start + 1) +
+                     offset);
+
+      rc->frames_till_regions_update = rest_frames;
+
+      identify_regions(stats_start, rest_frames - offset, offset, rc->regions,
+                       &rc->num_regions, rc->cor_coeff);
+    }
+
+    int cur_region_idx =
+        find_regions_index(rc->regions, rc->num_regions,
+                           rc->frames_since_key - rc->regions_offset);
+    if ((cur_region_idx >= 0 &&
+         rc->regions[cur_region_idx].type == SCENECUT_REGION) ||
+        rc->frames_since_key == 0) {
+      // If we start from a scenecut, then the last GOP's arf boost is not
+      // needed for this GOP.
+      cpi->gf_state.arf_gf_boost_lst = 0;
+    }
+
     // TODO(jingning): Resoleve the redundant calls here.
     if (rc->intervals_till_gf_calculate_due == 0 || 1) {
       calculate_gf_length(cpi, max_gop_length, MAX_NUM_GF_INTERVALS);
@@ -2863,26 +3579,45 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
 
     if (max_gop_length > 16 && oxcf->algo_cfg.enable_tpl_model &&
         !cpi->sf.tpl_sf.disable_gop_length_decision) {
+      int this_idx = rc->frames_since_key + rc->gf_intervals[rc->cur_gf_index] -
+                     rc->regions_offset - 1;
+      int this_region =
+          find_regions_index(rc->regions, rc->num_regions, this_idx);
+      int next_region =
+          find_regions_index(rc->regions, rc->num_regions, this_idx + 1);
+      int is_last_scenecut =
+          (rc->gf_intervals[rc->cur_gf_index] >= rc->frames_to_key ||
+           rc->regions[this_region].type == SCENECUT_REGION ||
+           rc->regions[next_region].type == SCENECUT_REGION);
+      int ori_gf_int = rc->gf_intervals[rc->cur_gf_index];
+
       if (rc->gf_intervals[rc->cur_gf_index] > 16) {
         // The calculate_gf_length function is previously used with
         // max_gop_length = 32 with look-ahead gf intervals.
         define_gf_group(cpi, &this_frame, frame_params, max_gop_length, 0);
         this_frame = this_frame_copy;
-        if (rc->frames_since_key > 0 && gf_group->arf_index > -1) {
+        int is_temporal_filter_enabled =
+            (rc->frames_since_key > 0 && gf_group->arf_index > -1);
+        if (is_temporal_filter_enabled) {
           int arf_src_index = gf_group->arf_src_offset[gf_group->arf_index];
           av1_temporal_filter(cpi, arf_src_index, NULL);
+          aom_extend_frame_borders(&cpi->alt_ref_buffer,
+                                   av1_num_planes(&cpi->common));
         }
         if (!av1_tpl_setup_stats(cpi, 1, frame_params, frame_input)) {
           // Tpl decides that a shorter gf interval is better.
           // TODO(jingning): Remove redundant computations here.
           max_gop_length = 16;
           calculate_gf_length(cpi, max_gop_length, 1);
+          if (is_last_scenecut &&
+              (ori_gf_int - rc->gf_intervals[rc->cur_gf_index] < 4)) {
+            rc->gf_intervals[rc->cur_gf_index] = ori_gf_int;
+          }
+        } else {
+          // Tpl stats is reused only when the ARF frame is temporally filtered
+          if (is_temporal_filter_enabled)
+            cpi->tpl_data.skip_tpl_setup_stats = 1;
         }
-      } else {
-        // Even based on 32 we still decide to use a short gf interval.
-        // Better to re-decide based on 16 then
-        max_gop_length = 16;
-        calculate_gf_length(cpi, max_gop_length, 1);
       }
     }
     define_gf_group(cpi, &this_frame, frame_params, max_gop_length, 0);
@@ -3033,7 +3768,6 @@ void av1_init_single_pass_lap(AV1_COMP *cpi) {
 void av1_twopass_postencode_update(AV1_COMP *cpi) {
   TWO_PASS *const twopass = &cpi->twopass;
   RATE_CONTROL *const rc = &cpi->rc;
-  const int bits_used = rc->base_frame_target;
   const RateControlCfg *const rc_cfg = &cpi->oxcf.rc_cfg;
 
   // VBR correction is done through rc->vbr_bits_off_target. Based on the
@@ -3042,10 +3776,10 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
   // is designed to prevent extreme behaviour at the end of a clip
   // or group of frames.
   rc->vbr_bits_off_target += rc->base_frame_target - rc->projected_frame_size;
-  twopass->bits_left = AOMMAX(twopass->bits_left - bits_used, 0);
+  twopass->bits_left = AOMMAX(twopass->bits_left - rc->base_frame_target, 0);
 
   // Target vs actual bits for this arf group.
-  twopass->rolling_arf_group_target_bits += rc->this_frame_target;
+  twopass->rolling_arf_group_target_bits += rc->base_frame_target;
   twopass->rolling_arf_group_actual_bits += rc->projected_frame_size;
 
   // Calculate the pct rc error.
@@ -3070,12 +3804,6 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
         rc->active_best_quality[i] = cpi->vmaf_info.original_qindex;
       }
 #endif
-
-      // if (pyramid_level >= 2) {
-      //   rc->active_best_quality[pyramid_level] =
-      //     AOMMAX(rc->active_best_quality[pyramid_level],
-      //            cpi->common.base_qindex);
-      // }
     }
   }
 
@@ -3104,7 +3832,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
 #endif
 
   if (cpi->common.current_frame.frame_type != KEY_FRAME) {
-    twopass->kf_group_bits -= bits_used;
+    twopass->kf_group_bits -= rc->base_frame_target;
     twopass->last_kfgroup_zeromotion_pct = twopass->kf_zeromotion_pct;
   }
   twopass->kf_group_bits = AOMMAX(twopass->kf_group_bits, 0);

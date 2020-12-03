@@ -117,9 +117,11 @@ static AOM_INLINE void set_planes_to_neutral_grey(
   }
 }
 
+#if !CONFIG_REALTIME_ONLY
 static AOM_INLINE void loop_restoration_read_sb_coeffs(
     const AV1_COMMON *const cm, MACROBLOCKD *xd, aom_reader *const r, int plane,
     int runit_idx);
+#endif
 
 static int read_is_valid(const uint8_t *start, size_t len, const uint8_t *end) {
   return len != 0 && len <= (size_t)(end - start);
@@ -1328,6 +1330,7 @@ static AOM_INLINE void decode_partition(AV1Decoder *const pbi,
                                                      parse_decode_block };
 
   if (parse_decode_flag & 1) {
+#if !CONFIG_REALTIME_ONLY
     const int num_planes = av1_num_planes(cm);
     for (int plane = 0; plane < num_planes; ++plane) {
       int rcol0, rcol1, rrow0, rrow1;
@@ -1342,6 +1345,7 @@ static AOM_INLINE void decode_partition(AV1Decoder *const pbi,
         }
       }
     }
+#endif
 
     partition = (bsize < BLOCK_8X8) ? PARTITION_NONE
                                     : read_partition(xd, mi_row, mi_col, reader,
@@ -1464,9 +1468,10 @@ static AOM_INLINE void setup_segmentation(AV1_COMMON *const cm,
 
   seg->enabled = aom_rb_read_bit(rb);
   if (!seg->enabled) {
-    if (cm->cur_frame->seg_map)
+    if (cm->cur_frame->seg_map) {
       memset(cm->cur_frame->seg_map, 0,
-             (cm->mi_params.mi_rows * cm->mi_params.mi_cols));
+             (cm->cur_frame->mi_rows * cm->cur_frame->mi_cols));
+    }
 
     memset(seg, 0, sizeof(*seg));
     segfeatures_copy(&cm->cur_frame->seg, seg);
@@ -1584,6 +1589,7 @@ static AOM_INLINE void decode_restoration_mode(AV1_COMMON *cm,
   }
 }
 
+#if !CONFIG_REALTIME_ONLY
 static AOM_INLINE void read_wiener_filter(int wiener_win,
                                           WienerInfo *wiener_info,
                                           WienerInfo *ref_wiener_info,
@@ -1687,7 +1693,7 @@ static AOM_INLINE void loop_restoration_read_sb_coeffs(
     int runit_idx) {
   const RestorationInfo *rsi = &cm->rst_info[plane];
   RestorationUnitInfo *rui = &rsi->unit_info[runit_idx];
-  if (rsi->frame_restoration_type == RESTORE_NONE) return;
+  assert(rsi->frame_restoration_type != RESTORE_NONE);
 
   assert(!cm->features.all_lossless);
 
@@ -1724,6 +1730,7 @@ static AOM_INLINE void loop_restoration_read_sb_coeffs(
     }
   }
 }
+#endif  // !CONFIG_REALTIME_ONLY
 
 static AOM_INLINE void setup_loopfilter(AV1_COMMON *cm,
                                         struct aom_read_bit_buffer *rb) {
@@ -4307,10 +4314,14 @@ static int read_global_motion_params(WarpedMotionParams *params,
                        trans_dec_factor;
   }
 
+#if !CONFIG_REALTIME_ONLY
+  // For realtime only build, warped motion is disabled, so this section is not
+  // needed.
   if (params->wmtype <= AFFINE) {
     int good_shear_params = av1_get_shear_params(params);
     if (!good_shear_params) return 0;
   }
+#endif
 
   return 1;
 }
@@ -5099,6 +5110,7 @@ BITSTREAM_PROFILE av1_read_profile(struct aom_read_bit_buffer *rb) {
   return (BITSTREAM_PROFILE)profile;
 }
 
+#if !CONFIG_REALTIME_ONLY
 static AOM_INLINE void superres_post_decode(AV1Decoder *pbi) {
   AV1_COMMON *const cm = &pbi->common;
   BufferPool *const pool = cm->buffer_pool;
@@ -5108,6 +5120,7 @@ static AOM_INLINE void superres_post_decode(AV1Decoder *pbi) {
 
   av1_superres_upscale(cm, pool);
 }
+#endif
 
 uint32_t av1_decode_frame_headers_and_setup(AV1Decoder *pbi,
                                             struct aom_read_bit_buffer *rb,
@@ -5189,11 +5202,13 @@ uint32_t av1_decode_frame_headers_and_setup(AV1Decoder *pbi,
 static AOM_INLINE void setup_frame_info(AV1Decoder *pbi) {
   AV1_COMMON *const cm = &pbi->common;
 
+#if !CONFIG_REALTIME_ONLY
   if (cm->rst_info[0].frame_restoration_type != RESTORE_NONE ||
       cm->rst_info[1].frame_restoration_type != RESTORE_NONE ||
       cm->rst_info[2].frame_restoration_type != RESTORE_NONE) {
     av1_alloc_restoration_buffers(cm);
   }
+#endif
   const int use_highbd = cm->seq_params.use_highbitdepth;
   const int buf_size = MC_TEMP_BUF_PELS << use_highbd;
   if (pbi->td.mc_buf_size != buf_size) {
@@ -5254,10 +5269,6 @@ void av1_decode_tg_tiles_and_wrapup(AV1Decoder *pbi, const uint8_t *data,
       }
     }
 
-    const int do_loop_restoration =
-        cm->rst_info[0].frame_restoration_type != RESTORE_NONE ||
-        cm->rst_info[1].frame_restoration_type != RESTORE_NONE ||
-        cm->rst_info[2].frame_restoration_type != RESTORE_NONE;
     const int do_cdef =
         !pbi->skip_loop_filter && !cm->features.coded_lossless &&
         (cm->cdef_info.cdef_bits || cm->cdef_info.cdef_strengths[0] ||
@@ -5265,6 +5276,11 @@ void av1_decode_tg_tiles_and_wrapup(AV1Decoder *pbi, const uint8_t *data,
     const int do_superres = av1_superres_scaled(cm);
     const int optimized_loop_restoration = !do_cdef && !do_superres;
 
+#if !CONFIG_REALTIME_ONLY
+    const int do_loop_restoration =
+        cm->rst_info[0].frame_restoration_type != RESTORE_NONE ||
+        cm->rst_info[1].frame_restoration_type != RESTORE_NONE ||
+        cm->rst_info[2].frame_restoration_type != RESTORE_NONE;
     if (!optimized_loop_restoration) {
       if (do_loop_restoration)
         av1_loop_restoration_save_boundary_lines(&pbi->common.cur_frame->buf,
@@ -5306,6 +5322,13 @@ void av1_decode_tg_tiles_and_wrapup(AV1Decoder *pbi, const uint8_t *data,
         }
       }
     }
+#else
+    if (!optimized_loop_restoration) {
+      if (do_cdef) {
+        av1_cdef_frame(&pbi->common.cur_frame->buf, cm, &pbi->dcb.xd);
+      }
+    }
+#endif  // !CONFIG_REALTIME_ONLY
   }
 #if CONFIG_LPF_MASK
   av1_zero_array(cm->lf.lfm, cm->lf.lfm_num);

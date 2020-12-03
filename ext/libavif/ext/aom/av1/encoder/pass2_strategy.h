@@ -19,6 +19,8 @@ extern "C" {
 struct AV1_COMP;
 struct EncodeFrameParams;
 
+#include "av1/encoder/encoder.h"
+
 /*!\endcond */
 /*!
  * \brief accumulated stats and features in a gf group

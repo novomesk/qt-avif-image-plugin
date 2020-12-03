@@ -229,9 +229,13 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
                                    cm->seq_params.bit_depth);
     // based on tests result for rtc test set
     // 0.04590 boosted or 0.02295 non-booseted in 18-bit fixed point
-    const int strength_boost_q_treshold = 700;
-    const int inter_frame_multiplier =
-        q > strength_boost_q_treshold ? 12034 : 6017;
+    const int strength_boost_q_treshold = 0;
+    int inter_frame_multiplier =
+        (q > strength_boost_q_treshold ||
+         (cpi->sf.rt_sf.use_nonrd_pick_mode &&
+          cpi->common.width * cpi->common.height > 352 * 288))
+            ? 12034
+            : 6017;
     // These values were determined by linear fitting the result of the
     // searched level for 8 bit depth:
     // Keyframes: filt_guess = q * 0.06699 - 1.60817

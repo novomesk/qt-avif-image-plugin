@@ -2008,7 +2008,7 @@ static aom_codec_err_t encoder_init(aom_codec_ctx_t *ctx) {
         // Enable look ahead - enabled for AOM_Q, AOM_CQ, AOM_VBR
         *num_lap_buffers = priv->cfg.g_lag_in_frames;
         *num_lap_buffers =
-            clamp(*num_lap_buffers, 1,
+            clamp(*num_lap_buffers, 0,
                   AOMMIN(MAX_LAP_BUFFERS, priv->oxcf.kf_cfg.key_freq_max +
                                               SCENE_CUT_KEY_TEST_INTERVAL));
         if ((int)priv->cfg.g_lag_in_frames - (*num_lap_buffers) >=

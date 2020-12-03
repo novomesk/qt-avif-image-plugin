@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.5)
 # and find_package()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
 
-project(libavif LANGUAGES C VERSION 0.8.3)
+project(libavif LANGUAGES C VERSION 0.8.4)
 
 # Set C99 as the default
 set(CMAKE_C_STANDARD 99)
@@ -19,7 +19,7 @@ set(CMAKE_C_STANDARD 99)
 #     Increment MINOR. Set PATCH to 0
 #   If the source code was changed, but there were no interface changes:
 #     Increment PATCH.
-set(LIBRARY_VERSION_MAJOR 8)
+set(LIBRARY_VERSION_MAJOR 9)
 set(LIBRARY_VERSION_MINOR 0)
 set(LIBRARY_VERSION_PATCH 0)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
@@ -131,7 +131,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     )
     # The detection of cross compilation by -Wpoison-system-directories has false positives on macOS because
     # --sysroot is implicitly added. Turn the warning off.
-    check_c_compiler_flag(-Wpoison-system-directories HAVE_POISON_SYSTEM_DIRECTORIES_WARNING)
+    if(NOT DEFINED HAVE_POISON_SYSTEM_DIRECTORIES_WARNING)
+        check_c_compiler_flag(-Wpoison-system-directories HAVE_POISON_SYSTEM_DIRECTORIES_WARNING)
+    endif()
     if(HAVE_POISON_SYSTEM_DIRECTORIES_WARNING)
         add_definitions(-Wno-poison-system-directories)
     endif()

@@ -165,9 +165,10 @@ static AOM_INLINE void update_global_motion_used(PREDICTION_MODE mode,
 }
 
 static AOM_INLINE void update_filter_type_cdf(const MACROBLOCKD *xd,
-                                              const MB_MODE_INFO *mbmi) {
-  int dir;
-  for (dir = 0; dir < 2; ++dir) {
+                                              const MB_MODE_INFO *mbmi,
+                                              int dual_filter) {
+  for (int dir = 0; dir < 2; ++dir) {
+    if (dir && !dual_filter) break;
     const int ctx = av1_get_pred_context_switchable_interp(xd, dir);
     InterpFilter filter = av1_extract_interp_filter(mbmi->interp_filters, dir);
     update_cdf(xd->tile_ctx->switchable_interp_cdf[ctx], filter,
@@ -331,10 +332,8 @@ static AOM_INLINE unsigned int get_num_refs_to_disable(
     num_refs_to_disable++;
     if (cpi->sf.inter_sf.selective_ref_frame >= 5 &&
         *ref_frame_flags & av1_ref_frame_flag_list[LAST2_FRAME]) {
-      const OrderHintInfo *const order_hint_info =
-          &cpi->common.seq_params.order_hint_info;
       const int last2_frame_dist = av1_encoder_get_relative_dist(
-          order_hint_info, ref_display_order_hint[LAST2_FRAME - LAST_FRAME],
+          ref_display_order_hint[LAST2_FRAME - LAST_FRAME],
           cur_frame_display_index);
       // Disable LAST2_FRAME if it is a temporally distant frame
       if (abs(last2_frame_dist) > 2) {

@@ -1008,9 +1008,6 @@ enum aome_enc_control_id {
   /*!\brief Codec control function to turn on / off filter intra usage at
    * sequence level, int parameter
    *
-   * \attention If AV1E_SET_ENABLE_FILTER_INTRA is 0, then this flag is
-   * forced to 0.
-   *
    * - 0 = disable
    * - 1 = enable (default)
    */
@@ -1047,8 +1044,6 @@ enum aome_enc_control_id {
 
   /*!\brief Codec control function to turn on / off frame superresolution, int
    * parameter
-   *
-   * \attention If AV1E_SET_ENABLE_SUPERRES is 0, then this flag is forced to 0.
    *
    * - 0 = disable
    * - 1 = enable (default)

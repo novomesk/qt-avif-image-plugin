@@ -586,7 +586,7 @@ void av1_build_quantizer(aom_bit_depth_t bit_depth, int y_dc_delta_q,
     const int qrounding_factor = q == 0 ? 64 : 48;
 
     for (i = 0; i < 2; ++i) {
-      int qrounding_factor_fp = 64;
+      const int qrounding_factor_fp = 64;
       // y quantizer with TX scale
       quant_QTX = i == 0 ? av1_dc_quant_QTX(q, y_dc_delta_q, bit_depth)
                          : av1_ac_quant_QTX(q, 0, bit_depth);
@@ -637,7 +637,8 @@ void av1_build_quantizer(aom_bit_depth_t bit_depth, int y_dc_delta_q,
       quants->u_zbin[q][i] = quants->u_zbin[q][1];
       quants->u_round[q][i] = quants->u_round[q][1];
       deq->u_dequant_QTX[q][i] = deq->u_dequant_QTX[q][1];
-      quants->v_quant[q][i] = quants->u_quant[q][1];
+
+      quants->v_quant[q][i] = quants->v_quant[q][1];
       quants->v_quant_fp[q][i] = quants->v_quant_fp[q][1];
       quants->v_round_fp[q][i] = quants->v_round_fp[q][1];
       quants->v_quant_shift[q][i] = quants->v_quant_shift[q][1];

@@ -307,12 +307,9 @@ void av1_rc_init(const AV1EncoderConfig *oxcf, int pass, RATE_CONTROL *rc) {
 
   rc->rolling_target_bits = rc->avg_frame_bandwidth;
   rc->rolling_actual_bits = rc->avg_frame_bandwidth;
-  rc->long_rolling_target_bits = rc->avg_frame_bandwidth;
-  rc->long_rolling_actual_bits = rc->avg_frame_bandwidth;
 
   rc->total_actual_bits = 0;
   rc->total_target_bits = 0;
-  rc->total_target_vs_actual = 0;
 
   rc->frames_since_key = 8;  // Sensible default for first frame.
   rc->this_key_frame_forced = 0;
@@ -1251,19 +1248,17 @@ static int rc_pick_q_and_bounds_no_stats(const AV1_COMP *cpi, int width,
   return q;
 }
 
-static const double rate_factor_deltas[RATE_FACTOR_LEVELS] = {
-  1.00,  // INTER_NORMAL
-  1.50,  // GF_ARF_LOW
-  2.00,  // GF_ARF_STD
-  2.00,  // KF_STD
-};
-
+static const double arf_layer_deltas[MAX_ARF_LAYERS + 1] = { 2.50, 2.00, 1.75,
+                                                             1.50, 1.25, 1.15,
+                                                             1.0 };
 int av1_frame_type_qdelta(const AV1_COMP *cpi, int q) {
-  const RATE_FACTOR_LEVEL rf_lvl = get_rate_factor_level(&cpi->gf_group);
-  const FRAME_TYPE frame_type = (rf_lvl == KF_STD) ? KEY_FRAME : INTER_FRAME;
-  double rate_factor;
+  const GF_GROUP *const gf_group = &cpi->gf_group;
+  const RATE_FACTOR_LEVEL rf_lvl = get_rate_factor_level(gf_group);
+  const FRAME_TYPE frame_type = gf_group->frame_type[gf_group->index];
+  const int arf_layer = AOMMIN(gf_group->layer_depth[gf_group->index], 6);
+  const double rate_factor =
+      (rf_lvl == INTER_NORMAL) ? 1.0 : arf_layer_deltas[arf_layer];
 
-  rate_factor = rate_factor_deltas[rf_lvl];
   return av1_compute_qdelta_by_rate(&cpi->rc, frame_type, q, rate_factor,
                                     cpi->is_screen_content_type,
                                     cpi->common.seq_params.bit_depth);
@@ -1827,17 +1822,11 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
         rc->rolling_target_bits * 3 + rc->this_frame_target, 2);
     rc->rolling_actual_bits = (int)ROUND_POWER_OF_TWO_64(
         rc->rolling_actual_bits * 3 + rc->projected_frame_size, 2);
-    rc->long_rolling_target_bits = (int)ROUND_POWER_OF_TWO_64(
-        rc->long_rolling_target_bits * 31 + rc->this_frame_target, 5);
-    rc->long_rolling_actual_bits = (int)ROUND_POWER_OF_TWO_64(
-        rc->long_rolling_actual_bits * 31 + rc->projected_frame_size, 5);
   }
 
   // Actual bits spent
   rc->total_actual_bits += rc->projected_frame_size;
   rc->total_target_bits += cm->show_frame ? rc->avg_frame_bandwidth : 0;
-
-  rc->total_target_vs_actual = rc->total_actual_bits - rc->total_target_bits;
 
   if (is_altref_enabled(cpi->oxcf.gf_cfg.lag_in_frames,
                         cpi->oxcf.gf_cfg.enable_auto_arf) &&
@@ -2702,38 +2691,5 @@ int av1_encodedframe_overshoot_cbr(AV1_COMP *cpi, int *q) {
     return 1;
   } else {
     return 0;
-  }
-}
-
-void av1_compute_frame_low_motion(AV1_COMP *const cpi) {
-  AV1_COMMON *const cm = &cpi->common;
-  const CommonModeInfoParams *const mi_params = &cm->mi_params;
-  SVC *const svc = &cpi->svc;
-  MB_MODE_INFO **mi = mi_params->mi_grid_base;
-  RATE_CONTROL *const rc = &cpi->rc;
-  const int rows = mi_params->mi_rows, cols = mi_params->mi_cols;
-  int cnt_zeromv = 0;
-  for (int mi_row = 0; mi_row < rows; mi_row++) {
-    for (int mi_col = 0; mi_col < cols; mi_col++) {
-      if (mi[0]->ref_frame[0] == LAST_FRAME &&
-          abs(mi[0]->mv[0].as_mv.row) < 16 && abs(mi[0]->mv[0].as_mv.col) < 16)
-        cnt_zeromv++;
-      mi++;
-    }
-    mi += mi_params->mi_stride - cols;
-  }
-  cnt_zeromv = 100 * cnt_zeromv / (rows * cols);
-  rc->avg_frame_low_motion = (3 * rc->avg_frame_low_motion + cnt_zeromv) >> 2;
-
-  // For SVC: set avg_frame_low_motion (only computed on top spatial layer)
-  // to all lower spatial layers.
-  if (cpi->use_svc && svc->spatial_layer_id == svc->number_spatial_layers - 1) {
-    for (int i = 0; i < svc->number_spatial_layers - 1; ++i) {
-      const int layer = LAYER_IDS_TO_IDX(i, svc->temporal_layer_id,
-                                         svc->number_temporal_layers);
-      LAYER_CONTEXT *const lc = &svc->layer_context[layer];
-      RATE_CONTROL *const lrc = &lc->rc;
-      lrc->avg_frame_low_motion = rc->avg_frame_low_motion;
-    }
   }
 }

@@ -22,6 +22,7 @@
 #include "av1/encoder/global_motion_facade.h"
 #include "av1/encoder/rdopt.h"
 #include "aom_dsp/aom_dsp_common.h"
+#include "av1/encoder/temporal_filter.h"
 #include "av1/encoder/tpl_model.h"
 
 static AOM_INLINE void accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {
@@ -312,12 +313,19 @@ static AOM_INLINE void switch_tile_and_get_next_job(
       TileDataEnc *const this_tile = &tile_data[tile_index];
       AV1EncRowMultiThreadSync *const row_mt_sync = &this_tile->row_mt_sync;
 
+#if CONFIG_REALTIME_ONLY
+      int num_b_rows_in_tile =
+          av1_get_sb_rows_in_tile(cm, this_tile->tile_info);
+      int num_b_cols_in_tile =
+          av1_get_sb_cols_in_tile(cm, this_tile->tile_info);
+#else
       int num_b_rows_in_tile =
           is_firstpass ? av1_get_mb_rows_in_tile(this_tile->tile_info)
                        : av1_get_sb_rows_in_tile(cm, this_tile->tile_info);
       int num_b_cols_in_tile =
           is_firstpass ? av1_get_mb_cols_in_tile(this_tile->tile_info)
                        : av1_get_sb_cols_in_tile(cm, this_tile->tile_info);
+#endif
       int theoretical_limit_on_threads =
           AOMMIN((num_b_cols_in_tile + 1) >> 1, num_b_rows_in_tile);
       int num_threads_working = row_mt_sync->num_threads_working;
@@ -532,6 +540,17 @@ static AOM_INLINE void create_enc_workers(AV1_COMP *cpi, int num_workers) {
                     aom_malloc(sizeof(*(gm_sync->mutex_))));
     if (gm_sync->mutex_) pthread_mutex_init(gm_sync->mutex_, NULL);
   }
+  AV1TemporalFilterSync *tf_sync = &mt_info->tf_sync;
+  if (tf_sync->mutex_ == NULL) {
+    CHECK_MEM_ERROR(cm, tf_sync->mutex_, aom_malloc(sizeof(*tf_sync->mutex_)));
+    if (tf_sync->mutex_) pthread_mutex_init(tf_sync->mutex_, NULL);
+  }
+  AV1CdefSync *cdef_sync = &mt_info->cdef_sync;
+  if (cdef_sync->mutex_ == NULL) {
+    CHECK_MEM_ERROR(cm, cdef_sync->mutex_,
+                    aom_malloc(sizeof(*(cdef_sync->mutex_))));
+    if (cdef_sync->mutex_) pthread_mutex_init(cdef_sync->mutex_, NULL);
+  }
 #endif
 
   for (int i = num_workers - 1; i >= 0; i--) {
@@ -542,6 +561,8 @@ static AOM_INLINE void create_enc_workers(AV1_COMP *cpi, int num_workers) {
 
     thread_data->cpi = cpi;
     thread_data->thread_id = i;
+    // Set the starting tile for each thread.
+    thread_data->start = i;
 
     if (i > 0) {
       // Set up sms_tree.
@@ -664,6 +685,8 @@ static AOM_INLINE void fp_create_enc_workers(AV1_COMP *cpi, int num_workers) {
 
     thread_data->cpi = cpi;
     thread_data->thread_id = i;
+    // Set the starting tile for each thread.
+    thread_data->start = i;
 
     if (i > 0) {
       // Set up firstpass PICK_MODE_CONTEXT.
@@ -683,17 +706,11 @@ static AOM_INLINE void fp_create_enc_workers(AV1_COMP *cpi, int num_workers) {
 }
 #endif
 
-static AOM_INLINE void launch_enc_workers(MultiThreadInfo *const mt_info,
-                                          int num_workers) {
+static AOM_INLINE void launch_workers(MultiThreadInfo *const mt_info,
+                                      int num_workers) {
   const AVxWorkerInterface *const winterface = aom_get_worker_interface();
-  // Encode a frame
   for (int i = num_workers - 1; i >= 0; i--) {
     AVxWorker *const worker = &mt_info->workers[i];
-    EncWorkerData *const thread_data = (EncWorkerData *)worker->data1;
-
-    // Set the starting tile for each thread.
-    thread_data->start = i;
-
     if (i == 0)
       winterface->execute(worker);
     else
@@ -878,7 +895,7 @@ void av1_encode_tiles_mt(AV1_COMP *cpi) {
     num_workers = AOMMIN(num_workers, mt_info->num_enc_workers);
   }
   prepare_enc_workers(cpi, enc_worker_hook, num_workers);
-  launch_enc_workers(&cpi->mt_info, num_workers);
+  launch_workers(&cpi->mt_info, num_workers);
   sync_enc_workers(&cpi->mt_info, cm, num_workers);
   accumulate_counters_enc_workers(cpi, num_workers);
 }
@@ -1023,7 +1040,7 @@ void av1_encode_tiles_row_mt(AV1_COMP *cpi) {
   assign_tile_to_thread(thread_id_to_tile_id, tile_cols * tile_rows,
                         num_workers);
   prepare_enc_workers(cpi, enc_row_mt_worker_hook, num_workers);
-  launch_enc_workers(&cpi->mt_info, num_workers);
+  launch_workers(&cpi->mt_info, num_workers);
   sync_enc_workers(&cpi->mt_info, cm, num_workers);
   if (cm->delta_q_info.delta_lf_present_flag) update_delta_lf_for_row_mt(cpi);
   accumulate_counters_enc_workers(cpi, num_workers);
@@ -1088,7 +1105,7 @@ void av1_fp_encode_tiles_row_mt(AV1_COMP *cpi) {
   assign_tile_to_thread(thread_id_to_tile_id, tile_cols * tile_rows,
                         num_workers);
   fp_prepare_enc_workers(cpi, fp_enc_row_mt_worker_hook, num_workers);
-  launch_enc_workers(&cpi->mt_info, num_workers);
+  launch_workers(&cpi->mt_info, num_workers);
   sync_enc_workers(&cpi->mt_info, cm, num_workers);
 }
 
@@ -1294,10 +1311,142 @@ void av1_mc_flow_dispenser_mt(AV1_COMP *cpi) {
          sizeof(*tpl_sync->num_finished_cols) * mb_rows);
 
   prepare_tpl_workers(cpi, tpl_worker_hook, num_workers);
-  launch_enc_workers(&cpi->mt_info, num_workers);
+  launch_workers(&cpi->mt_info, num_workers);
   sync_enc_workers(&cpi->mt_info, cm, num_workers);
 }
-#endif  // !CONFIG_REALTIME_ONLY
+
+// Deallocate memory for temporal filter multi-thread synchronization.
+void av1_tf_mt_dealloc(AV1TemporalFilterSync *tf_sync) {
+  assert(tf_sync != NULL);
+#if CONFIG_MULTITHREAD
+  if (tf_sync->mutex_ != NULL) {
+    pthread_mutex_destroy(tf_sync->mutex_);
+    aom_free(tf_sync->mutex_);
+  }
+#endif  // CONFIG_MULTITHREAD
+  tf_sync->next_tf_row = 0;
+}
+
+// Checks if a job is available. If job is available,
+// populates next_tf_row and returns 1, else returns 0.
+static AOM_INLINE int tf_get_next_job(AV1TemporalFilterSync *tf_mt_sync,
+                                      int *current_mb_row, int mb_rows) {
+  int do_next_row = 0;
+#if CONFIG_MULTITHREAD
+  pthread_mutex_t *tf_mutex_ = tf_mt_sync->mutex_;
+  pthread_mutex_lock(tf_mutex_);
+#endif
+  if (tf_mt_sync->next_tf_row < mb_rows) {
+    *current_mb_row = tf_mt_sync->next_tf_row;
+    tf_mt_sync->next_tf_row++;
+    do_next_row = 1;
+  }
+#if CONFIG_MULTITHREAD
+  pthread_mutex_unlock(tf_mutex_);
+#endif
+  return do_next_row;
+}
+
+// Hook function for each thread in temporal filter multi-threading.
+static int tf_worker_hook(void *arg1, void *unused) {
+  (void)unused;
+  EncWorkerData *thread_data = (EncWorkerData *)arg1;
+  AV1_COMP *cpi = thread_data->cpi;
+  ThreadData *td = thread_data->td;
+  TemporalFilterCtx *tf_ctx = &cpi->tf_ctx;
+  AV1TemporalFilterSync *tf_sync = &cpi->mt_info.tf_sync;
+  const struct scale_factors *scale = &cpi->tf_ctx.sf;
+  const int num_planes = av1_num_planes(&cpi->common);
+  assert(num_planes >= 1 && num_planes <= MAX_MB_PLANE);
+
+  MACROBLOCKD *mbd = &td->mb.e_mbd;
+  uint8_t *input_buffer[MAX_MB_PLANE];
+  MB_MODE_INFO **input_mb_mode_info;
+  tf_save_state(mbd, &input_mb_mode_info, input_buffer, num_planes);
+  tf_setup_macroblockd(mbd, &td->tf_data, scale);
+
+  int current_mb_row = -1;
+
+  while (tf_get_next_job(tf_sync, &current_mb_row, tf_ctx->mb_rows))
+    av1_tf_do_filtering_row(cpi, td, current_mb_row);
+
+  tf_restore_state(mbd, input_mb_mode_info, input_buffer, num_planes);
+
+  return 1;
+}
+
+// Assigns temporal filter hook function and thread data to each worker.
+static void prepare_tf_workers(AV1_COMP *cpi, AVxWorkerHook hook,
+                               int num_workers, int is_highbitdepth) {
+  MultiThreadInfo *mt_info = &cpi->mt_info;
+  mt_info->tf_sync.next_tf_row = 0;
+  for (int i = num_workers - 1; i >= 0; i--) {
+    AVxWorker *worker = &mt_info->workers[i];
+    EncWorkerData *thread_data = &mt_info->tile_thr_data[i];
+
+    worker->hook = hook;
+    worker->data1 = thread_data;
+    worker->data2 = NULL;
+
+    thread_data->cpi = cpi;
+    if (i == 0) {
+      thread_data->td = &cpi->td;
+    }
+
+    // Before encoding a frame, copy the thread data from cpi.
+    if (thread_data->td != &cpi->td) {
+      thread_data->td->mb = cpi->td.mb;
+      thread_data->td->mb.obmc_buffer = thread_data->td->obmc_buffer;
+      tf_alloc_and_reset_data(&thread_data->td->tf_data, cpi->tf_ctx.num_pels,
+                              is_highbitdepth);
+    }
+  }
+}
+
+// Deallocate thread specific data for temporal filter.
+static void tf_dealloc_thread_data(AV1_COMP *cpi, int num_workers,
+                                   int is_highbitdepth) {
+  MultiThreadInfo *mt_info = &cpi->mt_info;
+  for (int i = num_workers - 1; i >= 0; i--) {
+    EncWorkerData *thread_data = &mt_info->tile_thr_data[i];
+    ThreadData *td = thread_data->td;
+    if (td != &cpi->td) tf_dealloc_data(&td->tf_data, is_highbitdepth);
+  }
+}
+
+// Accumulate sse and sum after temporal filtering.
+static void tf_accumulate_frame_diff(AV1_COMP *cpi, int num_workers) {
+  FRAME_DIFF *total_diff = &cpi->td.tf_data.diff;
+  for (int i = num_workers - 1; i >= 0; i--) {
+    AVxWorker *const worker = &cpi->mt_info.workers[i];
+    EncWorkerData *const thread_data = (EncWorkerData *)worker->data1;
+    ThreadData *td = thread_data->td;
+    FRAME_DIFF *diff = &td->tf_data.diff;
+    if (td != &cpi->td) {
+      total_diff->sse += diff->sse;
+      total_diff->sum += diff->sum;
+    }
+  }
+}
+
+// Implements multi-threading for temporal filter.
+void av1_tf_do_filtering_mt(AV1_COMP *cpi) {
+  AV1_COMMON *cm = &cpi->common;
+  MultiThreadInfo *mt_info = &cpi->mt_info;
+  const int is_highbitdepth = cpi->tf_ctx.is_highbitdepth;
+
+  int num_workers = mt_info->num_workers;
+  if (mt_info->num_enc_workers == 0)
+    create_enc_workers(cpi, num_workers);
+  else
+    num_workers = AOMMIN(num_workers, mt_info->num_enc_workers);
+
+  prepare_tf_workers(cpi, tf_worker_hook, num_workers, is_highbitdepth);
+  launch_workers(mt_info, num_workers);
+  sync_enc_workers(mt_info, cm, num_workers);
+  tf_accumulate_frame_diff(cpi, num_workers);
+  tf_dealloc_thread_data(cpi, num_workers, is_highbitdepth);
+}
 
 // Checks if a job is available in the current direction. If a job is available,
 // frame_idx will be populated and returns 1, else returns 0.
@@ -1515,6 +1664,114 @@ void av1_global_motion_estimation_mt(AV1_COMP *cpi) {
 
   assign_thread_to_dir(job_info->thread_id_to_dir, num_workers);
   prepare_gm_workers(cpi, gm_mt_worker_hook, num_workers);
-  launch_enc_workers(&cpi->mt_info, num_workers);
+  launch_workers(&cpi->mt_info, num_workers);
   sync_enc_workers(&cpi->mt_info, &cpi->common, num_workers);
+}
+#endif  // !CONFIG_REALTIME_ONLY
+
+// Deallocate memory for CDEF search multi-thread synchronization.
+void av1_cdef_mt_dealloc(AV1CdefSync *cdef_sync) {
+  (void)cdef_sync;
+  assert(cdef_sync != NULL);
+#if CONFIG_MULTITHREAD
+  if (cdef_sync->mutex_ != NULL) {
+    pthread_mutex_destroy(cdef_sync->mutex_);
+    aom_free(cdef_sync->mutex_);
+  }
+#endif  // CONFIG_MULTITHREAD
+}
+
+// Updates the row and column indices of the next job to be processed.
+// Also updates end_of_frame flag when the processing of all blocks is complete.
+static void update_next_job_info(AV1CdefSync *cdef_sync, int nvfb, int nhfb) {
+  cdef_sync->fbc++;
+  if (cdef_sync->fbc == nhfb) {
+    cdef_sync->fbr++;
+    if (cdef_sync->fbr == nvfb) {
+      cdef_sync->end_of_frame = 1;
+    } else {
+      cdef_sync->fbc = 0;
+    }
+  }
+}
+
+// Initializes cdef_sync parameters.
+static AOM_INLINE void cdef_reset_job_info(AV1CdefSync *cdef_sync) {
+  cdef_sync->end_of_frame = 0;
+  cdef_sync->fbr = 0;
+  cdef_sync->fbc = 0;
+}
+
+// Checks if a job is available. If job is available,
+// populates next job information and returns 1, else returns 0.
+static AOM_INLINE int cdef_get_next_job(AV1CdefSync *cdef_sync,
+                                        CdefSearchCtx *cdef_search_ctx,
+                                        int *cur_fbr, int *cur_fbc,
+                                        int *sb_count) {
+#if CONFIG_MULTITHREAD
+  pthread_mutex_lock(cdef_sync->mutex_);
+#endif  // CONFIG_MULTITHREAD
+  int do_next_block = 0;
+  const int nvfb = cdef_search_ctx->nvfb;
+  const int nhfb = cdef_search_ctx->nhfb;
+
+  // If a block is skip, do not process the block and
+  // check the skip condition for the next block.
+  while ((!cdef_sync->end_of_frame) &&
+         (cdef_sb_skip(cdef_search_ctx->mi_params, cdef_sync->fbr,
+                       cdef_sync->fbc))) {
+    update_next_job_info(cdef_sync, nvfb, nhfb);
+  }
+
+  // Populates information needed for current job and update the row,
+  // column indices of the next block to be processed.
+  if (cdef_sync->end_of_frame == 0) {
+    do_next_block = 1;
+    *cur_fbr = cdef_sync->fbr;
+    *cur_fbc = cdef_sync->fbc;
+    *sb_count = cdef_search_ctx->sb_count;
+    cdef_search_ctx->sb_count++;
+    update_next_job_info(cdef_sync, nvfb, nhfb);
+  }
+#if CONFIG_MULTITHREAD
+  pthread_mutex_unlock(cdef_sync->mutex_);
+#endif  // CONFIG_MULTITHREAD
+  return do_next_block;
+}
+
+// Hook function for each thread in CDEF search multi-threading.
+static int cdef_filter_block_worker_hook(void *arg1, void *arg2) {
+  AV1CdefSync *const cdef_sync = (AV1CdefSync *)arg1;
+  CdefSearchCtx *cdef_search_ctx = (CdefSearchCtx *)arg2;
+  int cur_fbr, cur_fbc, sb_count;
+  while (cdef_get_next_job(cdef_sync, cdef_search_ctx, &cur_fbr, &cur_fbc,
+                           &sb_count)) {
+    av1_cdef_mse_calc_block(cdef_search_ctx, cur_fbr, cur_fbc, sb_count);
+  }
+  return 1;
+}
+
+// Assigns CDEF search hook function and thread data to each worker.
+static void prepare_cdef_workers(MultiThreadInfo *mt_info,
+                                 CdefSearchCtx *cdef_search_ctx,
+                                 AVxWorkerHook hook, int num_workers) {
+  for (int i = num_workers - 1; i >= 0; i--) {
+    AVxWorker *worker = &mt_info->workers[i];
+    worker->hook = hook;
+    worker->data1 = &mt_info->cdef_sync;
+    worker->data2 = cdef_search_ctx;
+  }
+}
+
+// Implements multi-threading for CDEF search.
+void av1_cdef_mse_calc_frame_mt(AV1_COMMON *cm, MultiThreadInfo *mt_info,
+                                CdefSearchCtx *cdef_search_ctx) {
+  AV1CdefSync *cdef_sync = &mt_info->cdef_sync;
+  const int num_workers = mt_info->num_workers;
+
+  cdef_reset_job_info(cdef_sync);
+  prepare_cdef_workers(mt_info, cdef_search_ctx, cdef_filter_block_worker_hook,
+                       num_workers);
+  launch_workers(mt_info, num_workers);
+  sync_enc_workers(mt_info, cm, num_workers);
 }

@@ -832,8 +832,8 @@ void av1_cnn_predict_c(const float **input, int in_width, int in_height,
                        int in_stride, const CNN_CONFIG *cnn_config,
                        const CNN_THREAD_DATA *thread_data,
                        CNN_MULTI_OUT *output_struct) {
-  TENSOR tensor1[CNN_MAX_BRANCHES] = { 0 };
-  TENSOR tensor2[CNN_MAX_BRANCHES] = { 0 };
+  TENSOR tensor1[CNN_MAX_BRANCHES] = { { 0 } };
+  TENSOR tensor2[CNN_MAX_BRANCHES] = { { 0 } };
 
   float **output[CNN_MAX_BRANCHES];
   const int *out_chs = output_struct->output_channels;

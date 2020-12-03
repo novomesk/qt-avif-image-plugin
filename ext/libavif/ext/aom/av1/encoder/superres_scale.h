@@ -18,10 +18,6 @@
 extern "C" {
 #endif
 
-// If true, AOM_SUPERRES_AUTO mode will exhaustively search over all superres
-// denominators for all frames (except overlay and internal overlay frames).
-#define SUPERRES_RECODE_ALL_RATIOS 0
-
 int av1_superres_in_recode_allowed(const AV1_COMP *const cpi);
 void av1_superres_post_encode(AV1_COMP *cpi);
 

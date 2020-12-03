@@ -43,7 +43,7 @@ extern "C" {
 
 #define MIN_GF_INTERVAL 4
 #define MAX_GF_INTERVAL 32
-#define FIXED_GF_INTERVAL 8  // Used in some testing modes only
+#define FIXED_GF_INTERVAL 16
 #define MAX_GF_LENGTH_LAP 16
 
 #define MAX_NUM_GF_INTERVALS 15
@@ -92,6 +92,25 @@ typedef enum {
 
 typedef enum { ORIG = 0, THREE_QUARTER = 1, ONE_HALF = 2 } RESIZE_STATE;
 
+#define MAX_FIRSTPASS_ANALYSIS_FRAMES 150
+typedef enum region_types {
+  STABLE_REGION = 0,
+  HIGH_VAR_REGION = 1,
+  SCENECUT_REGION = 2,
+  BLENDING_REGION = 3,
+} REGION_TYPES;
+
+typedef struct regions {
+  int start;
+  int last;
+  double avg_noise_var;
+  double avg_cor_coeff;
+  double avg_sr_fr_ratio;
+  double avg_intra_err;
+  double avg_coded_err;
+  REGION_TYPES type;
+} REGIONS;
+
 /*!\endcond */
 /*!
  * \brief  Rate Control parameters and status
@@ -118,6 +137,11 @@ typedef struct {
    * Projected size for current frame
    */
   int projected_frame_size;
+
+  /*!
+   * Bit size of transform coefficient for current frame.
+   */
+  int coefficient_size;
 
   /*!
    * Super block rate target used with some adaptive quantization strategies.
@@ -180,6 +204,12 @@ typedef struct {
   int cur_gf_index;
 
   /*!\cond */
+  int num_regions;
+  REGIONS regions[MAX_FIRSTPASS_ANALYSIS_FRAMES];
+  double cor_coeff[MAX_FIRSTPASS_ANALYSIS_FRAMES];
+  int regions_offset;  // offset of regions from the last keyframe
+  int frames_till_regions_update;
+
   int min_gf_interval;
   int max_gf_interval;
   int static_scene_max_gf_interval;
@@ -224,14 +254,10 @@ typedef struct {
   int rolling_target_bits;
   int rolling_actual_bits;
 
-  int long_rolling_target_bits;
-  int long_rolling_actual_bits;
-
   int rate_error_estimate;
 
   int64_t total_actual_bits;
   int64_t total_target_bits;
-  int64_t total_target_vs_actual;
 
   /*!\endcond */
   /*!
@@ -554,11 +580,6 @@ void av1_get_one_pass_rt_params(struct AV1_COMP *cpi,
  * \return q is returned, and updates are done to \c cpi->rc.
  */
 int av1_encodedframe_overshoot_cbr(struct AV1_COMP *cpi, int *q);
-/*!\cond */
-
-void av1_compute_frame_low_motion(struct AV1_COMP *const cpi);
-
-/*!\endcond */
 
 #ifdef __cplusplus
 }  // extern "C"
