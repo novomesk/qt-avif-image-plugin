@@ -1484,15 +1484,15 @@ typedef struct {
 
 /*!\cond */
 
-#if CONFIG_COLLECT_PARTITION_STATS == 2
-typedef struct PartitionStats {
+#if CONFIG_COLLECT_PARTITION_STATS
+typedef struct FramePartitionTimingStats {
   int partition_decisions[6][EXT_PARTITION_TYPES];
   int partition_attempts[6][EXT_PARTITION_TYPES];
   int64_t partition_times[6][EXT_PARTITION_TYPES];
 
   int partition_redo;
-} PartitionStats;
-#endif
+} FramePartitionTimingStats;
+#endif  // CONFIG_COLLECT_PARTITION_STATS
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
 #include "aom_ports/aom_timer.h"
@@ -2499,9 +2499,12 @@ typedef struct AV1_COMP {
    */
   int is_screen_content_type;
 
-#if CONFIG_COLLECT_PARTITION_STATS == 2
-  PartitionStats partition_stats;
-#endif
+#if CONFIG_COLLECT_PARTITION_STATS
+  /*!
+   * Accumulates the partition timing stat over the whole frame.
+   */
+  FramePartitionTimingStats partition_stats;
+#endif  // CONFIG_COLLECT_PARTITION_STATS
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
   /*!
@@ -2620,6 +2623,11 @@ typedef struct AV1_COMP {
    * Number of frames left to be encoded, is 0 if limit is not set.
    */
   int frames_left;
+
+  /*!
+   * Block size of first pass encoding
+   */
+  BLOCK_SIZE fp_block_size;
 } AV1_COMP;
 
 /*!
@@ -3176,8 +3184,9 @@ static AOM_INLINE int is_psnr_calc_enabled(const AV1_COMP *cpi) {
 }
 
 #if CONFIG_COLLECT_PARTITION_STATS == 2
-static INLINE void av1_print_partition_stats(PartitionStats *part_stats) {
-  FILE *f = fopen("partition_stats.csv", "w");
+static INLINE void av1_print_fr_partition_timing_stats(
+    const FramePartitionTimingStats *part_stats, const char *filename) {
+  FILE *f = fopen(filename, "w");
   if (!f) {
     return;
   }
@@ -3194,7 +3203,7 @@ static INLINE void av1_print_partition_stats(PartitionStats *part_stats) {
   }
   fprintf(f, "\n");
 
-  const int bsizes[6] = { 128, 64, 32, 16, 8, 4 };
+  static const int bsizes[6] = { 128, 64, 32, 16, 8, 4 };
 
   for (int bsize_idx = 0; bsize_idx < 6; bsize_idx++) {
     fprintf(f, "%d,%d,", bsizes[bsize_idx], part_stats->partition_redo);

@@ -488,6 +488,7 @@ static void set_good_speed_features_framesize_independent(
 
     sf->mv_sf.auto_mv_step_size = 1;
     sf->mv_sf.subpel_iters_per_step = 1;
+    sf->mv_sf.disable_extensive_joint_motion_search = 1;
 
     // TODO(chiyotsai@google.com): We can get 10% speed up if we move
     // adaptive_rd_thresh to speed 1. But currently it performs poorly on some
@@ -495,7 +496,8 @@ static void set_good_speed_features_framesize_independent(
     // bit more closely to figure out why.
     sf->inter_sf.adaptive_rd_thresh = 1;
     sf->inter_sf.comp_inter_joint_search_thresh = BLOCK_SIZES_ALL;
-    sf->inter_sf.disable_wedge_search_var_thresh = 100;
+    sf->inter_sf.disable_interintra_wedge_var_thresh = 100;
+    sf->inter_sf.disable_interinter_wedge_var_thresh = 100;
     sf->inter_sf.fast_interintra_wedge_search = 1;
     sf->inter_sf.prune_comp_search_by_single_result = boosted ? 4 : 1;
     sf->inter_sf.prune_compound_using_neighbors = 1;
@@ -503,6 +505,8 @@ static void set_good_speed_features_framesize_independent(
     sf->inter_sf.reuse_best_prediction_for_part_ab = 1;
     sf->inter_sf.selective_ref_frame = 3;
     sf->inter_sf.use_dist_wtd_comp_flag = DIST_WTD_COMP_DISABLED;
+    // Enable fast search only for COMPOUND_DIFFWTD type.
+    sf->inter_sf.enable_fast_compound_mode_search = 1;
 
     // TODO(Sachin): Enable/Enhance this speed feature for speed 2 & 3
     sf->interp_sf.adaptive_interp_filter_search = 1;
@@ -542,7 +546,7 @@ static void set_good_speed_features_framesize_independent(
     sf->inter_sf.mv_cost_upd_level = 1;
     // TODO(yunqing): evaluate this speed feature for speed 1 & 2, and combine
     // it with cpi->sf.disable_wedge_search_var_thresh.
-    sf->inter_sf.disable_wedge_interintra_search = 1;
+    sf->inter_sf.disable_interintra_wedge_var_thresh = UINT_MAX;
     sf->inter_sf.disable_smooth_interintra = boosted ? 0 : 1;
     // TODO(any): Experiment with the early exit mechanism for speeds 0, 1 and 2
     // and clean-up the speed feature
@@ -665,9 +669,11 @@ static void set_good_speed_features_framesize_independent(
     sf->part_sf.ext_partition_eval_thresh =
         allow_screen_content_tools ? BLOCK_8X8 : BLOCK_16X16;
 
-    sf->inter_sf.disable_interinter_wedge = 1;
+    sf->inter_sf.disable_interinter_wedge_var_thresh = UINT_MAX;
     sf->inter_sf.prune_inter_modes_if_skippable = 1;
     sf->inter_sf.txfm_rd_gate_level = boosted ? 0 : 5;
+    // Enable fast search for all valid compound modes.
+    sf->inter_sf.enable_fast_compound_mode_search = 2;
 
     sf->intra_sf.chroma_intra_pruning_with_hog = 3;
 
@@ -752,7 +758,8 @@ static void set_rt_speed_features_framesize_independent(AV1_COMP *cpi,
 
   // TODO(debargha): Test, tweak and turn on either 1 or 2
   sf->inter_sf.inter_mode_rd_model_estimation = 0;
-  sf->inter_sf.disable_wedge_search_var_thresh = 0;
+  sf->inter_sf.disable_interintra_wedge_var_thresh = 0;
+  sf->inter_sf.disable_interinter_wedge_var_thresh = 0;
   sf->inter_sf.model_based_post_interp_filter_breakout = 1;
   sf->inter_sf.prune_compound_using_single_ref = 0;
   sf->inter_sf.prune_mode_search_simple_translation = 1;
@@ -802,7 +809,8 @@ static void set_rt_speed_features_framesize_independent(AV1_COMP *cpi,
     sf->inter_sf.reuse_inter_intra_mode = 1;
     sf->inter_sf.selective_ref_frame = 2;
     sf->inter_sf.skip_repeated_newmv = 1;
-    sf->inter_sf.disable_wedge_search_var_thresh = 0;
+    sf->inter_sf.disable_interintra_wedge_var_thresh = 0;
+    sf->inter_sf.disable_interinter_wedge_var_thresh = 0;
     sf->inter_sf.prune_comp_type_by_comp_avg = 1;
 
     sf->interp_sf.cb_pred_filter_search = 1;
@@ -830,7 +838,8 @@ static void set_rt_speed_features_framesize_independent(AV1_COMP *cpi,
 
     sf->inter_sf.adaptive_rd_thresh = 1;
     sf->inter_sf.comp_inter_joint_search_thresh = BLOCK_SIZES_ALL;
-    sf->inter_sf.disable_wedge_search_var_thresh = 100;
+    sf->inter_sf.disable_interintra_wedge_var_thresh = 100;
+    sf->inter_sf.disable_interinter_wedge_var_thresh = 100;
     sf->inter_sf.fast_wedge_sign_estimate = 1;
     sf->inter_sf.prune_comp_type_by_comp_avg = 2;
     sf->inter_sf.selective_ref_frame = 3;
@@ -864,7 +873,7 @@ static void set_rt_speed_features_framesize_independent(AV1_COMP *cpi,
     sf->inter_sf.mv_cost_upd_level = 1;
     // TODO(yunqing): evaluate this speed feature for speed 1 & 2, and combine
     // it with cpi->sf.disable_wedge_search_var_thresh.
-    sf->inter_sf.disable_wedge_interintra_search = 1;
+    sf->inter_sf.disable_interintra_wedge_var_thresh = UINT_MAX;
     sf->inter_sf.prune_comp_search_by_single_result = 2;
     sf->inter_sf.selective_ref_frame = 4;
 
@@ -1126,6 +1135,7 @@ static AOM_INLINE void init_mv_sf(MV_SPEED_FEATURES *mv_sf) {
   mv_sf->use_bsize_dependent_search_method = 0;
   mv_sf->use_fullpel_costlist = 0;
   mv_sf->use_downsampled_sad = 0;
+  mv_sf->disable_extensive_joint_motion_search = 0;
 }
 
 static AOM_INLINE void init_inter_sf(INTER_MODE_SPEED_FEATURES *inter_sf) {
@@ -1136,7 +1146,6 @@ static AOM_INLINE void init_inter_sf(INTER_MODE_SPEED_FEATURES *inter_sf) {
   inter_sf->alt_ref_search_fp = 0;
   inter_sf->selective_ref_frame = 0;
   inter_sf->prune_ref_frame_for_rect_partitions = 0;
-  inter_sf->disable_wedge_search_var_thresh = 0;
   inter_sf->fast_wedge_sign_estimate = 0;
   inter_sf->prune_wedge_pred_diff_based = 0;
   inter_sf->use_dist_wtd_comp_flag = DIST_WTD_COMP_ENABLED;
@@ -1159,13 +1168,13 @@ static AOM_INLINE void init_inter_sf(INTER_MODE_SPEED_FEATURES *inter_sf) {
   inter_sf->disable_interinter_wedge_newmv_search = 0;
   inter_sf->enable_interinter_diffwtd_newmv_search = 0;
   inter_sf->disable_smooth_interintra = 0;
-  inter_sf->disable_wedge_interintra_search = 0;
   inter_sf->fast_interintra_wedge_search = 0;
   inter_sf->prune_comp_type_by_model_rd = 0;
   inter_sf->perform_best_rd_based_gating_for_chroma = 0;
   inter_sf->prune_obmc_prob_thresh = 0;
   inter_sf->disable_obmc = 0;
-  inter_sf->disable_interinter_wedge = 0;
+  inter_sf->disable_interinter_wedge_var_thresh = 0;
+  inter_sf->disable_interintra_wedge_var_thresh = 0;
   inter_sf->prune_ref_mv_idx_search = 0;
   inter_sf->prune_warped_prob_thresh = 0;
   inter_sf->reuse_compound_type_decision = 0;
@@ -1173,6 +1182,7 @@ static AOM_INLINE void init_inter_sf(INTER_MODE_SPEED_FEATURES *inter_sf) {
   inter_sf->prune_inter_modes_if_skippable = 0;
   inter_sf->disable_masked_comp = 0;
   inter_sf->reuse_best_prediction_for_part_ab = 0;
+  inter_sf->enable_fast_compound_mode_search = 0;
 }
 
 static AOM_INLINE void init_interp_sf(INTERP_FILTER_SPEED_FEATURES *interp_sf) {
@@ -1188,7 +1198,6 @@ static AOM_INLINE void init_intra_sf(INTRA_MODE_SPEED_FEATURES *intra_sf) {
   intra_sf->chroma_intra_pruning_with_hog = 0;
   intra_sf->skip_intra_in_interframe = 1;
   intra_sf->intra_pruning_with_hog = 0;
-  intra_sf->src_var_thresh_intra_skip = 1;
   intra_sf->prune_palette_search_level = 0;
 
   for (int i = 0; i < TX_SIZES; i++) {
@@ -1347,7 +1356,7 @@ void av1_set_speed_features_framesize_independent(AV1_COMP *cpi, int speed) {
     cpi->common.seq_params.enable_masked_compound &=
         !sf->inter_sf.disable_masked_comp;
     cpi->common.seq_params.enable_interintra_compound &=
-        !sf->inter_sf.disable_wedge_interintra_search;
+        (sf->inter_sf.disable_interintra_wedge_var_thresh != UINT_MAX);
   }
 
   // sf->part_sf.partition_search_breakout_dist_thr is set assuming max 64x64

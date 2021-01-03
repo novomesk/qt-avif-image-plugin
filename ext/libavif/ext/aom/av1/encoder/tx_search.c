@@ -3200,6 +3200,127 @@ static AOM_INLINE void block_rd_txfm(int plane, int block, int blk_row,
   if (args->current_rd > args->best_rd) args->exit_early = 1;
 }
 
+int64_t av1_estimate_txfm_yrd(const AV1_COMP *const cpi, MACROBLOCK *x,
+                              RD_STATS *rd_stats, int64_t ref_best_rd,
+                              BLOCK_SIZE bs, TX_SIZE tx_size) {
+  MACROBLOCKD *const xd = &x->e_mbd;
+  MB_MODE_INFO *const mbmi = xd->mi[0];
+  const TxfmSearchParams *txfm_params = &x->txfm_search_params;
+  const ModeCosts *mode_costs = &x->mode_costs;
+  const int is_inter = is_inter_block(mbmi);
+  const int tx_select = txfm_params->tx_mode_search_type == TX_MODE_SELECT &&
+                        block_signals_txsize(mbmi->bsize);
+  int tx_size_rate = 0;
+  if (tx_select) {
+    const int ctx = txfm_partition_context(
+        xd->above_txfm_context, xd->left_txfm_context, mbmi->bsize, tx_size);
+    tx_size_rate = mode_costs->txfm_partition_cost[ctx][0];
+  }
+  const int skip_ctx = av1_get_skip_txfm_context(xd);
+  const int no_skip_txfm_rate = mode_costs->skip_txfm_cost[skip_ctx][0];
+  const int skip_txfm_rate = mode_costs->skip_txfm_cost[skip_ctx][1];
+  const int64_t skip_txfm_rd = RDCOST(x->rdmult, skip_txfm_rate, 0);
+  const int64_t no_this_rd =
+      RDCOST(x->rdmult, no_skip_txfm_rate + tx_size_rate, 0);
+  mbmi->tx_size = tx_size;
+
+  const uint8_t txw_unit = tx_size_wide_unit[tx_size];
+  const uint8_t txh_unit = tx_size_high_unit[tx_size];
+  const int step = txw_unit * txh_unit;
+  const int max_blocks_wide = max_block_wide(xd, bs, 0);
+  const int max_blocks_high = max_block_high(xd, bs, 0);
+
+  struct rdcost_block_args args;
+  av1_zero(args);
+  args.x = x;
+  args.cpi = cpi;
+  args.best_rd = ref_best_rd;
+  args.current_rd = AOMMIN(no_this_rd, skip_txfm_rd);
+  av1_init_rd_stats(&args.rd_stats);
+  av1_get_entropy_contexts(bs, &xd->plane[0], args.t_above, args.t_left);
+  int i = 0;
+  for (int blk_row = 0; blk_row < max_blocks_high && !args.incomplete_exit;
+       blk_row += txh_unit) {
+    for (int blk_col = 0; blk_col < max_blocks_wide; blk_col += txw_unit) {
+      RD_STATS this_rd_stats;
+      av1_init_rd_stats(&this_rd_stats);
+
+      if (args.exit_early) {
+        args.incomplete_exit = 1;
+        break;
+      }
+
+      ENTROPY_CONTEXT *a = args.t_above + blk_col;
+      ENTROPY_CONTEXT *l = args.t_left + blk_row;
+      TXB_CTX txb_ctx;
+      get_txb_ctx(bs, tx_size, 0, a, l, &txb_ctx);
+
+      TxfmParam txfm_param;
+      QUANT_PARAM quant_param;
+      av1_setup_xform(&cpi->common, x, tx_size, DCT_DCT, &txfm_param);
+      av1_setup_quant(tx_size, 0, AV1_XFORM_QUANT_B, 0, &quant_param);
+
+      av1_xform(x, 0, i, blk_row, blk_col, bs, &txfm_param);
+      av1_quant(x, 0, i, &txfm_param, &quant_param);
+
+      this_rd_stats.rate =
+          cost_coeffs(x, 0, i, tx_size, txfm_param.tx_type, &txb_ctx, 0);
+
+      dist_block_tx_domain(x, 0, i, tx_size, &this_rd_stats.dist,
+                           &this_rd_stats.sse);
+
+      const int64_t no_skip_txfm_rd =
+          RDCOST(x->rdmult, this_rd_stats.rate, this_rd_stats.dist);
+      const int64_t skip_rd = RDCOST(x->rdmult, 0, this_rd_stats.sse);
+
+      this_rd_stats.skip_txfm &= !x->plane[0].eobs[i];
+
+      av1_merge_rd_stats(&args.rd_stats, &this_rd_stats);
+      args.current_rd += AOMMIN(no_skip_txfm_rd, skip_rd);
+
+      if (args.current_rd > ref_best_rd) {
+        args.exit_early = 1;
+        break;
+      }
+
+      av1_set_txb_context(x, 0, i, tx_size, a, l);
+      i += step;
+    }
+  }
+
+  if (args.incomplete_exit) av1_invalid_rd_stats(&args.rd_stats);
+
+  *rd_stats = args.rd_stats;
+  if (rd_stats->rate == INT_MAX) return INT64_MAX;
+
+  int64_t rd;
+  // rdstats->rate should include all the rate except skip/non-skip cost as the
+  // same is accounted in the caller functions after rd evaluation of all
+  // planes. However the decisions should be done after considering the
+  // skip/non-skip header cost
+  if (rd_stats->skip_txfm && is_inter) {
+    rd = RDCOST(x->rdmult, skip_txfm_rate, rd_stats->sse);
+  } else {
+    // Intra blocks are always signalled as non-skip
+    rd = RDCOST(x->rdmult, rd_stats->rate + no_skip_txfm_rate + tx_size_rate,
+                rd_stats->dist);
+    rd_stats->rate += tx_size_rate;
+  }
+  // Check if forcing the block to skip transform leads to smaller RD cost.
+  if (is_inter && !rd_stats->skip_txfm && !xd->lossless[mbmi->segment_id]) {
+    int64_t temp_skip_txfm_rd =
+        RDCOST(x->rdmult, skip_txfm_rate, rd_stats->sse);
+    if (temp_skip_txfm_rd <= rd) {
+      rd = temp_skip_txfm_rd;
+      rd_stats->rate = 0;
+      rd_stats->dist = rd_stats->sse;
+      rd_stats->skip_txfm = 1;
+    }
+  }
+
+  return rd;
+}
+
 int64_t av1_uniform_txfm_yrd(const AV1_COMP *const cpi, MACROBLOCK *x,
                              RD_STATS *rd_stats, int64_t ref_best_rd,
                              BLOCK_SIZE bs, TX_SIZE tx_size,

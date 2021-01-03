@@ -2226,6 +2226,9 @@ static AOM_INLINE int prune_modes_based_on_tpl_stats(
   const int have_newmv = have_newmv_in_inter_mode(this_mode);
   if ((prune_mode_level < 2) && have_newmv) return 0;
 
+  const int64_t best_inter_cost = inter_cost_info_from_tpl->best_inter_cost;
+  if (best_inter_cost == INT64_MAX) return 0;
+
   const int prune_level = prune_mode_level - 1;
   int64_t cur_inter_cost;
 
@@ -2257,7 +2260,6 @@ static AOM_INLINE int prune_modes_based_on_tpl_stats(
 
   // Prune the mode if cur_inter_cost is greater than threshold times
   // best_inter_cost
-  const int64_t best_inter_cost = inter_cost_info_from_tpl->best_inter_cost;
   if (cur_inter_cost >
       ((tpl_inter_mode_prune_mul_factor[prune_level][prune_index] *
         best_inter_cost) >>
@@ -5544,8 +5546,9 @@ void av1_rd_pick_inter_mode(struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
 #endif
   // Gate intra mode evaluation if best of inter is skip except when source
   // variance is extremely low
+  const unsigned int src_var_thresh_intra_skip = 1;
   if (sf->intra_sf.skip_intra_in_interframe &&
-      (x->source_variance > sf->intra_sf.src_var_thresh_intra_skip)) {
+      (x->source_variance > src_var_thresh_intra_skip)) {
     if (inter_cost >= 0 && intra_cost >= 0) {
       aom_clear_system_state();
       const NN_CONFIG *nn_config = (AOMMIN(cm->width, cm->height) <= 480)

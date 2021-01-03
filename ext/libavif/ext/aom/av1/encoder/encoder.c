@@ -1054,9 +1054,9 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
     setup_tpl_buffers(cm, &cpi->tpl_data, cpi->oxcf.gf_cfg.lag_in_frames);
   }
 
-#if CONFIG_COLLECT_PARTITION_STATS == 2
+#if CONFIG_COLLECT_PARTITION_STATS
   av1_zero(cpi->partition_stats);
-#endif
+#endif  // CONFIG_COLLECT_PARTITION_STATS
 
 #define BFP(BT, SDF, SDAF, VF, SVF, SVAF, SDX4DF, JSDAF, JSVAF) \
   cpi->fn_ptr[BT].sdf = SDF;                                    \
@@ -1501,7 +1501,8 @@ void av1_remove_compressor(AV1_COMP *cpi) {
 
 #if CONFIG_COLLECT_PARTITION_STATS == 2
     if (!is_stat_generation_stage(cpi)) {
-      av1_print_partition_stats(&cpi->partition_stats);
+      av1_print_fr_partition_timing_stats(&cpi->partition_stats,
+                                          "fr_part_timing_data.csv");
     }
 #endif
   }
@@ -3544,7 +3545,7 @@ int av1_get_compressed_data(AV1_COMP *cpi, unsigned int *frame_flags,
   aom_usec_timer_mark(&cmptimer);
   cpi->time_compress_data += aom_usec_timer_elapsed(&cmptimer);
 #endif  // CONFIG_INTERNAL_STATS
-  // Note *size = 0 indicates a dropeed frame for which psnr is not calculated
+  // Note *size = 0 indicates a dropped frame for which psnr is not calculated
   if (cpi->b_calculate_psnr && *size > 0) {
     if (cm->show_existing_frame ||
         (!is_stat_generation_stage(cpi) && cm->show_frame)) {

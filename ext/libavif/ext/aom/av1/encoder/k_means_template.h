@@ -98,7 +98,7 @@ void RENAME(av1_k_means)(const int *data, int *centroids, uint8_t *indices,
 #if AV1_K_MEANS_DIM - 2
   av1_calc_indices_dim1(data, centroids, indices, n, k);
 #else
-  RENAME(av1_calc_indices)(data, centroids, indices, n, k);
+  av1_calc_indices_dim2(data, centroids, indices, n, k);
 #endif
   int64_t this_dist = RENAME(calc_total_dist)(data, centroids, indices, n, k);
 
@@ -112,7 +112,7 @@ void RENAME(av1_k_means)(const int *data, int *centroids, uint8_t *indices,
 #if AV1_K_MEANS_DIM - 2
     av1_calc_indices_dim1(data, centroids, indices, n, k);
 #else
-    RENAME(av1_calc_indices)(data, centroids, indices, n, k);
+    av1_calc_indices_dim2(data, centroids, indices, n, k);
 #endif
     this_dist = RENAME(calc_total_dist)(data, centroids, indices, n, k);
 

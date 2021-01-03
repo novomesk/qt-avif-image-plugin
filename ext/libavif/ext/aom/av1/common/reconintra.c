@@ -882,16 +882,19 @@ void av1_filter_intra_predictor_c(uint8_t *dst, ptrdiff_t stride,
       for (int k = 0; k < 8; ++k) {
         int r_offset = k >> 2;
         int c_offset = k & 0x03;
+        int pr = av1_filter_intra_taps[mode][k][0] * p0 +
+                 av1_filter_intra_taps[mode][k][1] * p1 +
+                 av1_filter_intra_taps[mode][k][2] * p2 +
+                 av1_filter_intra_taps[mode][k][3] * p3 +
+                 av1_filter_intra_taps[mode][k][4] * p4 +
+                 av1_filter_intra_taps[mode][k][5] * p5 +
+                 av1_filter_intra_taps[mode][k][6] * p6;
+        // Section 7.11.2.3 specifies the right-hand side of the assignment as
+        //   Clip1( Round2Signed( pr, INTRA_FILTER_SCALE_BITS ) ).
+        // Since Clip1() clips a negative value to 0, it is safe to replace
+        // Round2Signed() with Round2().
         buffer[r + r_offset][c + c_offset] =
-            clip_pixel(ROUND_POWER_OF_TWO_SIGNED(
-                av1_filter_intra_taps[mode][k][0] * p0 +
-                    av1_filter_intra_taps[mode][k][1] * p1 +
-                    av1_filter_intra_taps[mode][k][2] * p2 +
-                    av1_filter_intra_taps[mode][k][3] * p3 +
-                    av1_filter_intra_taps[mode][k][4] * p4 +
-                    av1_filter_intra_taps[mode][k][5] * p5 +
-                    av1_filter_intra_taps[mode][k][6] * p6,
-                FILTER_INTRA_SCALE_BITS));
+            clip_pixel(ROUND_POWER_OF_TWO(pr, FILTER_INTRA_SCALE_BITS));
       }
     }
 
@@ -929,17 +932,19 @@ static void highbd_filter_intra_predictor(uint16_t *dst, ptrdiff_t stride,
       for (int k = 0; k < 8; ++k) {
         int r_offset = k >> 2;
         int c_offset = k & 0x03;
-        buffer[r + r_offset][c + c_offset] =
-            clip_pixel_highbd(ROUND_POWER_OF_TWO_SIGNED(
-                                  av1_filter_intra_taps[mode][k][0] * p0 +
-                                      av1_filter_intra_taps[mode][k][1] * p1 +
-                                      av1_filter_intra_taps[mode][k][2] * p2 +
-                                      av1_filter_intra_taps[mode][k][3] * p3 +
-                                      av1_filter_intra_taps[mode][k][4] * p4 +
-                                      av1_filter_intra_taps[mode][k][5] * p5 +
-                                      av1_filter_intra_taps[mode][k][6] * p6,
-                                  FILTER_INTRA_SCALE_BITS),
-                              bd);
+        int pr = av1_filter_intra_taps[mode][k][0] * p0 +
+                 av1_filter_intra_taps[mode][k][1] * p1 +
+                 av1_filter_intra_taps[mode][k][2] * p2 +
+                 av1_filter_intra_taps[mode][k][3] * p3 +
+                 av1_filter_intra_taps[mode][k][4] * p4 +
+                 av1_filter_intra_taps[mode][k][5] * p5 +
+                 av1_filter_intra_taps[mode][k][6] * p6;
+        // Section 7.11.2.3 specifies the right-hand side of the assignment as
+        //   Clip1( Round2Signed( pr, INTRA_FILTER_SCALE_BITS ) ).
+        // Since Clip1() clips a negative value to 0, it is safe to replace
+        // Round2Signed() with Round2().
+        buffer[r + r_offset][c + c_offset] = clip_pixel_highbd(
+            ROUND_POWER_OF_TWO(pr, FILTER_INTRA_SCALE_BITS), bd);
       }
     }
 

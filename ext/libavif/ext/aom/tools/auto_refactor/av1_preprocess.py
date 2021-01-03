@@ -56,7 +56,14 @@ def get_av1_pp_command(fake_header_dir, code_file_list):
                                                                          " "
                                                                          "-D'AV1_K_MEANS_DIM=2'"
                                                                          " "
-                                                                         "-D'INLINE='")
+                                                                         "-D'INLINE='"
+                                                                         " "
+                                                                         "-D'AOM_INLINE='"
+                                                                         " "
+                                                                         "-D'AOM_FORCE_INLINE='"
+                                                                         " "
+                                                                         "-D'inline='"
+                                                                         )
   return pre_command + " " + " ".join(code_file_list)
 
 

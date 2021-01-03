@@ -130,7 +130,7 @@ static void set_additional_frame_flags(const AV1_COMMON *const cm,
 }
 
 static INLINE void update_keyframe_counters(AV1_COMP *cpi) {
-  if (cpi->common.show_frame) {
+  if (cpi->common.show_frame && cpi->rc.frames_to_key) {
     cpi->rc.frames_since_key++;
     cpi->rc.frames_to_key--;
   }
@@ -355,7 +355,7 @@ int is_forced_keyframe_pending(struct lookahead_ctx *lookahead,
       // so there isn't a forced key-frame pending.
       return -1;
     } else if (e->flags == AOM_EFLAG_FORCE_KF) {
-      return (i + 1);
+      return i;
     } else {
       continue;
     }

@@ -1979,12 +1979,15 @@ void av1_nonrd_pick_inter_mode_sb(AV1_COMP *cpi, TileDataEnc *tile_data,
   int force_skip_low_temp_var = 0;
   int use_ref_frame_mask[REF_FRAMES] = { 0 };
   unsigned int sse_zeromv_norm = UINT_MAX;
-  const int num_inter_modes = cpi->sf.rt_sf.nonrd_agressive_skip
-                                  ? NUM_INTER_MODES_REDUCED
-                                  : NUM_INTER_MODES_RT;
-  const REF_MODE *const ref_mode_set = cpi->sf.rt_sf.nonrd_agressive_skip
-                                           ? ref_mode_set_reduced
-                                           : ref_mode_set_rt;
+  // Use mode set that includes zeromv (via globalmv) for speed >= 9 for
+  // content with low motion.
+  int use_zeromv =
+      ((cpi->oxcf.speed >= 9 && cpi->rc.avg_frame_low_motion > 70) ||
+       cpi->sf.rt_sf.nonrd_agressive_skip);
+  const int num_inter_modes =
+      use_zeromv ? NUM_INTER_MODES_REDUCED : NUM_INTER_MODES_RT;
+  const REF_MODE *const ref_mode_set =
+      use_zeromv ? ref_mode_set_reduced : ref_mode_set_rt;
   PRED_BUFFER tmp[4];
   DECLARE_ALIGNED(16, uint8_t, pred_buf[3 * 128 * 128]);
   PRED_BUFFER *this_mode_pred = NULL;

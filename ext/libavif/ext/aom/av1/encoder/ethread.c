@@ -299,7 +299,8 @@ static AOM_INLINE int get_next_job(TileDataEnc *const tile_data,
 
 static AOM_INLINE void switch_tile_and_get_next_job(
     AV1_COMMON *const cm, TileDataEnc *const tile_data, int *cur_tile_id,
-    int *current_mi_row, int *end_of_frame, int is_firstpass) {
+    int *current_mi_row, int *end_of_frame, int is_firstpass,
+    const BLOCK_SIZE fp_block_size) {
   const int tile_cols = cm->tiles.cols;
   const int tile_rows = cm->tiles.rows;
 
@@ -320,11 +321,13 @@ static AOM_INLINE void switch_tile_and_get_next_job(
           av1_get_sb_cols_in_tile(cm, this_tile->tile_info);
 #else
       int num_b_rows_in_tile =
-          is_firstpass ? av1_get_mb_rows_in_tile(this_tile->tile_info)
-                       : av1_get_sb_rows_in_tile(cm, this_tile->tile_info);
+          is_firstpass
+              ? av1_get_unit_rows_in_tile(this_tile->tile_info, fp_block_size)
+              : av1_get_sb_rows_in_tile(cm, this_tile->tile_info);
       int num_b_cols_in_tile =
-          is_firstpass ? av1_get_mb_cols_in_tile(this_tile->tile_info)
-                       : av1_get_sb_cols_in_tile(cm, this_tile->tile_info);
+          is_firstpass
+              ? av1_get_unit_cols_in_tile(this_tile->tile_info, fp_block_size)
+              : av1_get_sb_cols_in_tile(cm, this_tile->tile_info);
 #endif
       int theoretical_limit_on_threads =
           AOMMIN((num_b_cols_in_tile + 1) >> 1, num_b_rows_in_tile);
@@ -361,8 +364,9 @@ static AOM_INLINE void switch_tile_and_get_next_job(
     // Update the current tile id to the tile id that will be processed next,
     // which will be the least processed tile.
     *cur_tile_id = tile_id;
+    const int unit_height = mi_size_high[fp_block_size];
     get_next_job(&tile_data[tile_id], current_mi_row,
-                 is_firstpass ? FP_MIB_SIZE : cm->seq_params.mib_size);
+                 is_firstpass ? unit_height : cm->seq_params.mib_size);
   }
 }
 
@@ -381,6 +385,8 @@ static int fp_enc_row_mt_worker_hook(void *arg1, void *unused) {
 
   assert(cur_tile_id != -1);
 
+  const BLOCK_SIZE fp_block_size = cpi->fp_block_size;
+  const int unit_height = mi_size_high[fp_block_size];
   int end_of_frame = 0;
   while (1) {
     int current_mi_row = -1;
@@ -388,11 +394,12 @@ static int fp_enc_row_mt_worker_hook(void *arg1, void *unused) {
     pthread_mutex_lock(enc_row_mt_mutex_);
 #endif
     if (!get_next_job(&cpi->tile_data[cur_tile_id], &current_mi_row,
-                      FP_MIB_SIZE)) {
+                      unit_height)) {
       // No jobs are available for the current tile. Query for the status of
       // other tiles and get the next job if available
       switch_tile_and_get_next_job(cm, cpi->tile_data, &cur_tile_id,
-                                   &current_mi_row, &end_of_frame, 1);
+                                   &current_mi_row, &end_of_frame, 1,
+                                   fp_block_size);
     }
 #if CONFIG_MULTITHREAD
     pthread_mutex_unlock(enc_row_mt_mutex_);
@@ -406,7 +413,9 @@ static int fp_enc_row_mt_worker_hook(void *arg1, void *unused) {
     assert(current_mi_row != -1 &&
            current_mi_row <= this_tile->tile_info.mi_row_end);
 
-    av1_first_pass_row(cpi, td, this_tile, current_mi_row >> FP_MIB_SIZE_LOG2);
+    const int unit_height_log2 = mi_size_high_log2[fp_block_size];
+    av1_first_pass_row(cpi, td, this_tile, current_mi_row >> unit_height_log2,
+                       fp_block_size);
 #if CONFIG_MULTITHREAD
     pthread_mutex_lock(enc_row_mt_mutex_);
 #endif
@@ -434,6 +443,7 @@ static int enc_row_mt_worker_hook(void *arg1, void *unused) {
 
   assert(cur_tile_id != -1);
 
+  const BLOCK_SIZE fp_block_size = cpi->fp_block_size;
   int end_of_frame = 0;
   while (1) {
     int current_mi_row = -1;
@@ -445,7 +455,8 @@ static int enc_row_mt_worker_hook(void *arg1, void *unused) {
       // No jobs are available for the current tile. Query for the status of
       // other tiles and get the next job if available
       switch_tile_and_get_next_job(cm, cpi->tile_data, &cur_tile_id,
-                                   &current_mi_row, &end_of_frame, 0);
+                                   &current_mi_row, &end_of_frame, 0,
+                                   fp_block_size);
     }
 #if CONFIG_MULTITHREAD
     pthread_mutex_unlock(enc_row_mt_mutex_);
@@ -945,8 +956,10 @@ int av1_fp_compute_num_enc_workers(AV1_COMP *cpi) {
   for (int row = 0; row < tile_rows; row++) {
     for (int col = 0; col < tile_cols; col++) {
       av1_tile_init(&tile_info, cm, row, col);
-      const int num_mb_rows_in_tile = av1_get_mb_rows_in_tile(tile_info);
-      const int num_mb_cols_in_tile = av1_get_mb_cols_in_tile(tile_info);
+      const int num_mb_rows_in_tile =
+          av1_get_unit_rows_in_tile(tile_info, cpi->fp_block_size);
+      const int num_mb_cols_in_tile =
+          av1_get_unit_cols_in_tile(tile_info, cpi->fp_block_size);
       total_num_threads_row_mt +=
           AOMMIN((num_mb_cols_in_tile + 1) >> 1, num_mb_rows_in_tile);
     }
@@ -956,8 +969,9 @@ int av1_fp_compute_num_enc_workers(AV1_COMP *cpi) {
 
 // Computes the maximum number of mb_rows for row multi-threading of firstpass
 // stage
-static AOM_INLINE int fp_compute_max_mb_rows(
-    const AV1_COMMON *const cm, const TileDataEnc *const tile_data) {
+static AOM_INLINE int fp_compute_max_mb_rows(const AV1_COMMON *const cm,
+                                             const TileDataEnc *const tile_data,
+                                             const BLOCK_SIZE fp_block_size) {
   const int tile_cols = cm->tiles.cols;
   const int tile_rows = cm->tiles.rows;
   int max_mb_rows = 0;
@@ -965,7 +979,8 @@ static AOM_INLINE int fp_compute_max_mb_rows(
     for (int col = 0; col < tile_cols; col++) {
       const int tile_index = row * cm->tiles.cols + col;
       TileInfo tile_info = tile_data[tile_index].tile_info;
-      const int num_mb_rows_in_tile = av1_get_mb_rows_in_tile(tile_info);
+      const int num_mb_rows_in_tile =
+          av1_get_unit_rows_in_tile(tile_info, fp_block_size);
       max_mb_rows = AOMMAX(max_mb_rows, num_mb_rows_in_tile);
     }
   }
@@ -1066,7 +1081,8 @@ void av1_fp_encode_tiles_row_mt(AV1_COMP *cpi) {
 
   av1_init_tile_data(cpi);
 
-  max_mb_rows = fp_compute_max_mb_rows(cm, cpi->tile_data);
+  const BLOCK_SIZE fp_block_size = cpi->fp_block_size;
+  max_mb_rows = fp_compute_max_mb_rows(cm, cpi->tile_data, fp_block_size);
 
   // TODO(ravi.chaudhary@ittiam.com): Currently the percentage of
   // post-processing stages in encoder is quiet low, so limiting the number of

@@ -28,9 +28,6 @@ struct macroblock;
 /*!\cond */
 #define AV1_K_MEANS_RENAME(func, dim) func##_dim##dim##_c
 
-void AV1_K_MEANS_RENAME(av1_calc_indices, 2)(const int *data,
-                                             const int *centroids,
-                                             uint8_t *indices, int n, int k);
 void AV1_K_MEANS_RENAME(av1_k_means, 1)(const int *data, int *centroids,
                                         uint8_t *indices, int n, int k,
                                         int max_itr);
@@ -61,7 +58,7 @@ static INLINE void av1_calc_indices(const int *data, const int *centroids,
   if (dim == 1) {
     av1_calc_indices_dim1(data, centroids, indices, n, k);
   } else if (dim == 2) {
-    av1_calc_indices_dim2_c(data, centroids, indices, n, k);
+    av1_calc_indices_dim2(data, centroids, indices, n, k);
   } else {
     assert(0 && "Untemplated k means dimension");
   }

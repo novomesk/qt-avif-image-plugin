@@ -96,6 +96,24 @@ typedef struct {
   BLOCK_SIZE split_bsize2;
 } PartitionBlkParams;
 
+#if CONFIG_COLLECT_PARTITION_STATS
+typedef struct PartitionTimingStats {
+  // Tracks the number of partition decision used in the current call to \ref
+  // av1_rd_pick_partition
+  int partition_decisions[EXT_PARTITION_TYPES];
+  // Tracks the number of partition_block searched in the current call to \ref
+  // av1_rd_pick_partition
+  int partition_attempts[EXT_PARTITION_TYPES];
+  // Tracks the time spent on each partition search in the current call to \ref
+  // av1_rd_pick_partition
+  int64_t partition_times[EXT_PARTITION_TYPES];
+  // Timer used to time the partitions.
+  struct aom_usec_timer timer;
+  // Whether the timer is on
+  int timer_is_on;
+} PartitionTimingStats;
+#endif  // CONFIG_COLLECT_PARTITION_STATS
+
 // Structure holding state variables for partition search.
 typedef struct {
   // Intra partitioning related info.
@@ -149,6 +167,10 @@ typedef struct {
 
   // This flag will be set if best partition is found from the search.
   bool found_best_partition;
+
+#if CONFIG_COLLECT_PARTITION_STATS
+  PartitionTimingStats part_timing_stats;
+#endif  // CONFIG_COLLECT_PARTITION_STATS
 } PartitionSearchState;
 
 static AOM_INLINE void update_global_motion_used(PREDICTION_MODE mode,

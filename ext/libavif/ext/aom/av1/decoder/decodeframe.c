@@ -4131,7 +4131,7 @@ void av1_read_timing_info_header(aom_timing_info_t *timing_info,
     if (num_ticks_per_picture_minus_1 == UINT32_MAX) {
       aom_internal_error(
           error, AOM_CODEC_UNSUP_BITSTREAM,
-          "num_ticks_per_picture_minus_1 cannot be (1 << 32) − 1.");
+          "num_ticks_per_picture_minus_1 cannot be (1 << 32) - 1.");
     }
     timing_info->num_ticks_per_picture = num_ticks_per_picture_minus_1 + 1;
   }
@@ -5124,8 +5124,6 @@ static AOM_INLINE void superres_post_decode(AV1Decoder *pbi) {
 
 uint32_t av1_decode_frame_headers_and_setup(AV1Decoder *pbi,
                                             struct aom_read_bit_buffer *rb,
-                                            const uint8_t *data,
-                                            const uint8_t **p_data_end,
                                             int trailing_bits_present) {
   AV1_COMMON *const cm = &pbi->common;
   const int num_planes = av1_num_planes(cm);
@@ -5165,9 +5163,8 @@ uint32_t av1_decode_frame_headers_and_setup(AV1Decoder *pbi,
         xd->cur_buf->y_crop_width, xd->cur_buf->y_crop_height);
   }
 
+  // Showing a frame directly.
   if (cm->show_existing_frame) {
-    // showing a frame directly
-    *p_data_end = data + uncomp_hdr_size;
     if (pbi->reset_decoder_state) {
       // Use the default frame context values.
       *cm->fc = *cm->default_frame_context;

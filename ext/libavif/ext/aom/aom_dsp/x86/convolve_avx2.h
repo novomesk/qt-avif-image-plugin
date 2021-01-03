@@ -517,6 +517,30 @@ static INLINE void prepare_coeffs(const InterpFilterParams *const filter_params,
   coeffs[3] = _mm256_shuffle_epi32(coeff, 0xff);
 }
 
+static INLINE void prepare_coeffs_12taps(
+    const InterpFilterParams *const filter_params, const int subpel_q4,
+    __m256i *const coeffs /* [4] */) {
+  const int16_t *filter = av1_get_interp_filter_subpel_kernel(
+      filter_params, subpel_q4 & SUBPEL_MASK);
+
+  __m128i coeff_8 = _mm_loadu_si128((__m128i *)filter);
+  __m256i coeff = _mm256_broadcastsi128_si256(coeff_8);
+
+  // coeffs 0 1 0 1 0 1 0 1
+  coeffs[0] = _mm256_shuffle_epi32(coeff, 0x00);
+  // coeffs 2 3 2 3 2 3 2 3
+  coeffs[1] = _mm256_shuffle_epi32(coeff, 0x55);
+  // coeffs 4 5 4 5 4 5 4 5
+  coeffs[2] = _mm256_shuffle_epi32(coeff, 0xaa);
+  // coeffs 6 7 6 7 6 7 6 7
+  coeffs[3] = _mm256_shuffle_epi32(coeff, 0xff);
+  // coeffs 8 9 10 11 0 0 0 0
+  coeff_8 = _mm_loadl_epi64((__m128i *)(filter + 8));
+  coeff = _mm256_broadcastq_epi64(coeff_8);
+  coeffs[4] = _mm256_shuffle_epi32(coeff, 0x00);  // coeffs 8 9 8 9 8 9 8 9
+  coeffs[5] = _mm256_shuffle_epi32(coeff, 0x55);  // coeffs 10 11 10 11.. 10 11
+}
+
 static INLINE __m256i convolve_lowbd(const __m256i *const s,
                                      const __m256i *const coeffs) {
   const __m256i res_01 = _mm256_maddubs_epi16(s[0], coeffs[0]);
@@ -562,6 +586,22 @@ static INLINE __m256i convolve_6tap(const __m256i *const s,
   const __m256i res_2 = _mm256_madd_epi16(s[2], coeffs[2]);
 
   const __m256i res = _mm256_add_epi32(_mm256_add_epi32(res_0, res_1), res_2);
+
+  return res;
+}
+
+static INLINE __m256i convolve_12taps(const __m256i *const s,
+                                      const __m256i *const coeffs) {
+  const __m256i res_0 = _mm256_madd_epi16(s[0], coeffs[0]);
+  const __m256i res_1 = _mm256_madd_epi16(s[1], coeffs[1]);
+  const __m256i res_2 = _mm256_madd_epi16(s[2], coeffs[2]);
+  const __m256i res_3 = _mm256_madd_epi16(s[3], coeffs[3]);
+  const __m256i res_4 = _mm256_madd_epi16(s[4], coeffs[4]);
+  const __m256i res_5 = _mm256_madd_epi16(s[5], coeffs[5]);
+
+  const __m256i res1 = _mm256_add_epi32(_mm256_add_epi32(res_0, res_1),
+                                        _mm256_add_epi32(res_2, res_3));
+  const __m256i res = _mm256_add_epi32(_mm256_add_epi32(res_4, res_5), res1);
 
   return res;
 }

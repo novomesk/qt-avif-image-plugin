@@ -573,6 +573,9 @@ typedef struct MV_SPEED_FEATURES {
   // Whether to downsample the rows in sad calculation during motion search.
   // This is only active when there are at least 16 rows.
   int use_downsampled_sad;
+
+  // Enable/disable extensive joint motion search.
+  int disable_extensive_joint_motion_search;
 } MV_SPEED_FEATURES;
 
 typedef struct INTER_MODE_SPEED_FEATURES {
@@ -695,14 +698,14 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // Prune warped motion search using previous frame stats.
   int prune_warped_prob_thresh;
 
-  // Enable/disable interintra wedge search.
-  int disable_wedge_interintra_search;
+  // Variance threshold to enable/disable Interintra wedge search
+  unsigned int disable_interintra_wedge_var_thresh;
+
+  // Variance threshold to enable/disable Interinter wedge search
+  unsigned int disable_interinter_wedge_var_thresh;
 
   // De-couple wedge and mode search during interintra RDO.
   int fast_interintra_wedge_search;
-
-  // Only enable wedge search if the variance is above this threshold.
-  unsigned int disable_wedge_search_var_thresh;
 
   // Whether fast wedge sign estimate is used
   int fast_wedge_sign_estimate;
@@ -719,9 +722,6 @@ typedef struct INTER_MODE_SPEED_FEATURES {
 
   // Enable/disable smooth inter-intra mode
   int disable_smooth_interintra;
-
-  // Disable interinter_wedge
-  int disable_interinter_wedge;
 
   // Decide when and how to use joint_comp.
   DIST_WTD_COMP_FLAG use_dist_wtd_comp_flag;
@@ -761,6 +761,9 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // Reuse the best prediction modes found in PARTITION_SPLIT and PARTITION_RECT
   // when encoding PARTITION_AB.
   int reuse_best_prediction_for_part_ab;
+
+  // Enable/disable the fast compound mode search.
+  int enable_fast_compound_mode_search;
 } INTER_MODE_SPEED_FEATURES;
 
 typedef struct INTERP_FILTER_SPEED_FEATURES {
@@ -794,10 +797,6 @@ typedef struct INTRA_MODE_SPEED_FEATURES {
 
   // flag to allow skipping intra mode for inter frame prediction
   int skip_intra_in_interframe;
-
-  // variance threshold for intra mode gating when inter turned out to be skip
-  // in inter frame prediction
-  unsigned int src_var_thresh_intra_skip;
 
   // Prune intra mode candidates based on source block histogram of gradient.
   // Applies to luma plane only.

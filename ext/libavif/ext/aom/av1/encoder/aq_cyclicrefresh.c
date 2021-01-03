@@ -225,7 +225,7 @@ void av1_cyclic_refresh_postencode(AV1_COMP *const cpi) {
       }
       // Accumulate low_content_frame.
       if (is_inter_block(mi[0]) && mi[0]->ref_frame[0] == LAST_FRAME &&
-          abs(mv.row) < 16 && abs(mv.col) < 16)
+          abs(mv.row) < 8 && abs(mv.col) < 8)
         cnt_zeromv += sh << 1;
       if (mi_col + sh < mi_params->mi_cols) {
         mi += sh;

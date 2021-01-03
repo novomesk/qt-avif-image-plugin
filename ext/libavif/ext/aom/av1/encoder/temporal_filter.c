@@ -255,7 +255,7 @@ static void tf_determine_block_partition(const MV block_mv, const int block_mse,
                                          MV *subblock_mvs, int *subblock_mses) {
   int min_subblock_mse = INT_MAX;
   int max_subblock_mse = INT_MIN;
-  int sum_subblock_mse = 0;
+  int64_t sum_subblock_mse = 0;
   for (int i = 0; i < 4; ++i) {
     sum_subblock_mse += subblock_mses[i];
     min_subblock_mse = AOMMIN(min_subblock_mse, subblock_mses[i]);

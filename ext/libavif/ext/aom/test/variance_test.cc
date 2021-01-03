@@ -1182,7 +1182,6 @@ void ObmcVarianceTest<ObmcSubpelVarFunc>::SpeedTest() {
 #endif  // !CONFIG_REALTIME_ONLY
 
 typedef MseWxHTestClass<MseWxH16bitFunc> MseWxHTest;
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(MseWxHTest);
 typedef MainTestClass<Get4x4SseFunc> AvxSseTest;
 typedef MainTestClass<VarianceMxNFunc> AvxMseTest;
 typedef MainTestClass<VarianceMxNFunc> AvxVarianceTest;
@@ -1218,6 +1217,13 @@ TEST_P(AvxObmcSubpelVarianceTest, Ref) { RefTest(); }
 TEST_P(AvxObmcSubpelVarianceTest, ExtremeRef) { ExtremeRefTest(); }
 TEST_P(AvxObmcSubpelVarianceTest, DISABLED_Speed) { SpeedTest(); }
 #endif
+
+INSTANTIATE_TEST_SUITE_P(
+    C, MseWxHTest,
+    ::testing::Values(MseWxHParams(3, 3, &aom_mse_wxh_16bit_c, 8),
+                      MseWxHParams(3, 2, &aom_mse_wxh_16bit_c, 8),
+                      MseWxHParams(2, 3, &aom_mse_wxh_16bit_c, 8),
+                      MseWxHParams(2, 2, &aom_mse_wxh_16bit_c, 8)));
 
 INSTANTIATE_TEST_SUITE_P(C, SumOfSquaresTest,
                          ::testing::Values(aom_get_mb_ss_c));
@@ -1506,7 +1512,6 @@ void MseHBDWxHTestClass<MseHBDWxHFunctionType>::RefMatchTestMse() {
 
 typedef TestParams<MseHBDWxH16bitFunc> MseHBDWxHParams;
 typedef MseHBDWxHTestClass<MseHBDWxH16bitFunc> MseHBDWxHTest;
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(MseHBDWxHTest);
 typedef MainTestClass<VarianceMxNFunc> AvxHBDMseTest;
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AvxHBDMseTest);
 typedef MainTestClass<VarianceMxNFunc> AvxHBDVarianceTest;
@@ -1530,6 +1535,13 @@ TEST_P(AvxHBDSubpelVarianceTest, Ref) { RefTest(); }
 TEST_P(AvxHBDSubpelVarianceTest, ExtremeRef) { ExtremeRefTest(); }
 TEST_P(AvxHBDSubpelVarianceTest, DISABLED_Speed) { SpeedTest(); }
 TEST_P(AvxHBDSubpelAvgVarianceTest, Ref) { RefTest(); }
+
+INSTANTIATE_TEST_SUITE_P(
+    C, MseHBDWxHTest,
+    ::testing::Values(MseHBDWxHParams(3, 3, &aom_mse_wxh_16bit_highbd_c, 10),
+                      MseHBDWxHParams(3, 2, &aom_mse_wxh_16bit_highbd_c, 10),
+                      MseHBDWxHParams(2, 3, &aom_mse_wxh_16bit_highbd_c, 10),
+                      MseHBDWxHParams(2, 2, &aom_mse_wxh_16bit_highbd_c, 10)));
 
 /* TODO(debargha): This test does not support the highbd version
 INSTANTIATE_TEST_SUITE_P(

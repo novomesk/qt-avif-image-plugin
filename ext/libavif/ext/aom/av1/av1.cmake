@@ -418,7 +418,8 @@ list(APPEND AOM_AV1_ENCODER_INTRIN_AVX2
             "${AOM_ROOT}/av1/encoder/x86/av1_k_means_avx2.c"
             "${AOM_ROOT}/av1/encoder/x86/temporal_filter_avx2.c"
             "${AOM_ROOT}/av1/encoder/x86/highbd_temporal_filter_avx2.c"
-            "${AOM_ROOT}/av1/encoder/x86/pickrst_avx2.c")
+            "${AOM_ROOT}/av1/encoder/x86/pickrst_avx2.c"
+            "${AOM_ROOT}/av1/encoder/x86/cnn_avx2.c")
 
 if(NOT CONFIG_AV1_HIGHBITDEPTH)
   list(
@@ -429,7 +430,8 @@ endif()
 
 if(CONFIG_REALTIME_ONLY)
   list(REMOVE_ITEM AOM_AV1_ENCODER_INTRIN_AVX2
-                   "${AOM_ROOT}/av1/encoder/x86/pickrst_avx2.c")
+                   "${AOM_ROOT}/av1/encoder/x86/pickrst_avx2.c"
+                   "${AOM_ROOT}/av1/encoder/x86/cnn_avx2.c")
 endif()
 
 list(APPEND AOM_AV1_ENCODER_INTRIN_NEON

@@ -104,7 +104,8 @@ list(APPEND AOM_LIBYUV_SOURCES
             "${AOM_ROOT}/third_party/libyuv/source/scale_mips.cc"
             "${AOM_ROOT}/third_party/libyuv/source/scale_neon.cc"
             "${AOM_ROOT}/third_party/libyuv/source/scale_neon64.cc"
-            "${AOM_ROOT}/third_party/libyuv/source/scale_win.cc")
+            "${AOM_ROOT}/third_party/libyuv/source/scale_win.cc"
+            "${AOM_ROOT}/third_party/libyuv/source/scale_uv.cc")
 
 list(APPEND AOM_SOURCES
             "${AOM_CONFIG_DIR}/config/aom_config.c"
@@ -127,6 +128,8 @@ list(APPEND AOM_SOURCES
             "${AOM_ROOT}/aom/src/aom_integer.c")
 
 list(APPEND AOM_COMMON_APP_UTIL_SOURCES
+            "${AOM_ROOT}/common/args_helper.c"
+            "${AOM_ROOT}/common/args_helper.h"
             "${AOM_ROOT}/common/args.c"
             "${AOM_ROOT}/common/args.h"
             "${AOM_ROOT}/common/av1_config.c"
