@@ -226,25 +226,8 @@ bool QAVIFHandler::decode_one_frame()
             qWarning("Invalid QColorSpace created from ICC!\n");
         }
     } else {
-
-        avifColorPrimaries primaries_to_load;
-        avifTransferCharacteristics trc_to_load;
-
-        if ((m_decoder->image->colorPrimaries == 2 /* AVIF_COLOR_PRIMARIES_UNSPECIFIED */) ||
-                (m_decoder->image->colorPrimaries == 0 /* AVIF_COLOR_PRIMARIES_UNKNOWN */)) {
-            primaries_to_load = (avifColorPrimaries) 1; // AVIF_COLOR_PRIMARIES_BT709
-        } else {
-            primaries_to_load = m_decoder->image->colorPrimaries;
-        }
-        if ((m_decoder->image->transferCharacteristics == 2 /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */) ||
-                (m_decoder->image->transferCharacteristics == 0 /* AVIF_TRANSFER_CHARACTERISTICS_UNKNOWN */)) {
-            trc_to_load = (avifTransferCharacteristics) 13; // AVIF_TRANSFER_CHARACTERISTICS_SRGB
-        } else {
-            trc_to_load = m_decoder->image->transferCharacteristics;
-        }
-
         float prim[8]; // outPrimaries: rX, rY, gX, gY, bX, bY, wX, wY
-        avifColorPrimariesGetValues(primaries_to_load, prim);
+        avifColorPrimariesGetValues(m_decoder->image->colorPrimaries, prim);
 
         QPointF redPoint(prim[0], prim[1]);
         QPointF greenPoint(prim[2], prim[3]);
@@ -255,7 +238,7 @@ bool QAVIFHandler::decode_one_frame()
         QColorSpace::TransferFunction q_trc = QColorSpace::TransferFunction::Custom;
         float q_trc_gamma = 0.0f;
 
-        switch (trc_to_load) {
+        switch (m_decoder->image->transferCharacteristics) {
         /* AVIF_TRANSFER_CHARACTERISTICS_BT470M */
         case 4:
             q_trc = QColorSpace::TransferFunction::Gamma;
@@ -271,6 +254,8 @@ bool QAVIFHandler::decode_one_frame()
             q_trc = QColorSpace::TransferFunction::Linear;
             break;
         /* AVIF_TRANSFER_CHARACTERISTICS_SRGB */
+        case 0:
+        case 2: /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
         case 13:
             q_trc =  QColorSpace::TransferFunction::SRgb;
             break;
@@ -282,9 +267,11 @@ bool QAVIFHandler::decode_one_frame()
         }
 
         if (q_trc != QColorSpace::TransferFunction::Custom) {   //we create new colorspace using Qt
-            switch (primaries_to_load) {
+            switch (m_decoder->image->colorPrimaries) {
             /* AVIF_COLOR_PRIMARIES_BT709 */
+            case 0:
             case 1:
+            case 2: /* AVIF_COLOR_PRIMARIES_UNSPECIFIED */
                 result.setColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, q_trc, q_trc_gamma));
                 break;
             /* AVIF_COLOR_PRIMARIES_SMPTE432 */
