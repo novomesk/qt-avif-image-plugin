@@ -769,13 +769,15 @@ bool QAVIFHandler::write(const QImage &image)
 
 QVariant QAVIFHandler::option(ImageOption option) const
 {
+    if (option == Quality) {
+        return m_quality;
+    }
+
     if (!supportsOption(option) || !ensureParsed()) {
         return QVariant();
     }
 
     switch (option) {
-    case Quality:
-        return m_quality;
     case Size:
         return m_current_image.size();
     case Animation:
