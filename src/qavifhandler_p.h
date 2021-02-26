@@ -5,57 +5,59 @@
 #include <QVariant>
 #include <qimageiohandler.h>
 #include <QByteArray>
+#include <QPointF>
 #include <avif/avif.h>
 
 class QAVIFHandler : public QImageIOHandler
 {
 public:
-  QAVIFHandler();
-  ~QAVIFHandler();
+    QAVIFHandler();
+    ~QAVIFHandler();
 
-  bool canRead() const override;
-  bool read ( QImage *image ) override;
-  bool write ( const QImage &image ) override;
+    bool canRead() const override;
+    bool read(QImage *image) override;
+    bool write(const QImage &image) override;
 
-  static bool canRead ( QIODevice *device );
+    static bool canRead(QIODevice *device);
 
-  QVariant option ( ImageOption option ) const override;
-  void setOption ( ImageOption option, const QVariant &value ) override;
-  bool supportsOption ( ImageOption option ) const override;
+    QVariant option(ImageOption option) const override;
+    void setOption(ImageOption option, const QVariant &value) override;
+    bool supportsOption(ImageOption option) const override;
 
-  int imageCount() const override;
-  int currentImageNumber() const override;
-  bool jumpToNextImage() override;
-  bool jumpToImage ( int imageNumber ) override;
+    int imageCount() const override;
+    int currentImageNumber() const override;
+    bool jumpToNextImage() override;
+    bool jumpToImage(int imageNumber) override;
 
-  int nextImageDelay() const override;
+    int nextImageDelay() const override;
 
-  int loopCount() const override;
+    int loopCount() const override;
 private:
-  bool ensureParsed() const;
-  bool ensureDecoder();
-  bool decode_one_frame();
+    static QPointF CompatibleChromacity(qreal chrX, qreal chrY);
 
-  enum ParseAvifState
-  {
-    ParseAvifError = -1,
-    ParseAvifNotParsed = 0,
-    ParseAvifSuccess = 1
-  };
+    bool ensureParsed() const;
+    bool ensureDecoder();
+    bool decode_one_frame();
 
-  ParseAvifState m_parseState;
-  int m_quality;
+    enum ParseAvifState {
+        ParseAvifError = -1,
+        ParseAvifNotParsed = 0,
+        ParseAvifSuccess = 1
+    };
 
-  uint32_t m_container_width;
-  uint32_t m_container_height;
+    ParseAvifState m_parseState;
+    int m_quality;
 
-  QByteArray m_rawData;
-  avifROData m_rawAvifData;
+    uint32_t m_container_width;
+    uint32_t m_container_height;
 
-  avifDecoder *m_decoder;
-  QImage        m_current_image;
+    QByteArray m_rawData;
+    avifROData m_rawAvifData;
 
-  bool m_must_jump_to_next_image;
+    avifDecoder *m_decoder;
+    QImage        m_current_image;
+
+    bool m_must_jump_to_next_image;
 };
 
 #endif // QAVIFHANDLER_P_H

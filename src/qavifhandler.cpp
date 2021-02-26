@@ -39,7 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #include "qavifhandler_p.h"
-
+#include <cfloat>
 
 QAVIFHandler::QAVIFHandler() :
     m_parseState(ParseAvifNotParsed),
@@ -129,7 +129,7 @@ bool QAVIFHandler::ensureDecoder()
 
     decodeResult = avifDecoderSetIOMemory(m_decoder, m_rawAvifData.data, m_rawAvifData.size);
     if (decodeResult != AVIF_RESULT_OK) {
-        qWarning("ERROR: avifDecoderSetIOMemory failed: %s\n", avifResultToString(decodeResult));
+        qWarning("ERROR: avifDecoderSetIOMemory failed: %s", avifResultToString(decodeResult));
 
         avifDecoderDestroy(m_decoder);
         m_decoder = nullptr;
@@ -139,7 +139,7 @@ bool QAVIFHandler::ensureDecoder()
 
     decodeResult = avifDecoderParse(m_decoder);
     if (decodeResult != AVIF_RESULT_OK) {
-        qWarning("ERROR: Failed to parse input: %s\n", avifResultToString(decodeResult));
+        qWarning("ERROR: Failed to parse input: %s", avifResultToString(decodeResult));
 
         avifDecoderDestroy(m_decoder);
         m_decoder = nullptr;
@@ -174,7 +174,7 @@ bool QAVIFHandler::ensureDecoder()
             return false;
         }
     } else {
-        qWarning("ERROR: Failed to decode image: %s\n", avifResultToString(decodeResult));
+        qWarning("ERROR: Failed to decode image: %s", avifResultToString(decodeResult));
     }
 
     avifDecoderDestroy(m_decoder);
@@ -223,16 +223,17 @@ bool QAVIFHandler::decode_one_frame()
     if (m_decoder->image->icc.data && (m_decoder->image->icc.size > 0)) {
         result.setColorSpace(QColorSpace::fromIccProfile(QByteArray::fromRawData((const char *) m_decoder->image->icc.data, (int) m_decoder->image->icc.size)));
         if (! result.colorSpace().isValid()) {
-            qWarning("Invalid QColorSpace created from ICC!\n");
+            qWarning("Invalid QColorSpace created from ICC!");
         }
     } else {
-        float prim[8]; // outPrimaries: rX, rY, gX, gY, bX, bY, wX, wY
+        float prim[8] = { 0.64f, 0.33f, 0.3f, 0.6f, 0.15f, 0.06f, 0.3127f, 0.329f };
+        // outPrimaries: rX, rY, gX, gY, bX, bY, wX, wY
         avifColorPrimariesGetValues(m_decoder->image->colorPrimaries, prim);
 
-        QPointF redPoint(prim[0], prim[1]);
-        QPointF greenPoint(prim[2], prim[3]);
-        QPointF bluePoint(prim[4], prim[5]);
-        QPointF whitePoint(prim[6], prim[7]);
+        const QPointF redPoint(QAVIFHandler::CompatibleChromacity(prim[0], prim[1]));
+        const QPointF greenPoint(QAVIFHandler::CompatibleChromacity(prim[2], prim[3]));
+        const QPointF bluePoint(QAVIFHandler::CompatibleChromacity(prim[4], prim[5]));
+        const QPointF whitePoint(QAVIFHandler::CompatibleChromacity(prim[6], prim[7]));
 
 
         QColorSpace::TransferFunction q_trc = QColorSpace::TransferFunction::Custom;
@@ -285,7 +286,7 @@ bool QAVIFHandler::decode_one_frame()
         }
 
         if (! result.colorSpace().isValid()) {
-            qWarning("Invalid QColorSpace created from NCLX/CICP!\n");
+            qWarning("Invalid QColorSpace created from NCLX/CICP!");
         }
     }
 #endif
@@ -327,7 +328,7 @@ bool QAVIFHandler::decode_one_frame()
 
     avifResult res = avifImageYUVToRGB(m_decoder->image, &rgb);
     if (res != AVIF_RESULT_OK) {
-        qWarning("ERROR in avifImageYUVToRGB: %s\n", avifResultToString(res));
+        qWarning("ERROR in avifImageYUVToRGB: %s", avifResultToString(res));
         return false;
     }
 
@@ -369,7 +370,7 @@ bool QAVIFHandler::decode_one_frame()
         }
 
         else { //Zero values, we need to avoid 0 divide.
-            qWarning("ERROR: Wrong values in avifCleanApertureBox\n");
+            qWarning("ERROR: Wrong values in avifCleanApertureBox");
         }
     }
 
@@ -727,7 +728,7 @@ bool QAVIFHandler::write(const QImage &image)
 
         res = avifImageRGBToYUV(avif, &rgb);
         if (res != AVIF_RESULT_OK) {
-            qWarning("ERROR in avifImageRGBToYUV: %s\n", avifResultToString(res));
+            qWarning("ERROR in avifImageRGBToYUV: %s", avifResultToString(res));
             return false;
         }
     }
@@ -756,11 +757,11 @@ bool QAVIFHandler::write(const QImage &image)
         if (status > 0) {
             return true;
         } else if (status == -1) {
-            qWarning("Write error: %s\n", qUtf8Printable(device()->errorString()));
+            qWarning("Write error: %s", qUtf8Printable(device()->errorString()));
             return false;
         }
     } else {
-        qWarning("ERROR: Failed to encode: %s\n", avifResultToString(res));
+        qWarning("ERROR: Failed to encode: %s", avifResultToString(res));
     }
 
     return false;
@@ -857,14 +858,14 @@ bool QAVIFHandler::jumpToNextImage()
     avifResult decodeResult = avifDecoderNextImage(m_decoder);
 
     if (decodeResult != AVIF_RESULT_OK) {
-        qWarning("ERROR: Failed to decode Next image in sequence: %s\n", avifResultToString(decodeResult));
+        qWarning("ERROR: Failed to decode Next image in sequence: %s", avifResultToString(decodeResult));
         m_parseState = ParseAvifError;
         return false;
     }
 
     if ((m_container_width != m_decoder->image->width) ||
             (m_container_height != m_decoder->image->height)) {
-        qWarning("Decoded image sequence size (%dx%d) do not match first image size (%dx%d)!\n",
+        qWarning("Decoded image sequence size (%dx%d) do not match first image size (%dx%d)!",
                  m_decoder->image->width, m_decoder->image->height,
                  m_container_width, m_container_height);
 
@@ -906,14 +907,14 @@ bool QAVIFHandler::jumpToImage(int imageNumber)
     avifResult decodeResult = avifDecoderNthImage(m_decoder, imageNumber);
 
     if (decodeResult != AVIF_RESULT_OK) {
-        qWarning("ERROR: Failed to decode %d th Image in sequence: %s\n", imageNumber, avifResultToString(decodeResult));
+        qWarning("ERROR: Failed to decode %d th Image in sequence: %s", imageNumber, avifResultToString(decodeResult));
         m_parseState = ParseAvifError;
         return false;
     }
 
     if ((m_container_width != m_decoder->image->width) ||
             (m_container_height != m_decoder->image->height)) {
-        qWarning("Decoded image sequence size (%dx%d) do not match declared container size (%dx%d)!\n",
+        qWarning("Decoded image sequence size (%dx%d) do not match declared container size (%dx%d)!",
                  m_decoder->image->width, m_decoder->image->height,
                  m_container_width, m_container_height);
 
@@ -957,4 +958,16 @@ int QAVIFHandler::loopCount() const
     }
 
     return 1;
+}
+
+QPointF QAVIFHandler::CompatibleChromacity(qreal chrX, qreal chrY)
+{
+    chrX = qBound(qreal(0.0), chrX, qreal(1.0));
+    chrY = qBound(qreal(DBL_MIN), chrY, qreal(1.0));
+
+    if ((chrX + chrY) > qreal(1.0)) {
+        chrX = qreal(1.0) - chrY;
+    }
+
+    return QPointF(chrX, chrY);
 }
