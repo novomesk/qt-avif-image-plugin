@@ -372,11 +372,23 @@ static AOM_INLINE void set_vbp_thresholds(AV1_COMP *cpi, int64_t thresholds[],
                !cpi->sf.rt_sf.force_large_partition_blocks)
         threshold_base = (5 * threshold_base) >> 2;
     }
-
+    // TODO(kyslov) Enable var based partition adjusment on temporal denoising
+#if 0  // CONFIG_AV1_TEMPORAL_DENOISING
+    if (cpi->oxcf.noise_sensitivity > 0 && denoise_svc(cpi) &&
+        cpi->oxcf.speed > 5 && cpi->denoiser.denoising_level >= kDenLow)
+      threshold_base =
+          av1_scale_part_thresh(threshold_base, cpi->denoiser.denoising_level,
+                                content_state, cpi->svc.temporal_layer_id);
+    else
+      threshold_base =
+        scale_part_thresh_content(threshold_base, cpi->oxcf.speed, cm->width,
+                                  cm->height, cpi->svc.non_reference_frame);
+#else
     // Increase base variance threshold based on content_state/sum_diff level.
     threshold_base =
         scale_part_thresh_content(threshold_base, cpi->oxcf.speed, cm->width,
                                   cm->height, cpi->svc.non_reference_frame);
+#endif
 
     thresholds[0] = threshold_base >> 1;
     thresholds[1] = threshold_base;

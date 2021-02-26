@@ -883,7 +883,7 @@ static void set_layer_pattern(int layering_mode, int superframe_cnt,
           ref_frame_config->ref_idx[SVC_GOLDEN_FRAME] = 4;
         }
       }
-      if (layer_id->spatial_layer_id > 0)
+      if (layer_id->spatial_layer_id > 0 && !ksvc_mode)
         // Reference GOLDEN.
         ref_frame_config->reference[SVC_GOLDEN_FRAME] = 1;
       // For 3 spatial layer case 7 (where there is free buffer slot):
@@ -921,6 +921,7 @@ int main(int argc, const char **argv) {
 
   struct RateControlMetrics rc;
   int64_t cx_time = 0;
+  int64_t cx_time_sl[3];  // max number of spatial layers.
   double sum_bitrate = 0.0;
   double sum_bitrate2 = 0.0;
   double framerate = 30.0;
@@ -1054,15 +1055,19 @@ int main(int argc, const char **argv) {
     die("Failed to initialize encoder");
 
   aom_codec_control(&codec, AOME_SET_CPUUSED, app_input.speed);
-  aom_codec_control(&codec, AV1E_SET_AQ_MODE, app_input.aq_mode);
+  aom_codec_control(&codec, AV1E_SET_AQ_MODE, app_input.aq_mode ? 3 : 0);
   aom_codec_control(&codec, AV1E_SET_GF_CBR_BOOST_PCT, 0);
   aom_codec_control(&codec, AV1E_SET_ENABLE_CDEF, 1);
   aom_codec_control(&codec, AV1E_SET_ENABLE_ORDER_HINT, 0);
   aom_codec_control(&codec, AV1E_SET_ENABLE_TPL_MODEL, 0);
   aom_codec_control(&codec, AV1E_SET_DELTAQ_MODE, 0);
-  aom_codec_control(&codec, AV1E_SET_COEFF_COST_UPD_FREQ, 2);
-  aom_codec_control(&codec, AV1E_SET_MODE_COST_UPD_FREQ, 2);
+  aom_codec_control(&codec, AV1E_SET_COEFF_COST_UPD_FREQ, 3);
+  aom_codec_control(&codec, AV1E_SET_MODE_COST_UPD_FREQ, 3);
   aom_codec_control(&codec, AV1E_SET_MV_COST_UPD_FREQ, 3);
+  aom_codec_control(&codec, AV1E_SET_CDF_UPDATE_MODE, 1);
+  aom_codec_control(&codec, AV1E_SET_TILE_COLUMNS,
+                    cfg.g_threads ? get_msb(cfg.g_threads) : 0);
+  if (cfg.g_threads > 1) aom_codec_control(&codec, AV1E_SET_ROW_MT, 1);
 
   svc_params.number_spatial_layers = ss_number_layers;
   svc_params.number_temporal_layers = ts_number_layers;
@@ -1095,6 +1100,7 @@ int main(int argc, const char **argv) {
                       max_intra_size_pct);
   }
 
+  for (unsigned int slx = 0; slx < ss_number_layers; slx++) cx_time_sl[slx] = 0;
   frame_avail = 1;
   while (frame_avail || got_data) {
     struct aom_usec_timer timer;
@@ -1145,6 +1151,7 @@ int main(int argc, const char **argv) {
         die_codec(&codec, "Failed to encode frame");
       aom_usec_timer_mark(&timer);
       cx_time += aom_usec_timer_elapsed(&timer);
+      cx_time_sl[slx] += aom_usec_timer_elapsed(&timer);
 
       got_data = 0;
       while ((pkt = aom_codec_get_cx_data(&codec, &iter))) {
@@ -1221,6 +1228,14 @@ int main(int argc, const char **argv) {
   printf("Frame cnt and encoding time/FPS stats for encoding: %d %f %f\n",
          frame_cnt, 1000 * (float)cx_time / (double)(frame_cnt * 1000000),
          1000000 * (double)frame_cnt / (double)cx_time);
+
+  if (ss_number_layers > 1) {
+    printf("Per spatial layer: \n");
+    for (unsigned int slx = 0; slx < ss_number_layers; slx++)
+      printf("Frame cnt and encoding time/FPS stats for encoding: %d %f %f\n",
+             frame_cnt, (float)cx_time_sl[slx] / (double)(frame_cnt * 1000),
+             1000000 * (double)frame_cnt / (double)cx_time_sl[slx]);
+  }
 
   if (aom_codec_destroy(&codec)) die_codec(&codec, "Failed to destroy codec");
 

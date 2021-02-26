@@ -917,13 +917,18 @@ static void tf_do_filtering(AV1_COMP *cpi) {
  * \param[in]   is_second_arf   Whether the to-filter frame is the second ARF.
  *                              This field will affect the number of frames
  *                              used for filtering.
+ * \param[in]   update_type     This frame's update type.
+ *
+ * \param[in]   is_forward_keyframe Indicate whether this is a forward keyframe.
  *
  * \return Nothing will be returned. But the fields `frames`, `num_frames`,
  *         `filter_frame_idx` and `noise_levels` will be updated in cpi->tf_ctx.
  */
 static void tf_setup_filtering_buffer(AV1_COMP *cpi,
                                       const int filter_frame_lookahead_idx,
-                                      const int is_second_arf) {
+                                      const int is_second_arf,
+                                      FRAME_UPDATE_TYPE update_type,
+                                      int is_forward_keyframe) {
   TemporalFilterCtx *tf_ctx = &cpi->tf_ctx;
   YV12_BUFFER_CONFIG **frames = tf_ctx->frames;
   // Number of frames used for filtering. Set `arnr_max_frames` as 1 to disable
@@ -934,31 +939,25 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   const int lookahead_depth =
       av1_lookahead_depth(cpi->lookahead, cpi->compressor_stage);
 
+  int arf_src_offset = cpi->gf_group.arf_src_offset[cpi->gf_group.index];
+  const FRAME_TYPE frame_type = cpi->gf_group.frame_type[cpi->gf_group.index];
+
   // Temporal filtering should not go beyond key frames
   const int key_to_curframe =
-      AOMMAX(cpi->rc.frames_since_key +
-                 cpi->gf_group.arf_src_offset[cpi->gf_group.index],
-             0);
+      AOMMAX(cpi->rc.frames_since_key + arf_src_offset, 0);
   const int curframe_to_key =
-      AOMMAX(cpi->rc.frames_to_key -
-                 cpi->gf_group.arf_src_offset[cpi->gf_group.index] - 1,
-             0);
+      AOMMAX(cpi->rc.frames_to_key - arf_src_offset - 1, 0);
 
   // Number of buffered frames before the to-filter frame.
-  const int max_before =
-      AOMMIN(filter_frame_lookahead_idx < -1 ? -filter_frame_lookahead_idx + 1
-                                             : filter_frame_lookahead_idx + 1,
-             key_to_curframe);
-  // Number of buffered frames after the to-filter frame.
-  const int max_after = AOMMIN(lookahead_depth - max_before, curframe_to_key);
+  const int max_before = AOMMIN(filter_frame_lookahead_idx, key_to_curframe);
 
-  const int filter_frame_offset = filter_frame_lookahead_idx < -1
-                                      ? -filter_frame_lookahead_idx
-                                      : filter_frame_lookahead_idx;
+  // Number of buffered frames after the to-filter frame.
+  const int max_after =
+      AOMMIN(lookahead_depth - filter_frame_lookahead_idx - 1, curframe_to_key);
 
   // Estimate noises for each plane.
   const struct lookahead_entry *to_filter_buf = av1_lookahead_peek(
-      cpi->lookahead, filter_frame_offset, cpi->compressor_stage);
+      cpi->lookahead, filter_frame_lookahead_idx, cpi->compressor_stage);
   assert(to_filter_buf != NULL);
   const YV12_BUFFER_CONFIG *to_filter_frame = &to_filter_buf->img;
   const int num_planes = av1_num_planes(&cpi->common);
@@ -973,8 +972,8 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   RATE_CONTROL *rc = &cpi->rc;
   const double *coeff = rc->cor_coeff;
   const int offset = rc->regions_offset;
-  int cur_frame_idx = filter_frame_offset + rc->frames_since_key - offset;
-  if (rc->frames_since_key == 0) cur_frame_idx++;
+  int cur_frame_idx =
+      filter_frame_lookahead_idx + rc->frames_since_key - offset;
 
   double accu_coeff0 = 1.0, accu_coeff1 = 1.0;
   for (int i = 1; i <= max_after; i++) {
@@ -997,16 +996,15 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   int adjust_num = 6;
   if (num_frames == 1) {  // `arnr_max_frames = 1` is used to disable filtering.
     adjust_num = 0;
-  } else if (filter_frame_lookahead_idx < 0 && q <= 10) {
+  } else if ((update_type == KF_UPDATE || is_forward_keyframe) && q <= 10) {
     adjust_num = 0;
   }
-  num_frames = AOMMIN(num_frames + adjust_num, lookahead_depth + 1);
+  num_frames = AOMMIN(num_frames + adjust_num, lookahead_depth);
 
-  if (filter_frame_lookahead_idx == -1 ||
-      filter_frame_lookahead_idx == 0) {  // Key frame.
+  if (frame_type == KEY_FRAME && !is_forward_keyframe) {
     num_before = 0;
     num_after = AOMMIN(num_frames - 1, max_after);
-  } else if (filter_frame_lookahead_idx < -1) {  // Key frame in one-pass mode.
+  } else if (is_forward_keyframe) {  // Key frame in one-pass mode.
     num_before = AOMMIN(num_frames - 1, max_before);
     num_after = 0;
   } else {
@@ -1042,7 +1040,7 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
 
   // Setup the frame buffer.
   for (int frame = 0; frame < num_frames; ++frame) {
-    const int lookahead_idx = frame - num_before + filter_frame_offset;
+    const int lookahead_idx = frame - num_before + filter_frame_lookahead_idx;
     struct lookahead_entry *buf = av1_lookahead_peek(
         cpi->lookahead, lookahead_idx, cpi->compressor_stage);
     assert(buf != NULL);
@@ -1118,20 +1116,23 @@ double av1_estimate_noise_from_single_plane(const YV12_BUFFER_CONFIG *frame,
 // Returns:
 //   Nothing will be returned. But the contents of cpi->tf_ctx will be modified.
 static void init_tf_ctx(AV1_COMP *cpi, int filter_frame_lookahead_idx,
-                        int is_second_arf) {
+                        int is_second_arf, FRAME_UPDATE_TYPE update_type,
+                        int is_forward_keyframe) {
   TemporalFilterCtx *tf_ctx = &cpi->tf_ctx;
   // Setup frame buffer for filtering.
   YV12_BUFFER_CONFIG **frames = tf_ctx->frames;
   tf_ctx->num_frames = 0;
   tf_ctx->filter_frame_idx = -1;
-  tf_setup_filtering_buffer(cpi, filter_frame_lookahead_idx, is_second_arf);
+  tf_setup_filtering_buffer(cpi, filter_frame_lookahead_idx, is_second_arf,
+                            update_type, is_forward_keyframe);
   assert(tf_ctx->num_frames > 0);
   assert(tf_ctx->filter_frame_idx < tf_ctx->num_frames);
 
   // Check show existing condition for non-keyframes. For KFs, only check when
   // KF overlay is enabled.
-  tf_ctx->check_show_existing = !(filter_frame_lookahead_idx <= 0) ||
-                                cpi->oxcf.kf_cfg.enable_keyframe_filtering > 1;
+  tf_ctx->check_show_existing =
+      !(is_forward_keyframe && update_type == KF_UPDATE) ||
+      cpi->oxcf.kf_cfg.enable_keyframe_filtering > 1;
 
   // Setup scaling factors. Scaling on each of the arnr frames is not
   // supported.
@@ -1169,19 +1170,19 @@ static void init_tf_ctx(AV1_COMP *cpi, int filter_frame_lookahead_idx,
 }
 
 int av1_temporal_filter(AV1_COMP *cpi, const int filter_frame_lookahead_idx,
+                        FRAME_UPDATE_TYPE update_type, int is_forward_keyframe,
                         int *show_existing_arf) {
   MultiThreadInfo *const mt_info = &cpi->mt_info;
   // Basic informaton of the current frame.
   const GF_GROUP *const gf_group = &cpi->gf_group;
   const uint8_t group_idx = gf_group->index;
-  const FRAME_UPDATE_TYPE update_type = gf_group->update_type[group_idx];
   TemporalFilterCtx *tf_ctx = &cpi->tf_ctx;
   TemporalFilterData *tf_data = &cpi->td.tf_data;
   // Filter one more ARF if the lookahead index is leq 7 (w.r.t. 9-th frame).
   // This frame is ALWAYS a show existing frame.
-  const int is_second_arf = (update_type == INTNL_ARF_UPDATE) &&
-                            (filter_frame_lookahead_idx >= 7) &&
-                            cpi->sf.hl_sf.second_alt_ref_filtering;
+  const int is_second_arf =
+      (update_type == INTNL_ARF_UPDATE) && (filter_frame_lookahead_idx >= 7) &&
+      (is_forward_keyframe == 0) && cpi->sf.hl_sf.second_alt_ref_filtering;
   // TODO(anyone): Currently, we enforce the filtering strength on internal
   // ARFs except the second ARF to be zero. We should investigate in which case
   // it is more beneficial to use non-zero strength filtering.
@@ -1189,22 +1190,12 @@ int av1_temporal_filter(AV1_COMP *cpi, const int filter_frame_lookahead_idx,
     return 0;
   }
 
-  // TODO(yunqing): For INTNL_ARF_UPDATE type, the following me initialization
-  // is used somewhere unexpectedly. Should be resolved later.
-  // Initialize errorperbit and sadperbit
-  const int rdmult = av1_compute_rd_mult_based_on_qindex(cpi, TF_QINDEX);
-  MvCosts *mv_costs = &cpi->td.mb.mv_costs;
-  av1_set_error_per_bit(mv_costs, rdmult);
-  av1_set_sad_per_bit(cpi, mv_costs, TF_QINDEX);
-  av1_fill_mv_costs(cpi->common.fc,
-                    cpi->common.features.cur_frame_force_integer_mv,
-                    cpi->common.features.allow_high_precision_mv, mv_costs);
-
   // Initialize temporal filter context structure.
-  init_tf_ctx(cpi, filter_frame_lookahead_idx, is_second_arf);
+  init_tf_ctx(cpi, filter_frame_lookahead_idx, is_second_arf, update_type,
+              is_forward_keyframe);
 
   // Set showable frame.
-  if (filter_frame_lookahead_idx >= 0) {
+  if (is_forward_keyframe == 0 && update_type != KF_UPDATE) {
     cpi->common.showable_frame = tf_ctx->num_frames == 1 || is_second_arf ||
                                  (cpi->oxcf.algo_cfg.enable_overlay == 0);
   }

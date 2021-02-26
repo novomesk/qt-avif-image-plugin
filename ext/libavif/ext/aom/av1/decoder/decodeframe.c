@@ -3432,14 +3432,14 @@ static AOM_INLINE void launch_dec_workers(AV1Decoder *pbi,
                                           int num_workers) {
   const AVxWorkerInterface *const winterface = aom_get_worker_interface();
 
-  for (int worker_idx = 0; worker_idx < num_workers; ++worker_idx) {
+  for (int worker_idx = num_workers - 1; worker_idx >= 0; --worker_idx) {
     AVxWorker *const worker = &pbi->tile_workers[worker_idx];
     DecWorkerData *const thread_data = (DecWorkerData *)worker->data1;
 
     thread_data->data_end = data_end;
 
     worker->had_error = 0;
-    if (worker_idx == num_workers - 1) {
+    if (worker_idx == 0) {
       winterface->execute(worker);
     } else {
       winterface->launch(worker);
@@ -3479,12 +3479,12 @@ static AOM_INLINE void decode_mt_init(AV1Decoder *pbi) {
 
       winterface->init(worker);
       worker->thread_name = "aom tile worker";
-      if (worker_idx < num_threads - 1 && !winterface->reset(worker)) {
+      if (worker_idx != 0 && !winterface->reset(worker)) {
         aom_internal_error(&cm->error, AOM_CODEC_ERROR,
                            "Tile decoder thread creation failed");
       }
 
-      if (worker_idx < num_threads - 1) {
+      if (worker_idx != 0) {
         // Allocate thread data.
         CHECK_MEM_ERROR(cm, thread_data->td,
                         aom_memalign(32, sizeof(*thread_data->td)));
@@ -3499,7 +3499,7 @@ static AOM_INLINE void decode_mt_init(AV1Decoder *pbi) {
   }
   const int use_highbd = cm->seq_params.use_highbitdepth;
   const int buf_size = MC_TEMP_BUF_PELS << use_highbd;
-  for (worker_idx = 0; worker_idx < pbi->max_threads - 1; ++worker_idx) {
+  for (worker_idx = 1; worker_idx < pbi->max_threads; ++worker_idx) {
     DecWorkerData *const thread_data = pbi->thread_data + worker_idx;
     if (thread_data->td->mc_buf_size != buf_size) {
       av1_free_mc_tmp_buf(thread_data->td);

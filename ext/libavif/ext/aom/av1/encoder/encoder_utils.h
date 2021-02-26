@@ -479,17 +479,13 @@ MAKE_SDSF_SKIP_SAD_4D_WRAPPER(aom_highbd_sad_skip_8x32x4d)
 
 #if !CONFIG_REALTIME_ONLY
 
-#define LOWBD_OBFP(BT, OSDF, OVF, OSVF) \
-  cpi->fn_ptr[BT].osdf = OSDF;          \
-  cpi->fn_ptr[BT].ovf = OVF;            \
-  cpi->fn_ptr[BT].osvf = OSVF;
-
-#define LOWBD_OBFP_WRAPPER(WIDTH, HEIGHT)                              \
-  LOWBD_OBFP(BLOCK_##WIDTH##X##HEIGHT, aom_obmc_sad##WIDTH##x##HEIGHT, \
-             aom_obmc_variance##WIDTH##x##HEIGHT,                      \
-             aom_obmc_sub_pixel_variance##WIDTH##x##HEIGHT)
-
 #if CONFIG_AV1_HIGHBITDEPTH
+#define HIGHBD_OBFP_WRAPPER_8(WIDTH, HEIGHT)                 \
+  HIGHBD_OBFP(BLOCK_##WIDTH##X##HEIGHT,                      \
+              aom_highbd_obmc_sad##WIDTH##x##HEIGHT##_bits8, \
+              aom_highbd_obmc_variance##WIDTH##x##HEIGHT,    \
+              aom_highbd_obmc_sub_pixel_variance##WIDTH##x##HEIGHT)
+
 #define HIGHBD_OBFP(BT, OSDF, OVF, OSVF) \
   cpi->fn_ptr[BT].osdf = OSDF;           \
   cpi->fn_ptr[BT].ovf = OVF;             \
@@ -502,6 +498,11 @@ MAKE_SDSF_SKIP_SAD_4D_WRAPPER(aom_highbd_sad_skip_8x32x4d)
               aom_highbd_##BD##_obmc_sub_pixel_variance##WIDTH##x##HEIGHT)
 
 #define MAKE_OBFP_SAD_WRAPPER(fnname)                                     \
+  static unsigned int fnname##_bits8(const uint8_t *ref, int ref_stride,  \
+                                     const int32_t *wsrc,                 \
+                                     const int32_t *msk) {                \
+    return fnname(ref, ref_stride, wsrc, msk);                            \
+  }                                                                       \
   static unsigned int fnname##_bits10(const uint8_t *ref, int ref_stride, \
                                       const int32_t *wsrc,                \
                                       const int32_t *msk) {               \
@@ -598,28 +599,28 @@ static AOM_INLINE void highbd_set_var_fns(AV1_COMP *const cpi) {
 
 // OBMC excluded from realtime only build.
 #if !CONFIG_REALTIME_ONLY
-        LOWBD_OBFP_WRAPPER(128, 128)
-        LOWBD_OBFP_WRAPPER(128, 64)
-        LOWBD_OBFP_WRAPPER(64, 128)
-        LOWBD_OBFP_WRAPPER(64, 64)
-        LOWBD_OBFP_WRAPPER(64, 32)
-        LOWBD_OBFP_WRAPPER(32, 64)
-        LOWBD_OBFP_WRAPPER(32, 32)
-        LOWBD_OBFP_WRAPPER(32, 16)
-        LOWBD_OBFP_WRAPPER(16, 32)
-        LOWBD_OBFP_WRAPPER(16, 16)
-        LOWBD_OBFP_WRAPPER(8, 16)
-        LOWBD_OBFP_WRAPPER(16, 8)
-        LOWBD_OBFP_WRAPPER(8, 8)
-        LOWBD_OBFP_WRAPPER(4, 8)
-        LOWBD_OBFP_WRAPPER(8, 4)
-        LOWBD_OBFP_WRAPPER(4, 4)
-        LOWBD_OBFP_WRAPPER(64, 16)
-        LOWBD_OBFP_WRAPPER(16, 64)
-        LOWBD_OBFP_WRAPPER(32, 8)
-        LOWBD_OBFP_WRAPPER(8, 32)
-        LOWBD_OBFP_WRAPPER(16, 4)
-        LOWBD_OBFP_WRAPPER(4, 16)
+        HIGHBD_OBFP_WRAPPER_8(128, 128)
+        HIGHBD_OBFP_WRAPPER_8(128, 64)
+        HIGHBD_OBFP_WRAPPER_8(64, 128)
+        HIGHBD_OBFP_WRAPPER_8(64, 64)
+        HIGHBD_OBFP_WRAPPER_8(64, 32)
+        HIGHBD_OBFP_WRAPPER_8(32, 64)
+        HIGHBD_OBFP_WRAPPER_8(32, 32)
+        HIGHBD_OBFP_WRAPPER_8(32, 16)
+        HIGHBD_OBFP_WRAPPER_8(16, 32)
+        HIGHBD_OBFP_WRAPPER_8(16, 16)
+        HIGHBD_OBFP_WRAPPER_8(8, 16)
+        HIGHBD_OBFP_WRAPPER_8(16, 8)
+        HIGHBD_OBFP_WRAPPER_8(8, 8)
+        HIGHBD_OBFP_WRAPPER_8(4, 8)
+        HIGHBD_OBFP_WRAPPER_8(8, 4)
+        HIGHBD_OBFP_WRAPPER_8(4, 4)
+        HIGHBD_OBFP_WRAPPER_8(64, 16)
+        HIGHBD_OBFP_WRAPPER_8(16, 64)
+        HIGHBD_OBFP_WRAPPER_8(32, 8)
+        HIGHBD_OBFP_WRAPPER_8(8, 32)
+        HIGHBD_OBFP_WRAPPER_8(16, 4)
+        HIGHBD_OBFP_WRAPPER_8(4, 16)
 #endif
 
         HIGHBD_SDSFP_WRAPPER(128, 128, 8);
@@ -861,8 +862,8 @@ static AOM_INLINE void copy_frame_prob_info(AV1_COMP *cpi) {
   if (cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats) {
     av1_copy(frame_probs->tx_type_probs, default_tx_type_probs);
   }
-  if (!cpi->sf.inter_sf.disable_obmc &&
-      cpi->sf.inter_sf.prune_obmc_prob_thresh > 0) {
+  if (cpi->sf.inter_sf.prune_obmc_prob_thresh > 0 &&
+      cpi->sf.inter_sf.prune_obmc_prob_thresh < INT_MAX) {
     av1_copy(frame_probs->obmc_probs, default_obmc_probs);
   }
   if (cpi->sf.inter_sf.prune_warped_prob_thresh > 0) {
@@ -979,10 +980,6 @@ void av1_apply_active_map(AV1_COMP *cpi);
 uint16_t av1_setup_interp_filter_search_mask(AV1_COMP *cpi);
 
 void av1_determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig);
-
-int av1_recode_loop_test_global_motion(WarpedMotionParams *const global_motion,
-                                       const int *const global_motion_used,
-                                       int *const gm_params_cost);
 #endif
 
 void av1_set_size_dependent_vars(AV1_COMP *cpi, int *q, int *bottom_index,

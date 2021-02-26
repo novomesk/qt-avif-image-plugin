@@ -60,6 +60,9 @@
 #if CONFIG_TUNE_VMAF
 #include "av1/encoder/tune_vmaf.h"
 #endif
+#if CONFIG_AV1_TEMPORAL_DENOISING
+#include "av1/encoder/av1_temporal_denoiser.h"
+#endif
 
 #include "aom/internal/aom_codec_internal.h"
 #include "aom_util/aom_thread.h"
@@ -156,6 +159,18 @@ typedef enum {
   COST_UPD_TILE,
   COST_UPD_OFF,
 } COST_UPDATE_TYPE;
+
+typedef enum {
+  MOD_FP,           // First pass
+  MOD_TF,           // Temporal filtering
+  MOD_TPL,          // TPL
+  MOD_GME,          // Global motion estimation
+  MOD_ENC,          // Encode stage
+  MOD_LPF,          // Deblocking loop filter
+  MOD_CDEF_SEARCH,  // CDEF search
+  MOD_LR,           // Loop restoration filtering
+  NUM_MT_MODULES
+} MULTI_THREADED_MODULES;
 
 /*!\endcond */
 
@@ -864,6 +879,10 @@ typedef struct AV1EncoderConfig {
   int noise_block_size;
 #endif
 
+#if CONFIG_AV1_TEMPORAL_DENOISING
+  // Noise sensitivity.
+  int noise_sensitivity;
+#endif
   // Bit mask to specify which tier each of the 32 possible operating points
   // conforms to.
   unsigned int tier_mask;
@@ -875,7 +894,7 @@ typedef struct AV1EncoderConfig {
   // Indicates the maximum number of threads that may be used by the encoder.
   int max_threads;
 
-  // Indicates the spped preset to be used.
+  // Indicates the speed preset to be used.
   int speed;
 
   // Indicates the target sequence level index for each operating point(OP).
@@ -1245,8 +1264,6 @@ typedef struct TileDataEnc {
 
 typedef struct RD_COUNTS {
   int64_t comp_pred_diff[REFERENCE_MODES];
-  // Stores number of 4x4 blocks using global motion per reference frame.
-  int global_motion_used[REF_FRAMES];
   int compound_ref_used_flag;
   int skip_mode_used_flag;
   int tx_type_used[TX_SIZES_ALL][TX_TYPES];
@@ -1345,14 +1362,21 @@ typedef struct MultiThreadInfo {
   int num_workers;
 
   /*!
-   * Number of workers created for tpl and tile/row multi-threading of encoder.
+   * Number of workers used for different MT modules.
    */
-  int num_enc_workers;
+  int num_mod_workers[NUM_MT_MODULES];
 
   /*!
-   * Number of workers created for first-pass multi-threading.
+   * Flag to indicate whether thread specific buffers need to be allocated for
+   * tile/row based multi-threading of first pass stage.
    */
-  int num_fp_workers;
+  int fp_mt_buf_init_done;
+
+  /*!
+   * Flag to indicate whether thread specific buffers need to be allocated for
+   * tile/row based multi-threading of encode stage.
+   */
+  int enc_mt_buf_init_done;
 
   /*!
    * Synchronization object used to launch job in the worker thread.
@@ -1601,19 +1625,6 @@ static INLINE char const *get_component_name(int index) {
  */
 typedef struct {
   /*!
-   * Array to store the cost for signalling each global motion model.
-   * gmtype_cost[i] stores the cost of signalling the ith Global Motion model.
-   */
-  int type_cost[TRANS_TYPES];
-
-  /*!
-   * Array to store the cost for signalling a particular global motion model for
-   * each reference frame. gmparams_cost[i] stores the cost of signalling global
-   * motion for the ith reference frame.
-   */
-  int params_cost[REF_FRAMES];
-
-  /*!
    * Flag to indicate if global motion search needs to be rerun.
    */
   bool search_done;
@@ -1789,18 +1800,13 @@ typedef struct {
  */
 typedef struct {
   /*!
-   * Threshold to determine the best number of transform coefficients to keep
-   * using trellis optimization.
-   * Corresponds to enable_winner_mode_for_coeff_opt speed feature.
-   */
-  unsigned int coeff_opt_dist_threshold[MODE_EVAL_TYPES];
-
-  /*!
    * Threshold to determine if trellis optimization is to be enabled
-   * based on SATD.
+   * based on :
+   * 0 : dist threshold
+   * 1 : satd threshold
    * Corresponds to enable_winner_mode_for_coeff_opt speed feature.
    */
-  unsigned int coeff_opt_satd_threshold[MODE_EVAL_TYPES];
+  unsigned int coeff_opt_thresholds[MODE_EVAL_TYPES][2];
 
   /*!
    * Determines the tx size search method during rdopt.
@@ -1963,6 +1969,13 @@ typedef struct {
   int subsampling_x;
   int subsampling_y;
 } FRAME_INFO;
+
+/*!
+ * \brief This structure stores different types of frame indices.
+ */
+typedef struct {
+  int show_frame_count;
+} FRAME_INDEX_SET;
 
 /*!\endcond */
 
@@ -2373,6 +2386,11 @@ typedef struct AV1_COMP {
   FRAME_INFO frame_info;
 
   /*!
+   * Stores different types of frame indices.
+   */
+  FRAME_INDEX_SET frame_index_set;
+
+  /*!
    * Structure to store the dimensions of current frame.
    */
   InitialDimensions initial_dimensions;
@@ -2613,6 +2631,13 @@ typedef struct AV1_COMP {
    */
   NOISE_ESTIMATE noise_estimate;
 
+#if CONFIG_AV1_TEMPORAL_DENOISING
+  /*!
+   * Temporal Denoiser
+   */
+  AV1_DENOISER denoiser;
+#endif
+
   /*!
    * Count on how many consecutive times a block uses small/zeromv for encoding
    * in a scale of 8x8 block.
@@ -2828,6 +2853,8 @@ int av1_convert_sect5obus_to_annexb(uint8_t *buffer, size_t *input_size);
 // content tools is employed later. See av1_determine_sc_tools_with_encoding().
 void av1_set_screen_content_options(struct AV1_COMP *cpi,
                                     FeatureFlags *features);
+
+void av1_update_frame_size(AV1_COMP *cpi);
 
 // TODO(jingning): Move these functions as primitive members for the new cpi
 // class.
@@ -3183,6 +3210,13 @@ static AOM_INLINE int is_psnr_calc_enabled(const AV1_COMP *cpi) {
          cm->show_frame;
 }
 
+#if CONFIG_AV1_TEMPORAL_DENOISING
+static INLINE int denoise_svc(const struct AV1_COMP *const cpi) {
+  return (!cpi->use_svc || (cpi->use_svc && cpi->svc.spatial_layer_id >=
+                                                cpi->svc.first_layer_denoise));
+}
+#endif
+
 #if CONFIG_COLLECT_PARTITION_STATS == 2
 static INLINE void av1_print_fr_partition_timing_stats(
     const FramePartitionTimingStats *part_stats, const char *filename) {
@@ -3220,7 +3254,9 @@ static INLINE void av1_print_fr_partition_timing_stats(
   }
   fclose(f);
 }
+#endif  // CONFIG_COLLECT_PARTITION_STATS == 2
 
+#if CONFIG_COLLECT_PARTITION_STATS
 static INLINE int av1_get_bsize_idx_for_part_stats(BLOCK_SIZE bsize) {
   assert(bsize == BLOCK_128X128 || bsize == BLOCK_64X64 ||
          bsize == BLOCK_32X32 || bsize == BLOCK_16X16 || bsize == BLOCK_8X8 ||
@@ -3235,7 +3271,7 @@ static INLINE int av1_get_bsize_idx_for_part_stats(BLOCK_SIZE bsize) {
     default: assert(0 && "Invalid bsize for partition_stats."); return -1;
   }
 }
-#endif
+#endif  // CONFIG_COLLECT_PARTITION_STATS
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
 static INLINE void start_timing(AV1_COMP *cpi, int component) {

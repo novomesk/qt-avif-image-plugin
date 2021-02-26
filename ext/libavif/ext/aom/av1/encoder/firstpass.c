@@ -1212,6 +1212,8 @@ void av1_first_pass(AV1_COMP *cpi, const int64_t ts_duration) {
   xd->cfl.store_y = 0;
   av1_frame_init_quantizer(cpi);
 
+  av1_default_coef_probs(cm);
+  av1_init_mode_probs(cm->fc);
   av1_init_mv_probs(cm);
   av1_initialize_rd_consts(cpi);
 

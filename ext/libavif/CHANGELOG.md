@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2021-02-22
+
+### Added
+* Image grid encoding
+* Premultiplied alpha support (tongyuantongyu)
+* avifenc: Image grid encoding (`-g`, `--grid`)
+* avifenc: Harvest framerate from y4m headers as the "default", if present
+* avifenc: Recognize the Y4M format string "C420mpeg2" (wantehchang)
+* Basic deduplication when writing mdat chunks
+
+### Changed
+* avifenc: Adjusted min/max/speed/fps defaults
+* Better handling for export headers (tongyuantongyu)
+* Use procedure specified in H.273 to quantize YUV (tongyuantongyu)
+* Impose a maximum of 4096 bytes on searchSampleSize (wantehchang, fixes oss-fuzz perf issue / timeout)
+* Update aom.cmd: v2.0.2
+* Update dav1d.cmd: 0.8.2
+* Update libgav1.cmd: 4a89dc3 / lts_2020_09_23
+* Update rav1e.cmd: 0.4
+* Update svt.cmd/svt.sh: v0.8.6
+* Force libjpeg to output in RGB Colorspace (bugfix)
+* Minor other compilation/linking/formatting/comment fixes
+
 ## [0.8.4] - 2020-11-23
 
 ### Added
@@ -552,7 +575,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/AOMediaCodec/libavif/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/AOMediaCodec/libavif/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/AOMediaCodec/libavif/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/AOMediaCodec/libavif/compare/v0.8.1...v0.8.2

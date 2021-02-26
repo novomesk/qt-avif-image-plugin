@@ -180,23 +180,46 @@ static double calc_correction_factor(double err_per_mb, int q) {
   return fclamp(pow(error_term, power_term), 0.05, 5.0);
 }
 
-static void twopass_update_bpm_factor(TWO_PASS *twopass, int err_estimate,
-                                      int rate_err_tol) {
+// Based on history adjust expectations of bits per macroblock.
+static void twopass_update_bpm_factor(AV1_COMP *cpi, int rate_err_tol) {
+  TWO_PASS *twopass = &cpi->twopass;
+  const RATE_CONTROL *const rc = &cpi->rc;
+  int err_estimate = rc->rate_error_estimate;
+
   // Based on recent history adjust expectations of bits per macroblock.
-  double last_group_rate_err =
-      (double)twopass->rolling_arf_group_actual_bits /
-      DOUBLE_DIVIDE_CHECK((double)twopass->rolling_arf_group_target_bits);
   double damp_fac = AOMMAX(5.0, rate_err_tol / 10.0);
+  double rate_err_factor = 1.0;
+  const double adj_limit = AOMMAX(0.20, (double)(100 - rate_err_tol) / 200.0);
+  const double min_fac = 1.0 - adj_limit;
+  const double max_fac = 1.0 + adj_limit;
 
-  last_group_rate_err = AOMMAX(0.75, AOMMIN(1.25, last_group_rate_err));
-  last_group_rate_err = 1.0 + ((last_group_rate_err - 1.0) / damp_fac);
+  if (rc->vbr_bits_off_target && rc->total_actual_bits > 0) {
+    if (cpi->lap_enabled) {
+      rate_err_factor =
+          (double)twopass->rolling_arf_group_actual_bits /
+          DOUBLE_DIVIDE_CHECK((double)twopass->rolling_arf_group_target_bits);
+    } else {
+      rate_err_factor =
+          1.0 - ((double)(rc->vbr_bits_off_target) /
+                 AOMMAX(rc->total_actual_bits, cpi->twopass.bits_left));
+    }
 
-  // Is the last GOP error making the total error worse or better? Only make
+    rate_err_factor = AOMMAX(min_fac, AOMMIN(max_fac, rate_err_factor));
+
+    // Adjustment is damped if this is 1 pass with look ahead processing
+    // (as there are only ever a few frames of data) and for all but the first
+    // GOP in normal two pass.
+    if ((twopass->bpm_factor != 1.0) || cpi->lap_enabled) {
+      rate_err_factor = 1.0 + ((rate_err_factor - 1.0) / damp_fac);
+    }
+  }
+
+  // Is the rate control trending in the right direction. Only make
   // an adjustment if things are getting worse.
-  if ((last_group_rate_err < 1.0 && err_estimate > 0) ||
-      (last_group_rate_err > 1.0 && err_estimate < 0)) {
-    twopass->bpm_factor *= last_group_rate_err;
-    twopass->bpm_factor = AOMMAX(0.75, AOMMIN(1.25, twopass->bpm_factor));
+  if ((rate_err_factor < 1.0 && err_estimate > 0) ||
+      (rate_err_factor > 1.0 && err_estimate < 0)) {
+    twopass->bpm_factor *= rate_err_factor;
+    twopass->bpm_factor = AOMMAX(min_fac, AOMMIN(max_fac, twopass->bpm_factor));
   }
 }
 
@@ -274,8 +297,7 @@ static int get_twopass_worst_quality(AV1_COMP *cpi, const double av_frame_err,
     int rate_err_tol = AOMMIN(rc_cfg->under_shoot_pct, rc_cfg->over_shoot_pct);
 
     // Update bpm correction factor based on previous GOP rate error.
-    twopass_update_bpm_factor(&cpi->twopass, rc->rate_error_estimate,
-                              rate_err_tol);
+    twopass_update_bpm_factor(cpi, rate_err_tol);
 
     // Try and pick a max Q that will be high enough to encode the
     // content at the given rate.
@@ -2088,7 +2110,8 @@ static void correct_frames_to_key(AV1_COMP *cpi) {
       (int)av1_lookahead_depth(cpi->lookahead, cpi->compressor_stage);
   if (lookahead_size <
       av1_lookahead_pop_sz(cpi->lookahead, cpi->compressor_stage)) {
-    assert(IMPLIES(cpi->frames_left > 0, lookahead_size == cpi->frames_left));
+    assert(IMPLIES(cpi->oxcf.pass != 0 && cpi->frames_left > 0,
+                   lookahead_size == cpi->frames_left));
     cpi->rc.frames_to_key = AOMMIN(cpi->rc.frames_to_key, lookahead_size);
   } else if (cpi->frames_left > 0) {
     // Correct frames to key based on limit
@@ -2604,7 +2627,7 @@ void av1_gop_bit_allocation(const AV1_COMP *cpi, RATE_CONTROL *const rc,
 #define VERY_LOW_INTER_THRESH 0.05
 // Maximum threshold for the relative ratio of intra error score vs best
 // inter error score.
-#define KF_II_ERR_THRESHOLD 2.5
+#define KF_II_ERR_THRESHOLD 1.9
 // In real scene cuts there is almost always a sharp change in the intra
 // or inter error score.
 #define ERR_CHANGE_THRESHOLD 0.4
@@ -2612,6 +2635,25 @@ void av1_gop_bit_allocation(const AV1_COMP *cpi, RATE_CONTROL *const rc,
 // ratio in the next frame.
 #define II_IMPROVEMENT_THRESHOLD 3.5
 #define KF_II_MAX 128.0
+// Intra / Inter threshold very low
+#define VERY_LOW_II 1.5
+// Clean slide transitions we expect a sharp single frame spike in error.
+#define ERROR_SPIKE 5.0
+
+// Slide show transition detection.
+// Tests for case where there is very low error either side of the current frame
+// but much higher just for this frame. This can help detect key frames in
+// slide shows even where the slides are pictures of different sizes.
+// Also requires that intra and inter errors are very similar to help eliminate
+// harmful false positives.
+// It will not help if the transition is a fade or other multi-frame effect.
+static int slide_transition(const FIRSTPASS_STATS *this_frame,
+                            const FIRSTPASS_STATS *last_frame,
+                            const FIRSTPASS_STATS *next_frame) {
+  return (this_frame->intra_error < (this_frame->coded_error * VERY_LOW_II)) &&
+         (this_frame->coded_error > (last_frame->coded_error * ERROR_SPIKE)) &&
+         (this_frame->coded_error > (next_frame->coded_error * ERROR_SPIKE));
+}
 
 // Threshold for use of the lagging second reference frame. High second ref
 // usage may point to a transient event like a flash or occlusion rather than
@@ -2669,6 +2711,7 @@ static int test_candidate_kf(TWO_PASS *twopass,
       (this_frame->pcnt_second_ref < second_ref_usage_thresh) &&
       (next_frame->pcnt_second_ref < second_ref_usage_thresh) &&
       ((this_frame->pcnt_inter < VERY_LOW_INTER_THRESH) ||
+       slide_transition(this_frame, last_frame, next_frame) ||
        ((pcnt_intra > MIN_INTRA_LEVEL) &&
         (pcnt_intra > (INTRA_VS_INTER_THRESH * modified_pcnt_inter)) &&
         ((this_frame->intra_error /
@@ -3600,7 +3643,11 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
             (rc->frames_since_key > 0 && gf_group->arf_index > -1);
         if (is_temporal_filter_enabled) {
           int arf_src_index = gf_group->arf_src_offset[gf_group->arf_index];
-          av1_temporal_filter(cpi, arf_src_index, NULL);
+          FRAME_UPDATE_TYPE arf_update_type =
+              gf_group->update_type[gf_group->arf_index];
+          int is_forward_keyframe = 0;
+          av1_temporal_filter(cpi, arf_src_index, arf_update_type,
+                              is_forward_keyframe, NULL);
           aom_extend_frame_borders(&cpi->alt_ref_buffer,
                                    av1_num_planes(&cpi->common));
         }

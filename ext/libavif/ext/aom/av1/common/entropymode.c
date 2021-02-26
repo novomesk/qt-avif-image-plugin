@@ -1083,7 +1083,7 @@ int av1_fast_palette_color_index_context(const uint8_t *color_map, int stride,
 #undef NUM_PALETTE_NEIGHBORS
 #undef MAX_COLOR_CONTEXT_HASH
 
-static void init_mode_probs(FRAME_CONTEXT *fc) {
+void av1_init_mode_probs(FRAME_CONTEXT *fc) {
   av1_copy(fc->palette_y_size_cdf, default_palette_y_size_cdf);
   av1_copy(fc->palette_uv_size_cdf, default_palette_uv_size_cdf);
   av1_copy(fc->palette_y_color_index_cdf, default_palette_y_color_index_cdf);
@@ -1204,7 +1204,7 @@ void av1_setup_past_independence(AV1_COMMON *cm) {
   set_default_lf_deltas(&cm->lf);
 
   av1_default_coef_probs(cm);
-  init_mode_probs(cm->fc);
+  av1_init_mode_probs(cm->fc);
   av1_init_mv_probs(cm);
   cm->fc->initialized = 1;
   av1_setup_frame_contexts(cm);

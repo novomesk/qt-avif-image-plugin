@@ -87,12 +87,14 @@ typedef struct TplDepStats {
   int64_t inter_cost;
   int64_t srcrf_dist;
   int64_t recrf_dist;
+  int64_t cmp_recrf_dist[2];
   int64_t srcrf_rate;
   int64_t recrf_rate;
+  int64_t cmp_recrf_rate[2];
   int64_t mc_dep_rate;
   int64_t mc_dep_dist;
   int_mv mv[INTER_REFS_PER_FRAME];
-  int ref_frame_index;
+  int ref_frame_index[2];
   int64_t pred_error[INTER_REFS_PER_FRAME];
 } TplDepStats;
 
@@ -221,6 +223,56 @@ void av1_tpl_rdmult_setup_sb(struct AV1_COMP *cpi, MACROBLOCK *const x,
 
 void av1_mc_flow_dispenser_row(struct AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
                                BLOCK_SIZE bsize, TX_SIZE tx_size);
+
+/*!\brief  Compute the entropy of an exponential probability distribution
+ * function (pdf) subjected to uniform quantization.
+ *
+ * pdf(x) = b*exp(-b*x)
+ *
+ *\ingroup tpl_modelling
+ *
+ * \param[in]    q_step        quantizer step size
+ * \param[in]    b             parameter of exponential distribution
+ *
+ * \return entropy cost
+ */
+double av1_exponential_entropy(double q_step, double b);
+
+/*!\brief  Compute the entropy of a Laplace probability distribution
+ * function (pdf) subjected to non-uniform quantization.
+ *
+ * pdf(x) = 0.5*b*exp(-0.5*b*|x|)
+ *
+ *\ingroup tpl_modelling
+ *
+ * \param[in]    q_step          quantizer step size for non-zero bins
+ * \param[in]    b               parameter of Laplace distribution
+ * \param[in]    zero_bin_ratio  zero bin's size is zero_bin_ratio * q_step
+ *
+ * \return entropy cost
+ */
+double av1_laplace_entropy(double q_step, double b, double zero_bin_ratio);
+
+/*!\brief  Compute the frame rate using transform block stats
+ *
+ * Assume each position i in the transform block is of Laplace distribution
+ * with maximum absolute deviation abs_coeff_mean[i]
+ *
+ * Then we can use av1_laplace_entropy() to compute the expected frame
+ * rate.
+ *
+ *\ingroup tpl_modelling
+ *
+ * \param[in]    q_index         quantizer index
+ * \param[in]    block_count     number of transform blocks
+ * \param[in]    abs_coeff_mean  array of maximum absolute deviation
+ * \param[in]    coeff_num       number of coefficients per transform block
+ *
+ * \return expected frame rate
+ */
+double av1_laplace_estimate_frame_rate(int q_index, int block_count,
+                                       const double *abs_coeff_mean,
+                                       int coeff_num);
 /*!\endcond */
 #ifdef __cplusplus
 }  // extern "C"

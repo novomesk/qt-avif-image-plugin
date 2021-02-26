@@ -169,9 +169,6 @@ typedef struct {
 double av1_estimate_noise_from_single_plane(const YV12_BUFFER_CONFIG *frame,
                                             const int plane,
                                             const int bit_depth);
-
-#define TF_QINDEX 128  // Q-index used in temporal filtering.
-
 /*!\endcond */
 
 /*!\brief Does temporal filter for a given macroblock row.
@@ -205,6 +202,9 @@ void av1_tf_do_filtering_row(struct AV1_COMP *cpi, struct ThreadData *td,
  * \param[in]   cpi                        Top level encoder instance structure
  * \param[in]   filter_frame_lookahead_idx The index of the to-filter frame in
  *                                         the lookahead buffer cpi->lookahead.
+ * \param[in]   update_type                This frame's update type.
+ * \param[in]   is_forward_keyframe        Indicate whether this is a forward
+ *                                         keyframe.
  * \param[in,out]   show_existing_arf      Whether to show existing ARF. This
  *                                         field is updated in this function.
  *
@@ -212,6 +212,7 @@ void av1_tf_do_filtering_row(struct AV1_COMP *cpi, struct ThreadData *td,
  */
 int av1_temporal_filter(struct AV1_COMP *cpi,
                         const int filter_frame_lookahead_idx,
+                        FRAME_UPDATE_TYPE update_type, int is_forward_keyframe,
                         int *show_existing_arf);
 
 /*!\cond */

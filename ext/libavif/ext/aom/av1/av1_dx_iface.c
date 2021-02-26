@@ -1598,7 +1598,8 @@ aom_codec_iface_t aom_codec_av1_dx_algo = {
       NULL,  // aom_codec_enc_config_set_fn_t
       NULL,  // aom_codec_get_global_headers_fn_t
       NULL   // aom_codec_get_preview_frame_fn_t
-  }
+  },
+  NULL  // aom_codec_set_option_fn_t
 };
 
 aom_codec_iface_t *aom_codec_av1_dx(void) { return &aom_codec_av1_dx_algo; }

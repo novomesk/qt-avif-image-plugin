@@ -2636,7 +2636,7 @@ TEST_P(CNNConvolveTest, CheckOutput) { RunCNNConvolveSetup(1); }
 
 TEST_P(CNNConvolveTest, DISABLED_Speed) { RunCNNConvolveSetup(100000); }
 
-#if HAVE_AVX2
+#if HAVE_AVX2 && !CONFIG_EXCLUDE_SIMD_MISMATCH
 INSTANTIATE_TEST_SUITE_P(AVX2, CNNConvolveTest,
                          ::testing::Values(CNNConvolveTestFuncs(
                              &av1_cnn_convolve_no_maxpool_padding_valid_c,

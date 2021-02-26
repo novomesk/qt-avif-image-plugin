@@ -16,6 +16,7 @@
 #include "aom_dsp/aom_filter.h"
 #include "aom_dsp/x86/convolve.h"
 #include "aom_dsp/x86/convolve_sse2.h"
+#include "aom_dsp/x86/convolve_ssse3.h"
 #include "aom_dsp/x86/mem_sse2.h"
 #include "aom_dsp/x86/transpose_sse2.h"
 #include "aom_mem/aom_mem.h"

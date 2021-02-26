@@ -569,8 +569,7 @@ static int handle_smooth_inter_intra_mode(
     }
     args->inter_intra_mode[mbmi->ref_frame[0]] = *best_interintra_mode;
   }
-  assert(IMPLIES(!cpi->oxcf.comp_type_cfg.enable_smooth_interintra ||
-                     cpi->sf.inter_sf.disable_smooth_interintra,
+  assert(IMPLIES(!cpi->oxcf.comp_type_cfg.enable_smooth_interintra,
                  *best_interintra_mode != II_SMOOTH_PRED));
   // Recompute prediction if required
   bool interintra_mode_reuse = cpi->sf.inter_sf.reuse_inter_intra_mode ||
@@ -621,8 +620,7 @@ static int handle_wedge_inter_intra_mode(
   const AV1_COMMON *const cm = &cpi->common;
   const int bw = block_size_wide[bsize];
   const int try_smooth_interintra =
-      cpi->oxcf.comp_type_cfg.enable_smooth_interintra &&
-      !cpi->sf.inter_sf.disable_smooth_interintra;
+      cpi->oxcf.comp_type_cfg.enable_smooth_interintra;
 
   mbmi->use_wedge_interintra = 1;
 
@@ -736,8 +734,7 @@ int av1_handle_inter_intra_mode(const AV1_COMP *const cpi, MACROBLOCK *const x,
                                 int *rate_mv, int *tmp_rate2,
                                 const BUFFER_SET *orig_dst) {
   const int try_smooth_interintra =
-      cpi->oxcf.comp_type_cfg.enable_smooth_interintra &&
-      !cpi->sf.inter_sf.disable_smooth_interintra;
+      cpi->oxcf.comp_type_cfg.enable_smooth_interintra;
 
   const int is_wedge_used = av1_is_wedge_used(bsize);
   const int try_wedge_interintra =
@@ -822,20 +819,6 @@ int av1_handle_inter_intra_mode(const AV1_COMP *const cpi, MACROBLOCK *const x,
                                   AOM_PLANE_U, num_planes - 1);
   }
   return 0;
-}
-
-static void alloc_compound_type_rd_buffers_no_check(
-    CompoundTypeRdBuffers *const bufs) {
-  bufs->pred0 =
-      (uint8_t *)aom_memalign(16, 2 * MAX_SB_SQUARE * sizeof(*bufs->pred0));
-  bufs->pred1 =
-      (uint8_t *)aom_memalign(16, 2 * MAX_SB_SQUARE * sizeof(*bufs->pred1));
-  bufs->residual1 =
-      (int16_t *)aom_memalign(32, MAX_SB_SQUARE * sizeof(*bufs->residual1));
-  bufs->diff10 =
-      (int16_t *)aom_memalign(32, MAX_SB_SQUARE * sizeof(*bufs->diff10));
-  bufs->tmp_best_mask_buf = (uint8_t *)aom_malloc(
-      2 * MAX_SB_SQUARE * sizeof(*bufs->tmp_best_mask_buf));
 }
 
 // Computes the valid compound_types to be evaluated
@@ -1049,8 +1032,7 @@ static int64_t masked_compound_type_rd(
                                          diff10, strides);
     *calc_pred_masked_compound = 0;
   }
-  if (cpi->sf.inter_sf.prune_wedge_pred_diff_based &&
-      compound_type == COMPOUND_WEDGE) {
+  if (compound_type == COMPOUND_WEDGE) {
     unsigned int sse;
     if (is_cur_buf_hbd(xd))
       (void)cpi->fn_ptr[bsize].vf(CONVERT_TO_BYTEPTR(*preds0), *strides,
@@ -1104,10 +1086,6 @@ static int64_t masked_compound_type_rd(
         have_newmv_in_inter_mode(this_mode) &&
         (compound_type == COMPOUND_WEDGE) &&
         (!cpi->sf.inter_sf.disable_interinter_wedge_newmv_search);
-    int diffwtd_newmv_search =
-        cpi->sf.inter_sf.enable_interinter_diffwtd_newmv_search &&
-        compound_type == COMPOUND_DIFFWTD &&
-        have_newmv_in_inter_mode(this_mode);
 
     // Search for new MV if needed and build predictor
     if (wedge_newmv_search) {
@@ -1117,40 +1095,6 @@ static int64_t masked_compound_type_rd(
       const int mi_col = xd->mi_col;
       av1_enc_build_inter_predictor(cm, xd, mi_row, mi_col, ctx, bsize,
                                     AOM_PLANE_Y, AOM_PLANE_Y);
-    } else if (diffwtd_newmv_search) {
-      *out_rate_mv = av1_interinter_compound_motion_search(cpi, x, cur_mv,
-                                                           bsize, this_mode);
-      // we need to update the mask according to the new motion vector
-      CompoundTypeRdBuffers tmp_buf;
-      int64_t tmp_rd = INT64_MAX;
-      alloc_compound_type_rd_buffers_no_check(&tmp_buf);
-
-      uint8_t *tmp_preds0[1] = { tmp_buf.pred0 };
-      uint8_t *tmp_preds1[1] = { tmp_buf.pred1 };
-
-      get_inter_predictors_masked_compound(x, bsize, tmp_preds0, tmp_preds1,
-                                           tmp_buf.residual1, tmp_buf.diff10,
-                                           strides);
-
-      tmp_rd = pick_interinter_mask[compound_type - COMPOUND_WEDGE](
-          cpi, x, bsize, *tmp_preds0, *tmp_preds1, tmp_buf.residual1,
-          tmp_buf.diff10, &cur_sse);
-      // we can reuse rs2 here
-      tmp_rd += RDCOST(x->rdmult, *rs2 + *out_rate_mv, 0);
-
-      if (tmp_rd >= best_rd_cur) {
-        // restore the motion vector
-        mbmi->mv[0].as_int = cur_mv[0].as_int;
-        mbmi->mv[1].as_int = cur_mv[1].as_int;
-        *out_rate_mv = rate_mv;
-        av1_build_wedge_inter_predictor_from_buf(xd, bsize, 0, 0, preds0,
-                                                 strides, preds1, strides);
-      } else {
-        // build the final prediciton using the updated mv
-        av1_build_wedge_inter_predictor_from_buf(xd, bsize, 0, 0, tmp_preds0,
-                                                 strides, tmp_preds1, strides);
-      }
-      release_compound_type_rd_buffers(&tmp_buf);
     } else {
       *out_rate_mv = rate_mv;
       av1_build_wedge_inter_predictor_from_buf(xd, bsize, 0, 0, preds0, strides,

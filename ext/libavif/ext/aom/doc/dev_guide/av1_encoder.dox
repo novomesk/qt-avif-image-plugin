@@ -1293,14 +1293,14 @@ Related functions:
 - \ref av1_cost_coeffs_txb_estimate()
 
 \paragraph architecture_entropy_coef_opt Quantized level optimization
-Beside computing entropy cost, the encoder also uses \ref av1_optimize_txb_new()
+Beside computing entropy cost, the encoder also uses \ref av1_optimize_txb()
 to adjust the coefficient’s quantized levels to achieve optimal RD trade-off.
-In \ref av1_optimize_txb_new(), the encoder goes through each quantized
+In \ref av1_optimize_txb(), the encoder goes through each quantized
 coefficient and lowers the quantized coefficient level by one if the action
 yields a better RD score.
 
 Related functions:
-- \ref av1_optimize_txb_new()
+- \ref av1_optimize_txb()
 
 All the related functions are listed in \ref coefficient_coding.
 

@@ -485,10 +485,8 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
       set_tx_domain_dist_params(winner_mode_params, txfm_params, 0, 0);
 
       // Get default threshold for R-D optimization of coefficients
-      txfm_params->coeff_opt_dist_threshold = get_rd_opt_coeff_thresh(
-          winner_mode_params->coeff_opt_dist_threshold, 0, 0);
-      txfm_params->coeff_opt_satd_threshold = get_rd_opt_coeff_thresh(
-          winner_mode_params->coeff_opt_satd_threshold, 0, 0);
+      get_rd_opt_coeff_thresh(winner_mode_params->coeff_opt_thresholds,
+                              txfm_params, 0, 0);
 
       // Set default transform size search method
       set_tx_size_search_method(cm, winner_mode_params, txfm_params, 0, 0);
@@ -512,11 +510,8 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
 
       // Get threshold for R-D optimization of coefficients during mode
       // evaluation
-      txfm_params->coeff_opt_dist_threshold = get_rd_opt_coeff_thresh(
-          winner_mode_params->coeff_opt_dist_threshold,
-          sf->winner_mode_sf.enable_winner_mode_for_coeff_opt, 0);
-      txfm_params->coeff_opt_satd_threshold = get_rd_opt_coeff_thresh(
-          winner_mode_params->coeff_opt_satd_threshold,
+      get_rd_opt_coeff_thresh(
+          winner_mode_params->coeff_opt_thresholds, txfm_params,
           sf->winner_mode_sf.enable_winner_mode_for_coeff_opt, 0);
 
       // Set the transform size search method for mode evaluation
@@ -543,11 +538,8 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
 
       // Get threshold for R-D optimization of coefficients for winner mode
       // evaluation
-      txfm_params->coeff_opt_dist_threshold = get_rd_opt_coeff_thresh(
-          winner_mode_params->coeff_opt_dist_threshold,
-          sf->winner_mode_sf.enable_winner_mode_for_coeff_opt, 1);
-      txfm_params->coeff_opt_satd_threshold = get_rd_opt_coeff_thresh(
-          winner_mode_params->coeff_opt_satd_threshold,
+      get_rd_opt_coeff_thresh(
+          winner_mode_params->coeff_opt_thresholds, txfm_params,
           sf->winner_mode_sf.enable_winner_mode_for_coeff_opt, 1);
 
       // Set the transform size search method for winner mode evaluation

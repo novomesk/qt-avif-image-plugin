@@ -1087,8 +1087,8 @@ static int64_t handle_newmv(const AV1_COMP *const cpi, MACROBLOCK *const x,
       for (int i = 0; i < 2; ++i) {
         const int_mv ref_mv = av1_get_ref_mv(x, i);
         *rate_mv += av1_mv_bit_cost(&cur_mv[i].as_mv, &ref_mv.as_mv,
-                                    x->mv_costs.nmv_joint_cost,
-                                    x->mv_costs.mv_cost_stack, MV_COST_WEIGHT);
+                                    x->mv_costs->nmv_joint_cost,
+                                    x->mv_costs->mv_cost_stack, MV_COST_WEIGHT);
       }
     } else if (this_mode == NEAREST_NEWMV || this_mode == NEAR_NEWMV) {
       if (valid_mv1) {
@@ -1097,8 +1097,8 @@ static int64_t handle_newmv(const AV1_COMP *const cpi, MACROBLOCK *const x,
       }
       const int_mv ref_mv = av1_get_ref_mv(x, 1);
       *rate_mv = av1_mv_bit_cost(&cur_mv[1].as_mv, &ref_mv.as_mv,
-                                 x->mv_costs.nmv_joint_cost,
-                                 x->mv_costs.mv_cost_stack, MV_COST_WEIGHT);
+                                 x->mv_costs->nmv_joint_cost,
+                                 x->mv_costs->mv_cost_stack, MV_COST_WEIGHT);
     } else {
       assert(this_mode == NEW_NEARESTMV || this_mode == NEW_NEARMV);
       if (valid_mv0) {
@@ -1107,8 +1107,8 @@ static int64_t handle_newmv(const AV1_COMP *const cpi, MACROBLOCK *const x,
       }
       const int_mv ref_mv = av1_get_ref_mv(x, 0);
       *rate_mv = av1_mv_bit_cost(&cur_mv[0].as_mv, &ref_mv.as_mv,
-                                 x->mv_costs.nmv_joint_cost,
-                                 x->mv_costs.mv_cost_stack, MV_COST_WEIGHT);
+                                 x->mv_costs->nmv_joint_cost,
+                                 x->mv_costs->mv_cost_stack, MV_COST_WEIGHT);
     }
   } else {
     // Single ref case.
@@ -1352,8 +1352,7 @@ static int64_t motion_mode_rd(
     const int prune_obmc = cpi->frame_probs.obmc_probs[update_type][bsize] <
                            cpi->sf.inter_sf.prune_obmc_prob_thresh;
     if ((!cpi->oxcf.motion_mode_cfg.enable_obmc ||
-         cpi->sf.inter_sf.disable_obmc || cpi->sf.rt_sf.use_nonrd_pick_mode ||
-         prune_obmc) &&
+         cpi->sf.rt_sf.use_nonrd_pick_mode || prune_obmc) &&
         mbmi->motion_mode == OBMC_CAUSAL)
       continue;
 
@@ -1421,8 +1420,8 @@ static int64_t motion_mode_rd(
           if (mv0.as_int != mbmi->mv[0].as_int) {
             // Keep the refined MV and WM parameters.
             tmp_rate_mv = av1_mv_bit_cost(
-                &mbmi->mv[0].as_mv, &ref_mv.as_mv, x->mv_costs.nmv_joint_cost,
-                x->mv_costs.mv_cost_stack, MV_COST_WEIGHT);
+                &mbmi->mv[0].as_mv, &ref_mv.as_mv, x->mv_costs->nmv_joint_cost,
+                x->mv_costs->mv_cost_stack, MV_COST_WEIGHT);
             tmp_rate2 = rate2_nocoeff - rate_mv0 + tmp_rate_mv;
           } else {
             // Restore the old MV and WM parameters.
@@ -2305,8 +2304,8 @@ static int skip_repeated_newmv(
         const int compare_cost = mode_info[i].rate_mv + mode_info[i].drl_cost;
         const int_mv ref_mv = av1_get_ref_mv(x, 0);
         this_rate_mv = av1_mv_bit_cost(
-            &mode_info[i].mv.as_mv, &ref_mv.as_mv, x->mv_costs.nmv_joint_cost,
-            x->mv_costs.mv_cost_stack, MV_COST_WEIGHT);
+            &mode_info[i].mv.as_mv, &ref_mv.as_mv, x->mv_costs->nmv_joint_cost,
+            x->mv_costs->mv_cost_stack, MV_COST_WEIGHT);
         const int this_cost = this_rate_mv + drl_cost;
 
         if (compare_cost <= this_cost) {
@@ -2428,13 +2427,8 @@ static int process_compound_inter_mode(
   const int num_planes = av1_num_planes(cm);
   const int mi_row = xd->mi_row;
   const int mi_col = xd->mi_col;
-  // Find matching interp filter or set to default interp filter
-  const int need_search = av1_is_interp_needed(xd);
-  const InterpFilter assign_filter = cm->features.interp_filter;
   int is_luma_interp_done = 0;
-  av1_find_interp_filter_match(mbmi, cpi, assign_filter, need_search,
-                               args->interp_filter_stats,
-                               args->interp_filter_stats_idx);
+  set_default_interp_filters(mbmi, cm->features.interp_filter);
 
   int64_t best_rd_compound;
   int64_t rd_thresh;
@@ -3843,8 +3837,7 @@ static AOM_INLINE void set_params_rd_pick_inter_mode(
   const FRAME_UPDATE_TYPE update_type = get_frame_update_type(&cpi->gf_group);
   const int prune_obmc = cpi->frame_probs.obmc_probs[update_type][bsize] <
                          cpi->sf.inter_sf.prune_obmc_prob_thresh;
-  if (cpi->oxcf.motion_mode_cfg.enable_obmc && !cpi->sf.inter_sf.disable_obmc &&
-      !prune_obmc) {
+  if (cpi->oxcf.motion_mode_cfg.enable_obmc && !prune_obmc) {
     if (check_num_overlappable_neighbors(mbmi) &&
         is_motion_variation_allowed_bsize(bsize)) {
       int dst_width1[MAX_MB_PLANE] = { MAX_SB_SIZE, MAX_SB_SIZE, MAX_SB_SIZE };

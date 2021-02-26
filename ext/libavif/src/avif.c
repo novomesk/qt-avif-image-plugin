@@ -139,6 +139,7 @@ void avifImageCopy(avifImage * dstImage, const avifImage * srcImage, uint32_t pl
     dstImage->yuvRange = srcImage->yuvRange;
     dstImage->yuvChromaSamplePosition = srcImage->yuvChromaSamplePosition;
     dstImage->alphaRange = srcImage->alphaRange;
+    dstImage->alphaPremultiplied = srcImage->alphaPremultiplied;
 
     dstImage->colorPrimaries = srcImage->colorPrimaries;
     dstImage->transferCharacteristics = srcImage->transferCharacteristics;
@@ -148,7 +149,7 @@ void avifImageCopy(avifImage * dstImage, const avifImage * srcImage, uint32_t pl
     memcpy(&dstImage->pasp, &srcImage->pasp, sizeof(dstImage->pasp));
     memcpy(&dstImage->clap, &srcImage->clap, sizeof(dstImage->clap));
     memcpy(&dstImage->irot, &srcImage->irot, sizeof(dstImage->irot));
-    memcpy(&dstImage->imir, &srcImage->imir, sizeof(dstImage->pasp));
+    memcpy(&dstImage->imir, &srcImage->imir, sizeof(dstImage->imir));
 
     avifImageSetProfileICC(dstImage, srcImage->icc.data, srcImage->icc.size);
 
@@ -360,6 +361,9 @@ void avifRGBImageSetDefaults(avifRGBImage * rgb, const avifImage * image)
     rgb->ignoreAlpha = AVIF_FALSE;
     rgb->pixels = NULL;
     rgb->rowBytes = 0;
+    rgb->alphaPremultiplied = AVIF_FALSE; // Most expect RGBA output to *not* be premultiplied. Those that do can opt-in by
+                                          // setting this to match image->alphaPremultiplied or forcing this to true
+                                          // after calling avifRGBImageSetDefaults(),
 }
 
 void avifRGBImageAllocatePixels(avifRGBImage * rgb)

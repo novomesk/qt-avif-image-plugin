@@ -9,6 +9,8 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
+#include "aom/aomcx.h"
+
 #include "aom_ports/system_state.h"
 
 #include "av1/encoder/bitstream.h"
@@ -595,6 +597,13 @@ void av1_update_film_grain_parameters(struct AV1_COMP *cpi,
 
     aom_film_grain_table_read(cpi->film_grain_table,
                               tune_cfg->film_grain_table_filename, &cm->error);
+  } else if (tune_cfg->content == AOM_CONTENT_FILM) {
+    cm->seq_params.film_grain_params_present = 1;
+    cm->film_grain_params.bit_depth = cm->seq_params.bit_depth;
+    if (oxcf->tool_cfg.enable_monochrome)
+      reset_film_grain_chroma_params(&cm->film_grain_params);
+    if (cm->seq_params.color_range == AOM_CR_FULL_RANGE)
+      cm->film_grain_params.clip_to_restricted_range = 0;
   } else {
 #if CONFIG_DENOISE
     cm->seq_params.film_grain_params_present = (cpi->oxcf.noise_level > 0);
@@ -966,28 +975,6 @@ void av1_determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig) {
   // Set partition speed feature back.
   cpi->sf.part_sf.partition_search_type = partition_search_type_orig;
   cpi->sf.part_sf.fixed_partition_size = fixed_partition_block_size_orig;
-}
-
-#define GM_RECODE_LOOP_NUM4X4_FACTOR 192
-int av1_recode_loop_test_global_motion(WarpedMotionParams *const global_motion,
-                                       const int *const global_motion_used,
-                                       int *const gm_params_cost) {
-  int i;
-  int recode = 0;
-  for (i = LAST_FRAME; i <= ALTREF_FRAME; ++i) {
-    if (global_motion[i].wmtype != IDENTITY &&
-        global_motion_used[i] * GM_RECODE_LOOP_NUM4X4_FACTOR <
-            gm_params_cost[i]) {
-      global_motion[i] = default_warp_params;
-      assert(global_motion[i].wmtype == IDENTITY);
-      gm_params_cost[i] = 0;
-      recode = 1;
-      // TODO(sarahparker): The earlier condition for recoding here was:
-      // "recode |= (rdc->global_motion_used[i] > 0);". Can we bring something
-      // similar to that back to speed up global motion?
-    }
-  }
-  return recode;
 }
 #endif  // CONFIG_REALTIME_ONLY
 

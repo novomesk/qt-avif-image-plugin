@@ -976,7 +976,6 @@ static int get_active_cq_level(const RATE_CONTROL *rc,
   const RateControlCfg *const rc_cfg = &oxcf->rc_cfg;
   static const double cq_adjust_threshold = 0.1;
   int active_cq_level = rc_cfg->cq_level;
-  (void)intra_only;
   if (rc_cfg->mode == AOM_CQ || rc_cfg->mode == AOM_Q) {
     // printf("Superres %d %d %d = %d\n", superres_denom, intra_only,
     //        rc->frames_to_key, !(intra_only && rc->frames_to_key <= 1));
@@ -2567,7 +2566,8 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi,
   // Set frame type.
   if ((!cpi->use_svc && rc->frames_to_key == 0) ||
       (cpi->use_svc && svc->spatial_layer_id == 0 &&
-       svc->current_superframe % cpi->oxcf.kf_cfg.key_freq_max == 0) ||
+       (cpi->oxcf.kf_cfg.key_freq_max == 0 ||
+        svc->current_superframe % cpi->oxcf.kf_cfg.key_freq_max == 0)) ||
       (frame_flags & FRAMEFLAGS_KEY)) {
     frame_params->frame_type = KEY_FRAME;
     rc->this_key_frame_forced =
@@ -2638,6 +2638,9 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi,
           cpi, gf_group->update_type[gf_group->index]);
     }
   }
+  if (cpi->oxcf.rc_cfg.mode == AOM_Q)
+    rc->active_worst_quality = cpi->oxcf.rc_cfg.cq_level;
+
   av1_rc_set_frame_target(cpi, target, cm->width, cm->height);
   rc->base_frame_target = target;
   cm->current_frame.frame_type = frame_params->frame_type;

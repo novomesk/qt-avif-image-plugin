@@ -13,9 +13,13 @@
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
+#include <stdlib.h>
 
 #include "config/aom_config.h"
 #include "config/aom_dsp_rtcd.h"
+
+#include "aom/aomcx.h"
 
 #if CONFIG_DENOISE
 #include "aom_dsp/grain_table.h"
@@ -85,6 +89,10 @@ FRAME_COUNTS aggregate_fc;
 #ifdef OUTPUT_YUV_REC
 FILE *yuv_rec_file;
 #define FILE_NAME_LEN 100
+#endif
+
+#ifdef OUTPUT_YUV_DENOISED
+FILE *yuv_denoised_file = NULL;
 #endif
 
 static INLINE void Scale2Ratio(AOM_SCALING mode, int *hr, int *hs) {
@@ -284,7 +292,7 @@ static void set_tile_info(AV1_COMMON *const cm,
   av1_calculate_tile_rows(seq_params, mi_params->mi_rows, tiles);
 }
 
-static void update_frame_size(AV1_COMP *cpi) {
+void av1_update_frame_size(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
   MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
 
@@ -766,7 +774,7 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
       initial_dimensions->width = initial_dimensions->height = 0;
     }
   }
-  update_frame_size(cpi);
+  av1_update_frame_size(cpi);
 
   rc->is_src_frame_alt_ref = 0;
 
@@ -813,6 +821,17 @@ static INLINE void init_frame_info(FRAME_INFO *frame_info,
   frame_info->bit_depth = seq_params->bit_depth;
   frame_info->subsampling_x = seq_params->subsampling_x;
   frame_info->subsampling_y = seq_params->subsampling_y;
+}
+
+static INLINE void init_frame_index_set(FRAME_INDEX_SET *frame_index_set) {
+  frame_index_set->show_frame_count = 0;
+}
+
+static INLINE void update_frame_index_set(FRAME_INDEX_SET *frame_index_set,
+                                          int is_show_frame) {
+  if (is_show_frame) {
+    frame_index_set->show_frame_count++;
+  }
 }
 
 AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
@@ -885,6 +904,7 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
     }
   }
   init_frame_info(&cpi->frame_info, cm);
+  init_frame_index_set(&cpi->frame_index_set);
 
   cm->current_frame.frame_number = 0;
   cm->current_frame_id = -1;
@@ -949,6 +969,9 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf, BufferPool *const pool,
 
 #ifdef OUTPUT_YUV_REC
   yuv_rec_file = fopen("rec.yuv", "wb");
+#endif
+#ifdef OUTPUT_YUV_DENOISED
+  yuv_denoised_file = fopen("denoised.yuv", "wb");
 #endif
 
   assert(MAX_LAP_BUFFERS >= MAX_LAG_BUFFERS);
@@ -1507,6 +1530,10 @@ void av1_remove_compressor(AV1_COMP *cpi) {
 #endif
   }
 
+#if CONFIG_AV1_TEMPORAL_DENOISING
+  av1_denoiser_free(&(cpi->denoiser));
+#endif
+
   TplParams *const tpl_data = &cpi->tpl_data;
   for (int frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
     aom_free(tpl_data->tpl_stats_pool[frame]);
@@ -1544,7 +1571,8 @@ void av1_remove_compressor(AV1_COMP *cpi) {
     av1_loop_filter_dealloc(&mt_info->lf_row_sync);
     av1_cdef_mt_dealloc(&mt_info->cdef_sync);
 #if !CONFIG_REALTIME_ONLY
-    av1_loop_restoration_dealloc(&mt_info->lr_row_sync, mt_info->num_workers);
+    av1_loop_restoration_dealloc(&mt_info->lr_row_sync,
+                                 mt_info->num_mod_workers[MOD_LR]);
     av1_gm_dealloc(&mt_info->gm_sync);
     av1_tf_mt_dealloc(&mt_info->tf_sync);
 #endif
@@ -1564,6 +1592,10 @@ void av1_remove_compressor(AV1_COMP *cpi) {
 
 #ifdef OUTPUT_YUV_REC
   fclose(yuv_rec_file);
+#endif
+
+#ifdef OUTPUT_YUV_DENOISED
+  fclose(yuv_denoised_file);
 #endif
 }
 
@@ -1917,6 +1949,22 @@ void av1_check_initial_width(AV1_COMP *cpi, int use_highbitdepth,
   }
 }
 
+#if CONFIG_AV1_TEMPORAL_DENOISING
+static void setup_denoiser_buffer(AV1_COMP *cpi) {
+  AV1_COMMON *const cm = &cpi->common;
+  if (cpi->oxcf.noise_sensitivity > 0 &&
+      !cpi->denoiser.frame_buffer_initialized) {
+    if (av1_denoiser_alloc(
+            cm, &cpi->svc, &cpi->denoiser, cpi->use_svc,
+            cpi->oxcf.noise_sensitivity, cm->width, cm->height,
+            cm->seq_params.subsampling_x, cm->seq_params.subsampling_y,
+            cm->seq_params.use_highbitdepth, AOM_BORDER_IN_PIXELS))
+      aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
+                         "Failed to allocate denoiser");
+  }
+}
+#endif
+
 // Returns 1 if the assigned width or height was <= 0.
 int av1_set_size_literal(AV1_COMP *cpi, int width, int height) {
   AV1_COMMON *cm = &cpi->common;
@@ -1930,6 +1978,10 @@ int av1_set_size_literal(AV1_COMP *cpi, int width, int height) {
   cm->width = width;
   cm->height = height;
 
+#if CONFIG_AV1_TEMPORAL_DENOISING
+  setup_denoiser_buffer(cpi);
+#endif
+
   if (initial_dimensions->width && initial_dimensions->height &&
       (cm->width > initial_dimensions->width ||
        cm->height > initial_dimensions->height)) {
@@ -1942,7 +1994,7 @@ int av1_set_size_literal(AV1_COMP *cpi, int width, int height) {
     realloc_segmentation_maps(cpi);
     initial_dimensions->width = initial_dimensions->height = 0;
   }
-  update_frame_size(cpi);
+  av1_update_frame_size(cpi);
 
   return 0;
 }
@@ -1962,6 +2014,13 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
         cm->features.coded_lossless && !av1_superres_scaled(cm);
 
     av1_noise_estimate_init(&cpi->noise_estimate, cm->width, cm->height);
+#if CONFIG_AV1_TEMPORAL_DENOISING
+    // Reset the denoiser on the resized frame.
+    if (cpi->oxcf.noise_sensitivity > 0) {
+      av1_denoiser_free(&(cpi->denoiser));
+      setup_denoiser_buffer(cpi);
+    }
+#endif
   }
   set_mv_search_params(cpi);
 
@@ -2067,7 +2126,7 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
 #endif
   if (use_restoration) {
     MultiThreadInfo *const mt_info = &cpi->mt_info;
-    const int num_workers = mt_info->num_workers;
+    const int num_workers = mt_info->num_mod_workers[MOD_LR];
     av1_loop_restoration_save_boundary_lines(&cm->cur_frame->buf, cm, 1);
     av1_pick_filter_restoration(cpi->source, cpi);
     if (cm->rst_info[0].frame_restoration_type != RESTORE_NONE ||
@@ -2099,7 +2158,7 @@ static void cdef_restoration_frame(AV1_COMP *cpi, AV1_COMMON *cm,
  */
 static void loopfilter_frame(AV1_COMP *cpi, AV1_COMMON *cm) {
   MultiThreadInfo *const mt_info = &cpi->mt_info;
-  const int num_workers = mt_info->num_workers;
+  const int num_workers = mt_info->num_mod_workers[MOD_LPF];
   const int num_planes = av1_num_planes(cm);
   MACROBLOCKD *xd = &cpi->td.mb.e_mbd;
 
@@ -2231,6 +2290,11 @@ static int encode_without_recode(AV1_COMP *cpi) {
   if (cpi->sf.rt_sf.use_temporal_noise_estimate) {
     av1_update_noise_estimate(cpi);
   }
+
+#if CONFIG_AV1_TEMPORAL_DENOISING
+  if (cpi->oxcf.noise_sensitivity > 0 && cpi->use_svc)
+    av1_denoiser_reset_on_first_frame(cpi);
+#endif
 
   // For 1 spatial layer encoding: if the (non-LAST) reference has different
   // resolution from the source then disable that reference. This is to avoid
@@ -2554,11 +2618,6 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
       recode_loop_update_q(cpi, &loop, &q, &q_low, &q_high, top_index,
                            bottom_index, &undershoot_seen, &overshoot_seen,
                            &low_cr_seen, loop_count);
-
-      if (!loop && !cpi->sf.gm_sf.gm_disable_recode)
-        loop = av1_recode_loop_test_global_motion(
-            cm->global_motion, cpi->td.rd_counts.global_motion_used,
-            gm_info->params_cost);
     }
 
     if (loop) {
@@ -2576,6 +2635,36 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
   return AOM_CODEC_OK;
 }
 #endif  // !CONFIG_REALTIME_ONLY
+
+// TODO(jingning, paulwilkins): Set up high grain level to test
+// hardware decoders. Need to adapt the actual noise variance
+// according to the difference between reconstructed frame and the
+// source signal.
+static void set_grain_syn_params(AV1_COMMON *cm) {
+  aom_film_grain_t *film_grain_params = &cm->film_grain_params;
+  film_grain_params->apply_grain = 1;
+  film_grain_params->update_parameters = 1;
+  film_grain_params->random_seed = rand() & 0xffff;
+
+  film_grain_params->num_y_points = 1;
+  film_grain_params->scaling_points_y[0][0] = 128;
+  film_grain_params->scaling_points_y[0][1] = 100;
+
+  film_grain_params->num_cb_points = 1;
+  film_grain_params->scaling_points_cb[0][0] = 128;
+  film_grain_params->scaling_points_cb[0][1] = 100;
+
+  film_grain_params->num_cr_points = 1;
+  film_grain_params->scaling_points_cr[0][0] = 128;
+  film_grain_params->scaling_points_cr[0][1] = 100;
+
+  film_grain_params->chroma_scaling_from_luma = 0;
+  film_grain_params->scaling_shift = 1;
+  film_grain_params->ar_coeff_lag = 0;
+  film_grain_params->ar_coeff_shift = 1;
+  film_grain_params->overlap_flag = 1;
+  film_grain_params->grain_scale_shift = 0;
+}
 
 /*!\brief Recode loop or a single loop for encoding one frame, followed by
  * in-loop deblocking filters, CDEF filters, and restoration filters.
@@ -2625,6 +2714,14 @@ static int encode_with_recode_loop_and_filter(AV1_COMP *cpi, size_t *size,
     }
     return err;
   }
+
+#ifdef OUTPUT_YUV_DENOISED
+  const AV1EncoderConfig *const oxcf = &cpi->oxcf;
+  if (oxcf->noise_sensitivity > 0 && denoise_svc(cpi)) {
+    aom_write_yuv_frame(yuv_denoised_file,
+                        &cpi->denoiser.running_avg_y[INTRA_FRAME]);
+  }
+#endif
 
   AV1_COMMON *const cm = &cpi->common;
   SequenceHeader *const seq_params = &cm->seq_params;
@@ -2677,6 +2774,10 @@ static int encode_with_recode_loop_and_filter(AV1_COMP *cpi, size_t *size,
 #ifdef OUTPUT_YUV_REC
   aom_write_one_yuv_frame(cm, &cm->cur_frame->buf);
 #endif
+
+  if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_FILM) {
+    set_grain_syn_params(cm);
+  }
 
   av1_finalize_encoded_frame(cpi);
   // Build the bitstream
@@ -2948,6 +3049,10 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
     //       for the purpose to verify no mismatch between encoder and decoder.
     if (cm->show_frame) cpi->last_show_frame_buf = cm->cur_frame;
 
+#if CONFIG_AV1_TEMPORAL_DENOISING
+    av1_denoiser_update_ref_frame(cpi);
+#endif
+
     refresh_reference_frames(cpi);
 
     // Since we allocate a spot for the OVERLAY frame in the gf group, we need
@@ -2962,6 +3067,7 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
     }
 
     ++current_frame->frame_number;
+    update_frame_index_set(&cpi->frame_index_set, cm->show_frame);
     return AOM_CODEC_OK;
   }
 
@@ -3079,8 +3185,18 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
       // compression loss).
       // TODO(huisu@google.com): design schemes for various trade-offs between
       // compression quality and decoding speed.
-      features->disable_cdf_update =
-          (frame_is_intra_only(cm) || !cm->show_frame) ? 0 : 1;
+      if (oxcf->mode == GOOD) {
+        features->disable_cdf_update =
+            (frame_is_intra_only(cm) || !cm->show_frame) ? 0 : 1;
+      } else {
+        if (cpi->svc.number_spatial_layers == 1 &&
+            cpi->svc.number_temporal_layers == 1)
+          features->disable_cdf_update = cm->current_frame.frame_number & 1;
+        else if (cpi->svc.number_temporal_layers > 1)
+          // Disable only on top temporal enhancement layer for now.
+          features->disable_cdf_update = (cpi->svc.temporal_layer_id ==
+                                          cpi->svc.number_temporal_layers - 1);
+      }
       break;
   }
   seq_params->timing_info_present &= !seq_params->reduced_still_picture_hdr;
@@ -3133,6 +3249,9 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   if (frame_is_intra_only(cm) == 0) {
     release_scaled_references(cpi);
   }
+#if CONFIG_AV1_TEMPORAL_DENOISING
+  av1_denoiser_update_ref_frame(cpi);
+#endif
 
   // NOTE: Save the new show frame buffer index for --test-code=warn, i.e.,
   //       for the purpose to verify no mismatch between encoder and decoder.
@@ -3177,7 +3296,10 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   // A droppable frame might not be shown but it always
   // takes a space in the gf group. Therefore, even when
   // it is not shown, we still need update the count down.
-  if (cm->show_frame) ++current_frame->frame_number;
+  if (cm->show_frame) {
+    update_frame_index_set(&cpi->frame_index_set, cm->show_frame);
+    ++current_frame->frame_number;
+  }
 
 #if CONFIG_COLLECT_COMPONENT_TIMING
   end_timing(cpi, encode_frame_to_data_rate_time);
@@ -3213,8 +3335,9 @@ int av1_encode(AV1_COMP *const cpi, uint8_t *const dest,
   memcpy(&cpi->refresh_frame, &frame_params->refresh_frame,
          sizeof(cpi->refresh_frame));
 
-  if (current_frame->frame_type == KEY_FRAME && !cpi->no_show_fwd_kf)
+  if (current_frame->frame_type == KEY_FRAME && !cpi->no_show_fwd_kf) {
     current_frame->frame_number = 0;
+  }
 
   current_frame->order_hint =
       current_frame->frame_number + frame_params->order_offset;
@@ -3298,6 +3421,11 @@ int av1_receive_raw_frame(AV1_COMP *cpi, aom_enc_frame_flags_t frame_flags,
   struct aom_usec_timer timer;
   aom_usec_timer_start(&timer);
 #endif
+
+#if CONFIG_AV1_TEMPORAL_DENOISING
+  setup_denoiser_buffer(cpi);
+#endif
+
 #if CONFIG_DENOISE
   if (cpi->oxcf.noise_level > 0)
     if (apply_denoise_2d(cpi, sd, cpi->oxcf.noise_block_size,
@@ -3521,14 +3649,26 @@ int av1_get_compressed_data(AV1_COMP *cpi, unsigned int *frame_flags,
   // show_existing_frame and lag-in-frames.
   if (cpi->oxcf.pass == 2 && cpi->frame_component_time[0] > 100) {
     int i;
+    uint64_t frame_total = 0, total = 0;
+
     fprintf(stderr, "\n Frame number: %d, Frame type: %s, Show Frame: %d\n",
             cm->current_frame.frame_number,
             get_frame_type_enum(cm->current_frame.frame_type), cm->show_frame);
     for (i = 0; i < kTimingComponents; i++) {
       cpi->component_time[i] += cpi->frame_component_time[i];
-      fprintf(stderr, " %s:  %" PRId64 " us (total: %" PRId64 " us)\n",
+      // Use av1_encode_strategy_time (i = 0) as the total time.
+      if (i == 0) {
+        frame_total = cpi->frame_component_time[0];
+        total = cpi->component_time[0];
+      }
+      fprintf(stderr,
+              " %50s:  %15" PRId64 " us [%6.2f%%] (total: %15" PRId64
+              " us [%6.2f%%])\n",
               get_component_name(i), cpi->frame_component_time[i],
-              cpi->component_time[i]);
+              (float)((float)cpi->frame_component_time[i] * 100.0 /
+                      (float)frame_total),
+              cpi->component_time[i],
+              (float)((float)cpi->component_time[i] * 100.0 / (float)total));
       cpi->frame_component_time[i] = 0;
     }
   }

@@ -205,7 +205,7 @@ enum aome_enc_control_id {
    * encoding process, values greater than 0 will increase encoder speed at
    * the expense of quality.
    *
-   * Valid range: 0..8. 0 runs the slowest, and 8 runs the fastest;
+   * Valid range: 0..9. 0 runs the slowest, and 9 runs the fastest;
    * quality improves as speed decreases (since more compression
    * possibilities are explored).
    */
@@ -478,6 +478,7 @@ enum aome_enc_control_id {
    *
    *  - AOM_CONTENT_DEFAULT = Regular video content (default)
    *  - AOM_CONTENT_SCREEN  = Screen capture content
+   *  - AOM_CONTENT_FILM = Film content
    */
   AV1E_SET_TUNE_CONTENT = 43,
 
@@ -1186,7 +1187,7 @@ enum aome_enc_control_id {
   /*!\brief Control to select maximum height for the GF group pyramid structure,
    * unsigned int parameter
    *
-   * Valid range: 0..4
+   * Valid range: 0..5
    */
   AV1E_SET_GF_MAX_PYRAMID_HEIGHT = 123,
 
@@ -1296,7 +1297,7 @@ enum aome_enc_control_id {
   /*!\brief Control to select minimum height for the GF group pyramid structure,
    * unsigned int parameter
    *
-   * Valid values: 0..4
+   * Valid values: 0..5
    */
   AV1E_SET_GF_MIN_PYRAMID_HEIGHT = 156,
 
@@ -1378,6 +1379,7 @@ typedef struct aom_scaling_mode {
 typedef enum {
   AOM_CONTENT_DEFAULT,
   AOM_CONTENT_SCREEN,
+  AOM_CONTENT_FILM,
   AOM_CONTENT_INVALID
 } aom_tune_content;
 

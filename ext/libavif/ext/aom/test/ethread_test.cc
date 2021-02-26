@@ -262,6 +262,9 @@ class AVxEncoderThreadTest
       } else {
         encoder->Control(AOME_SET_ENABLEAUTOALTREF, 0);
         encoder->Control(AV1E_SET_AQ_MODE, 3);
+        encoder->Control(AV1E_SET_COEFF_COST_UPD_FREQ, 2);
+        encoder->Control(AV1E_SET_MODE_COST_UPD_FREQ, 2);
+        encoder->Control(AV1E_SET_MV_COST_UPD_FREQ, 3);
       }
       encoder_initialized_ = true;
     }
@@ -431,9 +434,25 @@ TEST_P(AVxEncoderThreadTest, EncoderResultTest) {
   DoTest();
 }
 
+class AVxEncoderThreadRTTest : public AVxEncoderThreadTest {};
+
+TEST_P(AVxEncoderThreadRTTest, EncoderResultTest) {
+  cfg_.large_scale_tile = 0;
+  decoder_->Control(AV1_SET_TILE_MODE, 0);
+  DoTest();
+}
+
 class AVxEncoderThreadTestLarge : public AVxEncoderThreadTest {};
 
 TEST_P(AVxEncoderThreadTestLarge, EncoderResultTest) {
+  cfg_.large_scale_tile = 0;
+  decoder_->Control(AV1_SET_TILE_MODE, 0);
+  DoTest();
+}
+
+class AVxEncoderThreadRTTestLarge : public AVxEncoderThreadTest {};
+
+TEST_P(AVxEncoderThreadRTTestLarge, EncoderResultTest) {
   cfg_.large_scale_tile = 0;
   decoder_->Control(AV1_SET_TILE_MODE, 0);
   DoTest();
@@ -452,11 +471,24 @@ AV1_INSTANTIATE_TEST_SUITE(AVxEncoderThreadTest,
                            ::testing::Values(2), ::testing::Values(0, 2),
                            ::testing::Values(0, 2), ::testing::Values(0, 1));
 
+// Test cpu_used 7, 8, 9 here.
+AV1_INSTANTIATE_TEST_SUITE(AVxEncoderThreadRTTest,
+                           ::testing::Values(::libaom_test::kRealTime),
+                           ::testing::Values(7, 8, 9), ::testing::Values(0, 2),
+                           ::testing::Values(0, 2), ::testing::Values(0, 1));
+
 // Test cpu_used 0, 1, 3 and 5.
 AV1_INSTANTIATE_TEST_SUITE(AVxEncoderThreadTestLarge,
                            ::testing::Values(::libaom_test::kTwoPassGood,
                                              ::libaom_test::kOnePassGood),
                            ::testing::Values(0, 1, 3, 5),
+                           ::testing::Values(1, 6), ::testing::Values(1, 6),
+                           ::testing::Values(0, 1));
+
+// Test cpu_used 0, 2, 4 and 6.
+AV1_INSTANTIATE_TEST_SUITE(AVxEncoderThreadRTTestLarge,
+                           ::testing::Values(::libaom_test::kRealTime),
+                           ::testing::Values(0, 2, 4, 6),
                            ::testing::Values(1, 6), ::testing::Values(1, 6),
                            ::testing::Values(0, 1));
 

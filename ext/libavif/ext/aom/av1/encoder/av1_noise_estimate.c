@@ -20,6 +20,9 @@
 #include "av1/encoder/context_tree.h"
 #include "av1/encoder/av1_noise_estimate.h"
 #include "av1/encoder/encoder.h"
+#if CONFIG_AV1_TEMPORAL_DENOISING
+#include "av1/encoder/av1_temporal_denoiser.h"
+#endif
 
 #if CONFIG_AV1_TEMPORAL_DENOISING
 // For SVC: only do noise estimation on top spatial layer.

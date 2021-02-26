@@ -8,7 +8,7 @@
 # License 1.0 was not distributed with this source code in the PATENTS file, you
 # can obtain it at www.aomedia.org/license/patent.
 #
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.6)
 
 set(AOM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(AOM_CONFIG_DIR "${CMAKE_CURRENT_BINARY_DIR}")
@@ -128,6 +128,8 @@ list(APPEND AOM_SOURCES
             "${AOM_ROOT}/aom/src/aom_integer.c")
 
 list(APPEND AOM_COMMON_APP_UTIL_SOURCES
+            "${AOM_ROOT}/av1/arg_defs.h"
+            "${AOM_ROOT}/av1/arg_defs.c"
             "${AOM_ROOT}/common/args_helper.c"
             "${AOM_ROOT}/common/args_helper.h"
             "${AOM_ROOT}/common/args.c"
@@ -752,6 +754,10 @@ foreach(var ${all_cmake_vars})
   endif()
 endforeach()
 
+if(NOT CONFIG_AV1_DECODER)
+  list(FILTER aom_source_vars EXCLUDE REGEX "_DECODER_")
+endif()
+
 # Libaom_srcs.txt generation.
 set(libaom_srcs_txt_file "${AOM_CONFIG_DIR}/libaom_srcs.txt")
 file(WRITE "${libaom_srcs_txt_file}" "# This file is generated. DO NOT EDIT.\n")
@@ -761,6 +767,9 @@ foreach(aom_source_var ${aom_source_vars})
   foreach(file ${${aom_source_var}})
     if(NOT "${file}" MATCHES "${AOM_CONFIG_DIR}")
       string(REPLACE "${AOM_ROOT}/" "" file "${file}")
+      if(NOT CONFIG_AV1_DECODER AND "${file}" MATCHES "aom_decoder")
+        continue()
+      endif()
       file(APPEND "${libaom_srcs_txt_file}" "${file}\n")
     endif()
   endforeach()
@@ -791,6 +800,9 @@ foreach(aom_source_var ${aom_source_vars})
     if(NOT "${file}" MATCHES "${AOM_CONFIG_DIR}")
       string(REPLACE "${AOM_ROOT}" "//third_party/libaom/source/libaom" file
                      "${file}")
+      if(NOT CONFIG_AV1_DECODER AND "${file}" MATCHES "aom_decoder")
+        continue()
+      endif()
       file(APPEND "${libaom_srcs_gni_file}" "  \"${file}\",\n")
     endif()
   endforeach()

@@ -230,14 +230,6 @@ TEST_P(ForcedKeyTestLarge, ForcedFrameIsKey) {
 }
 
 TEST_P(ForcedKeyTestLarge, ForcedFrameIsKeyCornerCases) {
-  // TODO(aomedia:2915): Remove this if statement.
-  if (encoding_mode_ == ::libaom_test::kTwoPassGood && auto_alt_ref_ == 1 &&
-      fwd_kf_enabled_ == 1) {
-    std::cerr << "The test will divide by zero (crbug.com/aomedia/2915). Skip "
-                 "the test."
-              << std::endl;
-    return;
-  }
   const aom_rational timebase = { 1, 30 };
   const int kf_offsets[] = { -2, -1, 1, 2, 0 };
   cfg_.g_lag_in_frames = 35;

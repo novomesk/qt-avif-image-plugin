@@ -89,6 +89,7 @@ list(APPEND AOM_DSP_COMMON_ASM_SSSE3
 
 list(APPEND AOM_DSP_COMMON_INTRIN_SSSE3
             "${AOM_ROOT}/aom_dsp/x86/aom_subpixel_8t_intrin_ssse3.c"
+            "${AOM_ROOT}/aom_dsp/x86/convolve_ssse3.h"
             "${AOM_ROOT}/aom_dsp/x86/highbd_convolve_ssse3.c"
             "${AOM_ROOT}/aom_dsp/x86/intrapred_ssse3.c")
 

@@ -27,14 +27,44 @@ void av1_convolve_2d_sr_avx2(const uint8_t *src, int src_stride, uint8_t *dst,
                              const int subpel_x_qn, const int subpel_y_qn,
                              ConvolveParams *conv_params) {
   if (filter_params_x->taps > 8) {
-    if (w < 8) {
-      av1_convolve_2d_sr_c(src, src_stride, dst, dst_stride, w, h,
-                           filter_params_x, filter_params_y, subpel_x_qn,
-                           subpel_y_qn, conv_params);
-    } else {
-      av1_convolve_2d_sr_12tap_sse2(src, src_stride, dst, dst_stride, w, h,
-                                    filter_params_x, filter_params_y,
-                                    subpel_x_qn, subpel_y_qn, conv_params);
+    const int bd = 8;
+    int im_stride = 8, i;
+    DECLARE_ALIGNED(32, int16_t, im_block[(MAX_SB_SIZE + MAX_FILTER_TAP) * 8]);
+    const int bits =
+        FILTER_BITS * 2 - conv_params->round_0 - conv_params->round_1;
+    const int offset_bits = bd + 2 * FILTER_BITS - conv_params->round_0;
+
+    assert(conv_params->round_0 > 0);
+
+    const __m256i round_const_h12 = _mm256_set1_epi32(
+        ((1 << (conv_params->round_0)) >> 1) + (1 << (bd + FILTER_BITS - 1)));
+    const __m128i round_shift_h12 = _mm_cvtsi32_si128(conv_params->round_0);
+
+    const __m256i sum_round_v = _mm256_set1_epi32(
+        (1 << offset_bits) + ((1 << conv_params->round_1) >> 1));
+    const __m128i sum_shift_v = _mm_cvtsi32_si128(conv_params->round_1);
+
+    const __m256i round_const_v = _mm256_set1_epi32(
+        ((1 << bits) >> 1) - (1 << (offset_bits - conv_params->round_1)) -
+        ((1 << (offset_bits - conv_params->round_1)) >> 1));
+    const __m128i round_shift_v = _mm_cvtsi32_si128(bits);
+
+    __m256i coeffs_h[6] = { 0 }, coeffs_v[6] = { 0 };
+
+    int horiz_tap = 12;
+    int vert_tap = 12;
+
+    prepare_coeffs_12taps(filter_params_x, subpel_x_qn, coeffs_h);
+    prepare_coeffs_12taps(filter_params_y, subpel_y_qn, coeffs_v);
+
+    int im_h = h + vert_tap - 1;
+    const int fo_vert = vert_tap / 2 - 1;
+    const int fo_horiz = horiz_tap / 2 - 1;
+    const uint8_t *const src_ptr = src - fo_vert * src_stride - fo_horiz;
+
+    for (int j = 0; j < w; j += 8) {
+      CONVOLVE_SR_HORIZONTAL_FILTER_12TAP
+      CONVOLVE_SR_VERTICAL_FILTER_12TAP
     }
   } else {
     const int bd = 8;

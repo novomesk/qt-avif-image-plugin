@@ -71,11 +71,17 @@ static AOM_INLINE void alloc_compressor_data(AV1_COMP *cpi) {
   if (!is_stat_generation_stage(cpi)) {
     alloc_token_info(cm, token_info);
   }
+  if (cpi->td.mb.mv_costs) {
+    aom_free(cpi->td.mb.mv_costs);
+    cpi->td.mb.mv_costs = NULL;
+  }
+  CHECK_MEM_ERROR(cm, cpi->td.mb.mv_costs,
+                  (MvCosts *)aom_calloc(1, sizeof(MvCosts)));
 
   av1_setup_shared_coeff_buffer(&cpi->common, &cpi->td.shared_coeff_buf);
   av1_setup_sms_tree(cpi, &cpi->td);
   cpi->td.firstpass_ctx =
-      av1_alloc_pmc(cm, BLOCK_16X16, &cpi->td.shared_coeff_buf);
+      av1_alloc_pmc(cpi, BLOCK_16X16, &cpi->td.shared_coeff_buf);
 }
 
 static AOM_INLINE void realloc_segmentation_maps(AV1_COMP *cpi) {
@@ -255,6 +261,11 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
 
   release_obmc_buffers(&cpi->td.mb.obmc_buffer);
 
+  if (cpi->td.mb.mv_costs) {
+    aom_free(cpi->td.mb.mv_costs);
+    cpi->td.mb.mv_costs = NULL;
+  }
+
   aom_free(cpi->td.mb.inter_modes_info);
   cpi->td.mb.inter_modes_info = NULL;
 
@@ -344,6 +355,11 @@ static AOM_INLINE void alloc_altref_frame_buffer(AV1_COMP *cpi) {
   AV1_COMMON *cm = &cpi->common;
   const SequenceHeader *const seq_params = &cm->seq_params;
   const AV1EncoderConfig *oxcf = &cpi->oxcf;
+
+  // When lag_in_frames <= 1, alt-ref frames are not enabled. In this case,
+  // temporal filtering of key frames is disabled as well. Hence alt_ref_buffer
+  // allocation is avoided.
+  if (oxcf->gf_cfg.lag_in_frames <= 1) return;
 
   // TODO(agrange) Check if ARF is enabled and skip allocation if not.
   if (aom_realloc_frame_buffer(

@@ -74,9 +74,13 @@ void av1_tf_do_filtering_mt(AV1_COMP *cpi);
 
 void av1_tf_mt_dealloc(AV1TemporalFilterSync *tf_sync);
 
-int av1_compute_num_enc_workers(AV1_COMP *cpi, int max_workers);
+void av1_compute_num_workers_for_mt(AV1_COMP *cpi);
+
+int av1_get_max_num_workers(AV1_COMP *cpi);
 
 void av1_create_workers(AV1_COMP *cpi, int num_workers);
+
+void av1_create_second_pass_workers(AV1_COMP *cpi, int num_workers);
 
 void av1_cdef_mse_calc_frame_mt(AV1_COMMON *cm, MultiThreadInfo *mt_info,
                                 CdefSearchCtx *cdef_search_ctx);

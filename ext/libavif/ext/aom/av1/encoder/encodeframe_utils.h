@@ -12,6 +12,8 @@
 #ifndef AOM_AV1_ENCODER_ENCODEFRAME_UTILS_H_
 #define AOM_AV1_ENCODER_ENCODEFRAME_UTILS_H_
 
+#include "aom_ports/aom_timer.h"
+
 #include "av1/common/reconinter.h"
 
 #include "av1/encoder/encoder.h"
@@ -107,6 +109,9 @@ typedef struct PartitionTimingStats {
   // Tracks the time spent on each partition search in the current call to \ref
   // av1_rd_pick_partition
   int64_t partition_times[EXT_PARTITION_TYPES];
+  // Tracks the rdcost spent on each partition search in the current call to
+  // \ref av1_rd_pick_partition
+  int64_t partition_rdcost[EXT_PARTITION_TYPES];
   // Timer used to time the partitions.
   struct aom_usec_timer timer;
   // Whether the timer is on
@@ -172,19 +177,6 @@ typedef struct {
   PartitionTimingStats part_timing_stats;
 #endif  // CONFIG_COLLECT_PARTITION_STATS
 } PartitionSearchState;
-
-static AOM_INLINE void update_global_motion_used(PREDICTION_MODE mode,
-                                                 BLOCK_SIZE bsize,
-                                                 const MB_MODE_INFO *mbmi,
-                                                 RD_COUNTS *rdc) {
-  if (mode == GLOBALMV || mode == GLOBAL_GLOBALMV) {
-    const int num_4x4s = mi_size_wide[bsize] * mi_size_high[bsize];
-    int ref;
-    for (ref = 0; ref < 1 + has_second_ref(mbmi); ++ref) {
-      rdc->global_motion_used[mbmi->ref_frame[ref]] += num_4x4s;
-    }
-  }
-}
 
 static AOM_INLINE void update_filter_type_cdf(const MACROBLOCKD *xd,
                                               const MB_MODE_INFO *mbmi,
@@ -281,7 +273,7 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, BLOCK_SIZE bsize,
                                    int mi_row, int mi_col);
 #endif  // !CONFIG_REALTIME_ONLY
 
-void av1_set_ssim_rdmult(const AV1_COMP *const cpi, MvCosts *const mv_costs,
+void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
                          const BLOCK_SIZE bsize, const int mi_row,
                          const int mi_col, int *const rdmult);
 
