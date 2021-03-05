@@ -168,3 +168,7 @@ AVIF thumbnails in dolphin:
 ### Kanryu QuickViewer
 
 ![AVIF image in quickviewer](img/app_kanryu_quickviewer.png)
+
+### VookiImageViewer
+
+![AVIF image in vooki-image-viewer](img/app_vooki-image-viewer.png)
