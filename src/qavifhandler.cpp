@@ -31,8 +31,8 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <QtGlobal>
 #include <QThread>
+#include <QtGlobal>
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
 #include <QColorSpace>
@@ -41,14 +41,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "qavifhandler_p.h"
 #include <cfloat>
 
-QAVIFHandler::QAVIFHandler() :
-    m_parseState(ParseAvifNotParsed),
-    m_quality(52),
-    m_container_width(0),
-    m_container_height(0),
-    m_rawAvifData(AVIF_DATA_EMPTY),
-    m_decoder(nullptr),
-    m_must_jump_to_next_image(false)
+QAVIFHandler::QAVIFHandler()
+    : m_parseState(ParseAvifNotParsed)
+    , m_quality(52)
+    , m_container_width(0)
+    , m_container_height(0)
+    , m_rawAvifData(AVIF_DATA_EMPTY)
+    , m_decoder(nullptr)
+    , m_must_jump_to_next_image(false)
 {
 }
 
@@ -83,7 +83,7 @@ bool QAVIFHandler::canRead(QIODevice *device)
     }
 
     avifROData input;
-    input.data = (const uint8_t *) header.constData();
+    input.data = (const uint8_t *)header.constData();
     input.size = header.size();
 
     if (avifPeekCompatibleFileType(&input)) {
@@ -114,14 +114,13 @@ bool QAVIFHandler::ensureDecoder()
 
     m_rawData = device()->readAll();
 
-    m_rawAvifData.data = (const uint8_t *) m_rawData.constData();
+    m_rawAvifData.data = (const uint8_t *)m_rawData.constData();
     m_rawAvifData.size = m_rawData.size();
 
     if (avifPeekCompatibleFileType(&m_rawAvifData) == AVIF_FALSE) {
         m_parseState = ParseAvifError;
         return false;
     }
-
 
     m_decoder = avifDecoderCreate();
 
@@ -150,7 +149,6 @@ bool QAVIFHandler::ensureDecoder()
     decodeResult = avifDecoderNextImage(m_decoder);
 
     if (decodeResult == AVIF_RESULT_OK) {
-
         m_container_width = m_decoder->image->width;
         m_container_height = m_decoder->image->height;
 
@@ -221,12 +219,12 @@ bool QAVIFHandler::decode_one_frame()
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     if (m_decoder->image->icc.data && (m_decoder->image->icc.size > 0)) {
-        result.setColorSpace(QColorSpace::fromIccProfile(QByteArray::fromRawData((const char *) m_decoder->image->icc.data, (int) m_decoder->image->icc.size)));
-        if (! result.colorSpace().isValid()) {
-            qWarning("Invalid QColorSpace created from ICC!");
+        result.setColorSpace(QColorSpace::fromIccProfile(QByteArray::fromRawData((const char *)m_decoder->image->icc.data, (int)m_decoder->image->icc.size)));
+        if (!result.colorSpace().isValid()) {
+            qWarning("AVIF image has Qt-unsupported or invalid ICC profile!");
         }
     } else {
-        float prim[8] = { 0.64f, 0.33f, 0.3f, 0.6f, 0.15f, 0.06f, 0.3127f, 0.329f };
+        float prim[8] = {0.64f, 0.33f, 0.3f, 0.6f, 0.15f, 0.06f, 0.3127f, 0.329f};
         // outPrimaries: rX, rY, gX, gY, bX, bY, wX, wY
         avifColorPrimariesGetValues(m_decoder->image->colorPrimaries, prim);
 
@@ -234,7 +232,6 @@ bool QAVIFHandler::decode_one_frame()
         const QPointF greenPoint(QAVIFHandler::CompatibleChromacity(prim[2], prim[3]));
         const QPointF bluePoint(QAVIFHandler::CompatibleChromacity(prim[4], prim[5]));
         const QPointF whitePoint(QAVIFHandler::CompatibleChromacity(prim[6], prim[7]));
-
 
         QColorSpace::TransferFunction q_trc = QColorSpace::TransferFunction::Custom;
         float q_trc_gamma = 0.0f;
@@ -258,16 +255,17 @@ bool QAVIFHandler::decode_one_frame()
         case 0:
         case 2: /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
         case 13:
-            q_trc =  QColorSpace::TransferFunction::SRgb;
+            q_trc = QColorSpace::TransferFunction::SRgb;
             break;
         default:
             qWarning("CICP colorPrimaries: %d, transferCharacteristics: %d\nThe colorspace is unsupported by this plug-in yet.",
-                     m_decoder->image->colorPrimaries, m_decoder->image->transferCharacteristics);
+                     m_decoder->image->colorPrimaries,
+                     m_decoder->image->transferCharacteristics);
             q_trc = QColorSpace::TransferFunction::SRgb;
             break;
         }
 
-        if (q_trc != QColorSpace::TransferFunction::Custom) {   //we create new colorspace using Qt
+        if (q_trc != QColorSpace::TransferFunction::Custom) { // we create new colorspace using Qt
             switch (m_decoder->image->colorPrimaries) {
             /* AVIF_COLOR_PRIMARIES_BT709 */
             case 0:
@@ -285,8 +283,8 @@ bool QAVIFHandler::decode_one_frame()
             }
         }
 
-        if (! result.colorSpace().isValid()) {
-            qWarning("Invalid QColorSpace created from NCLX/CICP!");
+        if (!result.colorSpace().isValid()) {
+            qWarning("AVIF plugin created invalid QColorSpace from NCLX/CICP!");
         }
     }
 #endif
@@ -333,11 +331,11 @@ bool QAVIFHandler::decode_one_frame()
     }
 
     if (m_decoder->image->transformFlags & AVIF_TRANSFORM_CLAP) {
-        if ((m_decoder->image->clap.widthD > 0) && (m_decoder->image->clap.heightD > 0) &&
-                (m_decoder->image->clap.horizOffD > 0) && (m_decoder->image->clap.vertOffD > 0)) {
-            int  new_width, new_height, offx, offy;
+        if ((m_decoder->image->clap.widthD > 0) && (m_decoder->image->clap.heightD > 0) && (m_decoder->image->clap.horizOffD > 0)
+            && (m_decoder->image->clap.vertOffD > 0)) {
+            int new_width, new_height, offx, offy;
 
-            new_width = (int)((double)(m_decoder->image->clap.widthN)  / (m_decoder->image->clap.widthD) + 0.5);
+            new_width = (int)((double)(m_decoder->image->clap.widthN) / (m_decoder->image->clap.widthD) + 0.5);
             if (new_width > result.width()) {
                 new_width = result.width();
             }
@@ -348,17 +346,14 @@ bool QAVIFHandler::decode_one_frame()
             }
 
             if (new_width > 0 && new_height > 0) {
-
-                offx = ((double)((int32_t) m_decoder->image->clap.horizOffN)) / (m_decoder->image->clap.horizOffD) +
-                       (result.width() - new_width) / 2.0 + 0.5;
+                offx = ((double)((int32_t)m_decoder->image->clap.horizOffN)) / (m_decoder->image->clap.horizOffD) + (result.width() - new_width) / 2.0 + 0.5;
                 if (offx < 0) {
                     offx = 0;
                 } else if (offx > (result.width() - new_width)) {
                     offx = result.width() - new_width;
                 }
 
-                offy = ((double)((int32_t) m_decoder->image->clap.vertOffN)) / (m_decoder->image->clap.vertOffD) +
-                       (result.height() - new_height) / 2.0 + 0.5;
+                offy = ((double)((int32_t)m_decoder->image->clap.vertOffN)) / (m_decoder->image->clap.vertOffD) + (result.height() - new_height) / 2.0 + 0.5;
                 if (offy < 0) {
                     offy = 0;
                 } else if (offy > (result.height() - new_height)) {
@@ -369,7 +364,7 @@ bool QAVIFHandler::decode_one_frame()
             }
         }
 
-        else { //Zero values, we need to avoid 0 divide.
+        else { // Zero values, we need to avoid 0 divide.
             qWarning("ERROR: Wrong values in avifCleanApertureBox");
         }
     }
@@ -394,10 +389,10 @@ bool QAVIFHandler::decode_one_frame()
 
     if (m_decoder->image->transformFlags & AVIF_TRANSFORM_IMIR) {
         switch (m_decoder->image->imir.axis) {
-        case 0: //vertical
+        case 0: // vertical
             result = result.mirrored(false, true);
             break;
-        case 1: //horizontal
+        case 1: // horizontal
             result = result.mirrored(true, false);
             break;
         }
@@ -447,13 +442,13 @@ bool QAVIFHandler::write(const QImage &image)
     int maxQuantizerAlpha = 0;
     avifResult res;
 
-    bool save_grayscale; //true - monochrome, false - colors
-    int save_depth; //8 or 10bit per channel
-    QImage::Format tmpformat; //format for temporary image
+    bool save_grayscale; // true - monochrome, false - colors
+    int save_depth; // 8 or 10bit per channel
+    QImage::Format tmpformat; // format for temporary image
 
     avifImage *avif = nullptr;
 
-    //grayscale detection
+    // grayscale detection
     switch (image.format()) {
     case QImage::Format_Mono:
     case QImage::Format_MonoLSB:
@@ -471,7 +466,7 @@ bool QAVIFHandler::write(const QImage &image)
         break;
     }
 
-    //depth detection
+    // depth detection
     switch (image.format()) {
     case QImage::Format_BGR30:
     case QImage::Format_A2BGR30_Premultiplied:
@@ -494,15 +489,15 @@ bool QAVIFHandler::write(const QImage &image)
         break;
     }
 
-    //quality settings
+    // quality settings
     if (maxQuantizer > 20) {
         minQuantizer = maxQuantizer - 20;
-        if (maxQuantizer > 40) { //we decrease quality of alpha channel here
+        if (maxQuantizer > 40) { // we decrease quality of alpha channel here
             maxQuantizerAlpha = maxQuantizer - 40;
         }
     }
 
-    if (save_grayscale && !image.hasAlphaChannel()) { //we are going to save grayscale image without alpha channel
+    if (save_grayscale && !image.hasAlphaChannel()) { // we are going to save grayscale image without alpha channel
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
         if (save_depth > 8) {
             tmpformat = QImage::Format_Grayscale16;
@@ -536,7 +531,6 @@ bool QAVIFHandler::write(const QImage &image)
                 /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
                 break;
             }
-
         }
 #endif
 
@@ -545,7 +539,7 @@ bool QAVIFHandler::write(const QImage &image)
                 const uint16_t *src16bit = reinterpret_cast<const uint16_t *>(tmpgrayimage.constScanLine(y));
                 uint16_t *dest16bit = reinterpret_cast<uint16_t *>(avif->yuvPlanes[0] + y * avif->yuvRowBytes[0]);
                 for (int x = 0; x < tmpgrayimage.width(); x++) {
-                    int tmp_pixelval = (int)(((float)(*src16bit) / 65535.0f) * 1023.0f + 0.5f); //downgrade to 10 bits
+                    int tmp_pixelval = (int)(((float)(*src16bit) / 65535.0f) * 1023.0f + 0.5f); // downgrade to 10 bits
                     *dest16bit = qBound(0, tmp_pixelval, 1023);
                     dest16bit++;
                     src16bit++;
@@ -563,14 +557,14 @@ bool QAVIFHandler::write(const QImage &image)
             }
         }
 
-    } else { //we are going to save color image
+    } else { // we are going to save color image
         if (save_depth > 8) {
             if (image.hasAlphaChannel()) {
                 tmpformat = QImage::Format_RGBA64;
             } else {
                 tmpformat = QImage::Format_RGBX64;
             }
-        } else { //8bit depth
+        } else { // 8bit depth
             if (image.hasAlphaChannel()) {
                 tmpformat = QImage::Format_RGBA8888;
             } else {
@@ -583,18 +577,19 @@ bool QAVIFHandler::write(const QImage &image)
         avifPixelFormat pixel_format = AVIF_PIXEL_FORMAT_YUV420;
         if (maxQuantizer < 20) {
             if (maxQuantizer < 10) {
-                pixel_format = AVIF_PIXEL_FORMAT_YUV444; //best quality
+                pixel_format = AVIF_PIXEL_FORMAT_YUV444; // best quality
             } else {
-                pixel_format = AVIF_PIXEL_FORMAT_YUV422; //high quality
+                pixel_format = AVIF_PIXEL_FORMAT_YUV422; // high quality
             }
         }
 
-        avifMatrixCoefficients matrix_to_save = (avifMatrixCoefficients)1; //default for Qt 5.12 and 5.13;
+        avifMatrixCoefficients matrix_to_save = (avifMatrixCoefficients)1; // default for Qt 5.12 and 5.13;
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
 
         avifColorPrimaries primaries_to_save = (avifColorPrimaries)2;
         avifTransferCharacteristics transfer_to_save = (avifTransferCharacteristics)2;
+        QByteArray iccprofile;
 
         if (tmpcolorimage.colorSpace().isValid()) {
             switch (tmpcolorimage.colorSpace().primaries()) {
@@ -645,11 +640,9 @@ bool QAVIFHandler::write(const QImage &image)
                 break;
             }
 
-            //in case primaries or trc were not identified
-            if ((primaries_to_save == 2) ||
-                    (transfer_to_save == 2)) {
-
-                //upgrade image to higher bit depth
+            // in case primaries or trc were not identified
+            if ((primaries_to_save == 2) || (transfer_to_save == 2)) {
+                // upgrade image to higher bit depth
                 if (save_depth == 8) {
                     save_depth = 10;
                     if (tmpcolorimage.hasAlphaChannel()) {
@@ -659,8 +652,7 @@ bool QAVIFHandler::write(const QImage &image)
                     }
                 }
 
-                if ((primaries_to_save == 2) &&
-                        (transfer_to_save != 2)) {    //other primaries but known trc
+                if ((primaries_to_save == 2) && (transfer_to_save != 2)) { // other primaries but known trc
                     primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
                     matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
 
@@ -679,16 +671,20 @@ bool QAVIFHandler::write(const QImage &image)
                         transfer_to_save = (avifTransferCharacteristics)13;
                         break;
                     }
-                } else if ((primaries_to_save != 2) &&
-                           (transfer_to_save == 2)) {    //recognized primaries but other trc
+                } else if ((primaries_to_save != 2) && (transfer_to_save == 2)) { // recognized primaries but other trc
                     transfer_to_save = (avifTransferCharacteristics)13;
                     tmpcolorimage.convertToColorSpace(tmpcolorimage.colorSpace().withTransferFunction(QColorSpace::TransferFunction::SRgb));
-                } else { //unrecognized profile
+                } else { // unrecognized profile
                     primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
                     transfer_to_save = (avifTransferCharacteristics)13;
                     matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
                     tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
                 }
+            }
+        } else { // profile is unsupported by Qt
+            iccprofile = tmpcolorimage.colorSpace().iccProfile();
+            if (iccprofile.size() > 0) {
+                matrix_to_save = (avifMatrixCoefficients)6;
             }
         }
 #endif
@@ -698,6 +694,10 @@ bool QAVIFHandler::write(const QImage &image)
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
         avif->colorPrimaries = primaries_to_save;
         avif->transferCharacteristics = transfer_to_save;
+
+        if (iccprofile.size() > 0) {
+            avifImageSetProfileICC(avif, (const uint8_t *)iccprofile.constData(), iccprofile.size());
+        }
 #endif
 
         avifRGBImage rgb;
@@ -705,7 +705,7 @@ bool QAVIFHandler::write(const QImage &image)
         rgb.rowBytes = tmpcolorimage.bytesPerLine();
         rgb.pixels = const_cast<uint8_t *>(tmpcolorimage.constBits());
 
-        if (save_depth > 8) { //10bit depth
+        if (save_depth > 8) { // 10bit depth
             rgb.depth = 16;
 
             if (tmpcolorimage.hasAlphaChannel()) {
@@ -715,7 +715,7 @@ bool QAVIFHandler::write(const QImage &image)
             }
 
             rgb.format = AVIF_RGB_FORMAT_RGBA;
-        } else { //8bit depth
+        } else { // 8bit depth
             rgb.depth = 8;
 
             if (tmpcolorimage.hasAlphaChannel()) {
@@ -767,7 +767,6 @@ bool QAVIFHandler::write(const QImage &image)
     return false;
 }
 
-
 QVariant QAVIFHandler::option(ImageOption option) const
 {
     if (option == Quality) {
@@ -811,9 +810,7 @@ void QAVIFHandler::setOption(ImageOption option, const QVariant &value)
 
 bool QAVIFHandler::supportsOption(ImageOption option) const
 {
-    return option == Quality
-           || option == Size
-           || option == Animation;
+    return option == Quality || option == Size || option == Animation;
 }
 
 int QAVIFHandler::imageCount() const
@@ -851,7 +848,7 @@ bool QAVIFHandler::jumpToNextImage()
         return true;
     }
 
-    if (m_decoder->imageIndex >= m_decoder->imageCount - 1) {   //start from begining
+    if (m_decoder->imageIndex >= m_decoder->imageCount - 1) { // start from begining
         avifDecoderReset(m_decoder);
     }
 
@@ -863,11 +860,12 @@ bool QAVIFHandler::jumpToNextImage()
         return false;
     }
 
-    if ((m_container_width != m_decoder->image->width) ||
-            (m_container_height != m_decoder->image->height)) {
+    if ((m_container_width != m_decoder->image->width) || (m_container_height != m_decoder->image->height)) {
         qWarning("Decoded image sequence size (%dx%d) do not match first image size (%dx%d)!",
-                 m_decoder->image->width, m_decoder->image->height,
-                 m_container_width, m_container_height);
+                 m_decoder->image->width,
+                 m_decoder->image->height,
+                 m_container_width,
+                 m_container_height);
 
         m_parseState = ParseAvifError;
         return false;
@@ -879,7 +877,6 @@ bool QAVIFHandler::jumpToNextImage()
         m_parseState = ParseAvifError;
         return false;
     }
-
 }
 
 bool QAVIFHandler::jumpToImage(int imageNumber)
@@ -888,7 +885,7 @@ bool QAVIFHandler::jumpToImage(int imageNumber)
         return false;
     }
 
-    if (m_decoder->imageCount < 2) {   //not an animation
+    if (m_decoder->imageCount < 2) { // not an animation
         if (imageNumber == 0) {
             return true;
         } else {
@@ -896,11 +893,11 @@ bool QAVIFHandler::jumpToImage(int imageNumber)
         }
     }
 
-    if (imageNumber < 0 || imageNumber >= m_decoder->imageCount) {   //wrong index
+    if (imageNumber < 0 || imageNumber >= m_decoder->imageCount) { // wrong index
         return false;
     }
 
-    if (imageNumber == m_decoder->imageCount) {   // we are here already
+    if (imageNumber == m_decoder->imageCount) { // we are here already
         return true;
     }
 
@@ -912,11 +909,12 @@ bool QAVIFHandler::jumpToImage(int imageNumber)
         return false;
     }
 
-    if ((m_container_width != m_decoder->image->width) ||
-            (m_container_height != m_decoder->image->height)) {
+    if ((m_container_width != m_decoder->image->width) || (m_container_height != m_decoder->image->height)) {
         qWarning("Decoded image sequence size (%dx%d) do not match declared container size (%dx%d)!",
-                 m_decoder->image->width, m_decoder->image->height,
-                 m_container_width, m_container_height);
+                 m_decoder->image->width,
+                 m_decoder->image->height,
+                 m_container_width,
+                 m_container_height);
 
         m_parseState = ParseAvifError;
         return false;

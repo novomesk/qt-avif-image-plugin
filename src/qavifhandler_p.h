@@ -1,12 +1,12 @@
 #ifndef QAVIFHANDLER_P_H
 #define QAVIFHANDLER_P_H
 
-#include <QImage>
-#include <QVariant>
-#include <qimageiohandler.h>
 #include <QByteArray>
+#include <QImage>
 #include <QPointF>
+#include <QVariant>
 #include <avif/avif.h>
+#include <qimageiohandler.h>
 
 class QAVIFHandler : public QImageIOHandler
 {
@@ -32,6 +32,7 @@ public:
     int nextImageDelay() const override;
 
     int loopCount() const override;
+
 private:
     static QPointF CompatibleChromacity(qreal chrX, qreal chrY);
 
@@ -42,7 +43,7 @@ private:
     enum ParseAvifState {
         ParseAvifError = -1,
         ParseAvifNotParsed = 0,
-        ParseAvifSuccess = 1
+        ParseAvifSuccess = 1,
     };
 
     ParseAvifState m_parseState;
@@ -55,7 +56,7 @@ private:
     avifROData m_rawAvifData;
 
     avifDecoder *m_decoder;
-    QImage        m_current_image;
+    QImage m_current_image;
 
     bool m_must_jump_to_next_image;
 };
