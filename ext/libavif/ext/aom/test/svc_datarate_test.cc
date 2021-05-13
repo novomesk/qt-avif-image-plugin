@@ -46,8 +46,7 @@ class DatarateTestSVC
 
  protected:
   virtual void SetUp() {
-    InitializeConfig();
-    SetMode(GET_PARAM(1));
+    InitializeConfig(GET_PARAM(1));
     ResetModel();
   }
 
@@ -90,6 +89,7 @@ class DatarateTestSVC
       initialize_svc(number_temporal_layers_, number_spatial_layers_,
                      &svc_params_);
       encoder->Control(AV1E_SET_SVC_PARAMS, &svc_params_);
+      // TODO(aomedia:3032): Configure KSVC in fixed mode.
       encoder->Control(AV1E_SET_ENABLE_ORDER_HINT, 0);
       encoder->Control(AV1E_SET_ENABLE_TPL_MODEL, 0);
       encoder->Control(AV1E_SET_DELTAQ_MODE, 0);
@@ -485,7 +485,7 @@ class DatarateTestSVC
                                          1, 0, 400);
     cfg_.g_w = 640;
     cfg_.g_h = 480;
-    const int bitrate_array[2] = { 80, 100 };
+    const int bitrate_array[2] = { 80, 90 };
     cfg_.rc_target_bitrate = bitrate_array[GET_PARAM(4)];
     ResetModel();
     number_temporal_layers_ = 3;

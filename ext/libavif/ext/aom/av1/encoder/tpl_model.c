@@ -35,6 +35,41 @@
 #include "av1/encoder/reconinter_enc.h"
 #include "av1/encoder/tpl_model.h"
 
+static AOM_INLINE void tpl_stats_record_txfm_block(TplTxfmStats *tpl_txfm_stats,
+                                                   const tran_low_t *coeff,
+                                                   int coeff_num) {
+  aom_clear_system_state();
+  // For transform larger than 16x16, the scale of coeff need to be adjusted.
+  // It's not LOSSLESS_Q_STEP.
+  assert(coeff_num <= 256);
+  for (int i = 0; i < coeff_num; ++i) {
+    tpl_txfm_stats->abs_coeff_sum[i] += abs(coeff[i]) / (double)LOSSLESS_Q_STEP;
+  }
+  ++tpl_txfm_stats->txfm_block_count;
+}
+
+static AOM_INLINE void tpl_stats_update_abs_coeff_mean(
+    TplParams *tpl_data, TplTxfmStats *tpl_txfm_stats) {
+  aom_clear_system_state();
+  TplDepFrame *tpl_frame = &tpl_data->tpl_frame[tpl_data->frame_idx];
+  tpl_frame->txfm_block_count = tpl_txfm_stats->txfm_block_count;
+  for (int i = 0; i < tpl_frame->coeff_num; ++i) {
+    tpl_frame->abs_coeff_sum[i] = tpl_txfm_stats->abs_coeff_sum[i];
+    tpl_frame->abs_coeff_mean[i] =
+        tpl_frame->abs_coeff_sum[i] / tpl_txfm_stats->txfm_block_count;
+  }
+}
+
+void av1_tpl_stats_init_txfm_stats(TplDepFrame *tpl_frame, int tpl_bsize_1d) {
+  aom_clear_system_state();
+  tpl_frame->txfm_block_count = 0;
+  tpl_frame->coeff_num = tpl_bsize_1d * tpl_bsize_1d;
+  memset(tpl_frame->abs_coeff_sum, 0, sizeof(tpl_frame->abs_coeff_sum));
+  assert(sizeof(tpl_frame->abs_coeff_mean) /
+             sizeof(tpl_frame->abs_coeff_mean[0]) ==
+         tpl_frame->coeff_num);
+}
+
 static AOM_INLINE void get_quantize_error(const MACROBLOCK *x, int plane,
                                           const tran_low_t *coeff,
                                           tran_low_t *qcoeff,
@@ -72,6 +107,63 @@ static AOM_INLINE void get_quantize_error(const MACROBLOCK *x, int plane,
 
   *sse = (*sse) >> shift;
   *sse = AOMMAX(*sse, 1);
+}
+
+static AOM_INLINE void set_tpl_stats_block_size(uint8_t *block_mis_log2,
+                                                uint8_t *tpl_bsize_1d) {
+  // tpl stats bsize: 2 means 16x16
+  *block_mis_log2 = 2;
+  // Block size used in tpl motion estimation
+  *tpl_bsize_1d = 16;
+  // MIN_TPL_BSIZE_1D = 16;
+  assert(*tpl_bsize_1d >= 16);
+}
+
+void av1_setup_tpl_buffers(AV1_COMMON *const cm, TplParams *const tpl_data,
+                           int lag_in_frames) {
+  CommonModeInfoParams *const mi_params = &cm->mi_params;
+  set_tpl_stats_block_size(&tpl_data->tpl_stats_block_mis_log2,
+                           &tpl_data->tpl_bsize_1d);
+  const uint8_t block_mis_log2 = tpl_data->tpl_stats_block_mis_log2;
+  tpl_data->border_in_pixels =
+      ALIGN_POWER_OF_TWO(tpl_data->tpl_bsize_1d + 2 * AOM_INTERP_EXTEND, 5);
+
+  for (int frame = 0; frame < MAX_LENGTH_TPL_FRAME_STATS; ++frame) {
+    const int mi_cols =
+        ALIGN_POWER_OF_TWO(mi_params->mi_cols, MAX_MIB_SIZE_LOG2);
+    const int mi_rows =
+        ALIGN_POWER_OF_TWO(mi_params->mi_rows, MAX_MIB_SIZE_LOG2);
+    TplDepFrame *tpl_frame = &tpl_data->tpl_stats_buffer[frame];
+    tpl_frame->is_valid = 0;
+    tpl_frame->width = mi_cols >> block_mis_log2;
+    tpl_frame->height = mi_rows >> block_mis_log2;
+    tpl_frame->stride = tpl_data->tpl_stats_buffer[frame].width;
+    tpl_frame->mi_rows = mi_params->mi_rows;
+    tpl_frame->mi_cols = mi_params->mi_cols;
+    av1_tpl_stats_init_txfm_stats(tpl_frame, tpl_data->tpl_bsize_1d);
+  }
+  tpl_data->tpl_frame = &tpl_data->tpl_stats_buffer[REF_FRAMES + 1];
+
+  // If lag_in_frames <= 1, TPL module is not invoked. Hence tpl recon and
+  // stats buffers are not allocated.
+  if (lag_in_frames <= 1) return;
+
+  // TODO(aomedia:2873): Explore the allocation of tpl buffers based on
+  // lag_in_frames.
+  for (int frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
+    CHECK_MEM_ERROR(
+        cm, tpl_data->tpl_stats_pool[frame],
+        aom_calloc(tpl_data->tpl_stats_buffer[frame].width *
+                       tpl_data->tpl_stats_buffer[frame].height,
+                   sizeof(*tpl_data->tpl_stats_buffer[frame].tpl_stats_ptr)));
+    if (aom_alloc_frame_buffer(
+            &tpl_data->tpl_rec_pool[frame], cm->width, cm->height,
+            cm->seq_params.subsampling_x, cm->seq_params.subsampling_y,
+            cm->seq_params.use_highbitdepth, tpl_data->border_in_pixels,
+            cm->features.byte_alignment))
+      aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
+                         "Failed to allocate frame buffer");
+  }
 }
 
 static AOM_INLINE void tpl_fwd_txfm(const int16_t *src_diff, int bw,
@@ -229,12 +321,13 @@ static void get_rate_distortion(
     tran_low_t *qcoeff, tran_low_t *dqcoeff, AV1_COMMON *cm, MACROBLOCK *x,
     const YV12_BUFFER_CONFIG *ref_frame_ptr[2], uint8_t *rec_buffer_pool[3],
     const int rec_stride_pool[3], TX_SIZE tx_size, PREDICTION_MODE best_mode,
-    int mi_row, int mi_col) {
+    int mi_row, int mi_col, int use_y_only_rate_distortion) {
   *rate_cost = 0;
   *recon_error = 1;
 
   MACROBLOCKD *xd = &x->e_mbd;
   int is_compound = (best_mode == NEW_NEWMV);
+  int num_planes = use_y_only_rate_distortion ? 1 : MAX_MB_PLANE;
 
   uint8_t *src_buffer_pool[MAX_MB_PLANE] = {
     xd->cur_buf->y_buffer,
@@ -250,7 +343,7 @@ static void get_rate_distortion(
   const int_interpfilters kernel =
       av1_broadcast_interp_filter(EIGHTTAP_REGULAR);
 
-  for (int plane = 0; plane < MAX_MB_PLANE; ++plane) {
+  for (int plane = 0; plane < num_planes; ++plane) {
     struct macroblockd_plane *pd = &xd->plane[plane];
     BLOCK_SIZE bsize_plane =
         ss_size_lookup[txsize_to_bsize[tx_size]][pd->subsampling_x]
@@ -317,9 +410,10 @@ static void get_rate_distortion(
   }
 }
 
-static AOM_INLINE void mode_estimation(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
-                                       int mi_col, BLOCK_SIZE bsize,
-                                       TX_SIZE tx_size,
+static AOM_INLINE void mode_estimation(AV1_COMP *cpi,
+                                       TplTxfmStats *tpl_txfm_stats,
+                                       MACROBLOCK *x, int mi_row, int mi_col,
+                                       BLOCK_SIZE bsize, TX_SIZE tx_size,
                                        TplDepStats *tpl_stats) {
   AV1_COMMON *cm = &cpi->common;
   const GF_GROUP *gf_group = &cpi->gf_group;
@@ -348,6 +442,7 @@ static AOM_INLINE void mode_estimation(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
       mi_row * MI_SIZE * tpl_frame->rec_picture->y_stride + mi_col * MI_SIZE;
   uint8_t *dst_buffer = tpl_frame->rec_picture->y_buffer + dst_mb_offset;
   int dst_buffer_stride = tpl_frame->rec_picture->y_stride;
+  int use_y_only_rate_distortion = cpi->sf.tpl_sf.use_y_only_rate_distortion;
 
   uint8_t *rec_buffer_pool[3] = {
     tpl_frame->rec_picture->y_buffer,
@@ -619,7 +714,8 @@ static AOM_INLINE void mode_estimation(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
 
     int_mv tmp_mv[2] = { single_mv[rf_idx0], single_mv[rf_idx1] };
     int rate_mv;
-    av1_joint_motion_search(cpi, x, bsize, tmp_mv, NULL, 0, &rate_mv, 1);
+    av1_joint_motion_search(cpi, x, bsize, tmp_mv, NULL, 0, &rate_mv,
+                            !cpi->sf.mv_sf.disable_second_mv);
 
     for (int ref = 0; ref < 2; ++ref) {
       struct buf_2d ref_buf = { NULL, ref_frame_ptr[ref]->y_buffer,
@@ -668,7 +764,8 @@ static AOM_INLINE void mode_estimation(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
     int rate_cost = 1;
     get_rate_distortion(&rate_cost, &recon_error, src_diff, coeff, qcoeff,
                         dqcoeff, cm, x, ref_frame_ptr, rec_buffer_pool,
-                        rec_stride_pool, tx_size, best_mode, mi_row, mi_col);
+                        rec_stride_pool, tx_size, best_mode, mi_row, mi_col,
+                        use_y_only_rate_distortion);
     tpl_stats->srcrf_rate = rate_cost << TPL_DEP_COST_SCALE_LOG2;
   }
 
@@ -693,7 +790,10 @@ static AOM_INLINE void mode_estimation(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
           : NULL;
   get_rate_distortion(&rate_cost, &recon_error, src_diff, coeff, qcoeff,
                       dqcoeff, cm, x, ref_frame_ptr, rec_buffer_pool,
-                      rec_stride_pool, tx_size, best_mode, mi_row, mi_col);
+                      rec_stride_pool, tx_size, best_mode, mi_row, mi_col,
+                      use_y_only_rate_distortion);
+
+  tpl_stats_record_txfm_block(tpl_txfm_stats, coeff, tpl_frame->coeff_num);
 
   tpl_stats->recrf_dist = recon_error << (TPL_DEP_COST_SCALE_LOG2);
   tpl_stats->recrf_rate = rate_cost << TPL_DEP_COST_SCALE_LOG2;
@@ -711,7 +811,8 @@ static AOM_INLINE void mode_estimation(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
         tpl_data->src_ref_frame[comp_ref_frames[best_cmp_rf_idx][1]];
     get_rate_distortion(&rate_cost, &recon_error, src_diff, coeff, qcoeff,
                         dqcoeff, cm, x, ref_frame_ptr, rec_buffer_pool,
-                        rec_stride_pool, tx_size, best_mode, mi_row, mi_col);
+                        rec_stride_pool, tx_size, best_mode, mi_row, mi_col,
+                        use_y_only_rate_distortion);
     tpl_stats->cmp_recrf_dist[0] = recon_error << TPL_DEP_COST_SCALE_LOG2;
     tpl_stats->cmp_recrf_rate[0] = rate_cost << TPL_DEP_COST_SCALE_LOG2;
 
@@ -731,7 +832,8 @@ static AOM_INLINE void mode_estimation(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
     ref_frame_ptr[1] = tpl_data->ref_frame[comp_ref_frames[best_cmp_rf_idx][1]];
     get_rate_distortion(&rate_cost, &recon_error, src_diff, coeff, qcoeff,
                         dqcoeff, cm, x, ref_frame_ptr, rec_buffer_pool,
-                        rec_stride_pool, tx_size, best_mode, mi_row, mi_col);
+                        rec_stride_pool, tx_size, best_mode, mi_row, mi_col,
+                        use_y_only_rate_distortion);
     tpl_stats->cmp_recrf_dist[1] = recon_error << TPL_DEP_COST_SCALE_LOG2;
     tpl_stats->cmp_recrf_rate[1] = rate_cost << TPL_DEP_COST_SCALE_LOG2;
 
@@ -809,8 +911,8 @@ static int get_overlap_area(int grid_pos_row, int grid_pos_col, int ref_pos_row,
       break;
     default: assert(0);
   }
-
-  return width * height;
+  int overlap_area = width * height;
+  return overlap_area;
 }
 
 int av1_tpl_ptr_pos(int mi_row, int mi_col, int stride, uint8_t right_shift) {
@@ -849,6 +951,7 @@ static int64_t delta_rate_cost(int64_t delta_rate, int64_t recrf_dist,
 static AOM_INLINE void tpl_model_update_b(TplParams *const tpl_data, int mi_row,
                                           int mi_col, const BLOCK_SIZE bsize,
                                           int frame_idx, int ref) {
+  aom_clear_system_state();
   TplDepFrame *tpl_frame_ptr = &tpl_data->tpl_frame[frame_idx];
   TplDepStats *tpl_ptr = tpl_frame_ptr->tpl_stats_ptr;
   TplDepFrame *tpl_frame = tpl_data->tpl_frame;
@@ -907,101 +1010,45 @@ static AOM_INLINE void tpl_model_update_b(TplParams *const tpl_data, int mi_row,
           grid_pos_row, grid_pos_col, ref_pos_row, ref_pos_col, block, bsize);
       int ref_mi_row = round_floor(grid_pos_row, bh) * mi_height;
       int ref_mi_col = round_floor(grid_pos_col, bw) * mi_width;
-      const int step = 1 << block_mis_log2;
-
-      for (int idy = 0; idy < mi_height; idy += step) {
-        for (int idx = 0; idx < mi_width; idx += step) {
-          TplDepStats *des_stats = &ref_stats_ptr[av1_tpl_ptr_pos(
-              ref_mi_row + idy, ref_mi_col + idx, ref_tpl_frame->stride,
-              block_mis_log2)];
-          des_stats->mc_dep_dist +=
-              ((cur_dep_dist + mc_dep_dist) * overlap_area) / pix_num;
-          des_stats->mc_dep_rate +=
-              ((delta_rate + mc_dep_rate) * overlap_area) / pix_num;
-
-          assert(overlap_area >= 0);
-        }
-      }
+      assert((1 << block_mis_log2) == mi_height);
+      assert((1 << block_mis_log2) == mi_width);
+      TplDepStats *des_stats = &ref_stats_ptr[av1_tpl_ptr_pos(
+          ref_mi_row, ref_mi_col, ref_tpl_frame->stride, block_mis_log2)];
+      des_stats->mc_dep_dist +=
+          ((cur_dep_dist + mc_dep_dist) * overlap_area) / pix_num;
+      des_stats->mc_dep_rate +=
+          ((delta_rate + mc_dep_rate) * overlap_area) / pix_num;
     }
   }
 }
 
 static AOM_INLINE void tpl_model_update(TplParams *const tpl_data, int mi_row,
-                                        int mi_col, const BLOCK_SIZE bsize,
-                                        int frame_idx) {
-  const int mi_height = mi_size_high[bsize];
-  const int mi_width = mi_size_wide[bsize];
-  const int step = 1 << tpl_data->tpl_stats_block_mis_log2;
+                                        int mi_col, int frame_idx) {
   const BLOCK_SIZE tpl_stats_block_size =
       convert_length_to_bsize(MI_SIZE << tpl_data->tpl_stats_block_mis_log2);
-
-  for (int idy = 0; idy < mi_height; idy += step) {
-    for (int idx = 0; idx < mi_width; idx += step) {
-      tpl_model_update_b(tpl_data, mi_row + idy, mi_col + idx,
-                         tpl_stats_block_size, frame_idx, 0);
-      tpl_model_update_b(tpl_data, mi_row + idy, mi_col + idx,
-                         tpl_stats_block_size, frame_idx, 1);
-    }
-  }
+  tpl_model_update_b(tpl_data, mi_row, mi_col, tpl_stats_block_size, frame_idx,
+                     0);
+  tpl_model_update_b(tpl_data, mi_row, mi_col, tpl_stats_block_size, frame_idx,
+                     1);
 }
 
 static AOM_INLINE void tpl_model_store(TplDepStats *tpl_stats_ptr, int mi_row,
-                                       int mi_col, BLOCK_SIZE bsize, int stride,
+                                       int mi_col, int stride,
                                        const TplDepStats *src_stats,
                                        uint8_t block_mis_log2) {
-  const int mi_height = mi_size_high[bsize];
-  const int mi_width = mi_size_wide[bsize];
-  const int step = 1 << block_mis_log2;
-  const int div = (mi_height >> block_mis_log2) * (mi_width >> block_mis_log2);
-
-  int64_t intra_cost = src_stats->intra_cost / div;
-  int64_t inter_cost = src_stats->inter_cost / div;
-  int64_t srcrf_dist = src_stats->srcrf_dist / div;
-  int64_t recrf_dist = src_stats->recrf_dist / div;
-  int64_t srcrf_rate = src_stats->srcrf_rate / div;
-  int64_t recrf_rate = src_stats->recrf_rate / div;
-  int64_t cmp_recrf_dist[2] = {
-    src_stats->cmp_recrf_dist[0] / div,
-    src_stats->cmp_recrf_dist[1] / div,
-  };
-  int64_t cmp_recrf_rate[2] = {
-    src_stats->cmp_recrf_rate[0] / div,
-    src_stats->cmp_recrf_rate[1] / div,
-  };
-
-  intra_cost = AOMMAX(1, intra_cost);
-  inter_cost = AOMMAX(1, inter_cost);
-  srcrf_dist = AOMMAX(1, srcrf_dist);
-  recrf_dist = AOMMAX(1, recrf_dist);
-  srcrf_rate = AOMMAX(1, srcrf_rate);
-  recrf_rate = AOMMAX(1, recrf_rate);
-  cmp_recrf_dist[0] = AOMMAX(1, cmp_recrf_dist[0]);
-  cmp_recrf_dist[1] = AOMMAX(1, cmp_recrf_dist[1]);
-  cmp_recrf_rate[0] = AOMMAX(1, cmp_recrf_rate[0]);
-  cmp_recrf_rate[1] = AOMMAX(1, cmp_recrf_rate[1]);
-
-  for (int idy = 0; idy < mi_height; idy += step) {
-    TplDepStats *tpl_ptr = &tpl_stats_ptr[av1_tpl_ptr_pos(
-        mi_row + idy, mi_col, stride, block_mis_log2)];
-    for (int idx = 0; idx < mi_width; idx += step) {
-      tpl_ptr->intra_cost = intra_cost;
-      tpl_ptr->inter_cost = inter_cost;
-      tpl_ptr->srcrf_dist = srcrf_dist;
-      tpl_ptr->recrf_dist = recrf_dist;
-      tpl_ptr->srcrf_rate = srcrf_rate;
-      tpl_ptr->recrf_rate = recrf_rate;
-      tpl_ptr->cmp_recrf_dist[0] = cmp_recrf_dist[0];
-      tpl_ptr->cmp_recrf_dist[1] = cmp_recrf_dist[1];
-      tpl_ptr->cmp_recrf_rate[0] = cmp_recrf_rate[0];
-      tpl_ptr->cmp_recrf_rate[1] = cmp_recrf_rate[1];
-      memcpy(tpl_ptr->mv, src_stats->mv, sizeof(tpl_ptr->mv));
-      memcpy(tpl_ptr->pred_error, src_stats->pred_error,
-             sizeof(tpl_ptr->pred_error));
-      tpl_ptr->ref_frame_index[0] = src_stats->ref_frame_index[0];
-      tpl_ptr->ref_frame_index[1] = src_stats->ref_frame_index[1];
-      ++tpl_ptr;
-    }
-  }
+  int index = av1_tpl_ptr_pos(mi_row, mi_col, stride, block_mis_log2);
+  TplDepStats *tpl_ptr = &tpl_stats_ptr[index];
+  *tpl_ptr = *src_stats;
+  tpl_ptr->intra_cost = AOMMAX(1, tpl_ptr->intra_cost);
+  tpl_ptr->inter_cost = AOMMAX(1, tpl_ptr->inter_cost);
+  tpl_ptr->srcrf_dist = AOMMAX(1, tpl_ptr->srcrf_dist);
+  tpl_ptr->recrf_dist = AOMMAX(1, tpl_ptr->recrf_dist);
+  tpl_ptr->srcrf_rate = AOMMAX(1, tpl_ptr->srcrf_rate);
+  tpl_ptr->recrf_rate = AOMMAX(1, tpl_ptr->recrf_rate);
+  tpl_ptr->cmp_recrf_dist[0] = AOMMAX(1, tpl_ptr->cmp_recrf_dist[0]);
+  tpl_ptr->cmp_recrf_dist[1] = AOMMAX(1, tpl_ptr->cmp_recrf_dist[1]);
+  tpl_ptr->cmp_recrf_rate[0] = AOMMAX(1, tpl_ptr->cmp_recrf_rate[0]);
+  tpl_ptr->cmp_recrf_rate[1] = AOMMAX(1, tpl_ptr->cmp_recrf_rate[1]);
 }
 
 // Reset the ref and source frame pointers of tpl_data.
@@ -1036,6 +1083,7 @@ static AOM_INLINE void init_mc_flow_dispenser(AV1_COMP *cpi, int frame_idx,
   ThreadData *td = &cpi->td;
   MACROBLOCK *x = &td->mb;
   MACROBLOCKD *xd = &x->e_mbd;
+  TplTxfmStats *tpl_txfm_stats = &td->tpl_txfm_stats;
   tpl_data->frame_idx = frame_idx;
   tpl_reset_src_ref_frames(tpl_data);
   av1_tile_init(&xd->tile, cm, 0, 0);
@@ -1113,12 +1161,15 @@ static AOM_INLINE void init_mc_flow_dispenser(AV1_COMP *cpi, int frame_idx,
 
   tpl_frame->base_rdmult =
       av1_compute_rd_mult_based_on_qindex(cpi, pframe_qindex) / 6;
+
+  memset(tpl_txfm_stats, 0, sizeof(*tpl_txfm_stats));
 }
 
 // This function stores the motion estimation dependencies of all the blocks in
 // a row
-void av1_mc_flow_dispenser_row(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
-                               BLOCK_SIZE bsize, TX_SIZE tx_size) {
+void av1_mc_flow_dispenser_row(AV1_COMP *cpi, TplTxfmStats *tpl_txfm_stats,
+                               MACROBLOCK *x, int mi_row, BLOCK_SIZE bsize,
+                               TX_SIZE tx_size) {
   AV1_COMMON *const cm = &cpi->common;
   MultiThreadInfo *const mt_info = &cpi->mt_info;
   AV1TplRowMultiThreadInfo *const tpl_row_mt = &mt_info->tpl_row_mt;
@@ -1131,6 +1182,8 @@ void av1_mc_flow_dispenser_row(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
   const int tplb_cols_in_tile =
       ROUND_POWER_OF_TWO(mi_params->mi_cols, mi_size_wide_log2[bsize]);
   const int tplb_row = ROUND_POWER_OF_TWO(mi_row, mi_size_high_log2[bsize]);
+  assert(mi_size_high[bsize] == (1 << tpl_data->tpl_stats_block_mis_log2));
+  assert(mi_size_wide[bsize] == (1 << tpl_data->tpl_stats_block_mis_log2));
 
   for (int mi_col = 0, tplb_col_in_tile = 0; mi_col < mi_params->mi_cols;
        mi_col += mi_width, tplb_col_in_tile++) {
@@ -1144,12 +1197,12 @@ void av1_mc_flow_dispenser_row(AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
     xd->mb_to_left_edge = -GET_MV_SUBPEL(mi_col * MI_SIZE);
     xd->mb_to_right_edge =
         GET_MV_SUBPEL(mi_params->mi_cols - mi_width - mi_col);
-    mode_estimation(cpi, x, mi_row, mi_col, bsize, tx_size, &tpl_stats);
+    mode_estimation(cpi, tpl_txfm_stats, x, mi_row, mi_col, bsize, tx_size,
+                    &tpl_stats);
 
     // Motion flow dependency dispenser.
-    tpl_model_store(tpl_frame->tpl_stats_ptr, mi_row, mi_col, bsize,
-                    tpl_frame->stride, &tpl_stats,
-                    tpl_data->tpl_stats_block_mis_log2);
+    tpl_model_store(tpl_frame->tpl_stats_ptr, mi_row, mi_col, tpl_frame->stride,
+                    &tpl_stats, tpl_data->tpl_stats_block_mis_log2);
     (*tpl_row_mt->sync_write_ptr)(&tpl_data->tpl_mt_sync, tplb_row,
                                   tplb_col_in_tile, tplb_cols_in_tile);
   }
@@ -1171,7 +1224,8 @@ static AOM_INLINE void mc_flow_dispenser(AV1_COMP *cpi) {
     xd->mb_to_top_edge = -GET_MV_SUBPEL(mi_row * MI_SIZE);
     xd->mb_to_bottom_edge =
         GET_MV_SUBPEL((mi_params->mi_rows - mi_height - mi_row) * MI_SIZE);
-    av1_mc_flow_dispenser_row(cpi, x, mi_row, bsize, tx_size);
+    av1_mc_flow_dispenser_row(cpi, &td->tpl_txfm_stats, x, mi_row, bsize,
+                              tx_size);
   }
 }
 
@@ -1182,11 +1236,13 @@ static void mc_flow_synthesizer(AV1_COMP *cpi, int frame_idx) {
   const BLOCK_SIZE bsize = convert_length_to_bsize(tpl_data->tpl_bsize_1d);
   const int mi_height = mi_size_high[bsize];
   const int mi_width = mi_size_wide[bsize];
+  assert(mi_height == (1 << tpl_data->tpl_stats_block_mis_log2));
+  assert(mi_width == (1 << tpl_data->tpl_stats_block_mis_log2));
 
   for (int mi_row = 0; mi_row < cm->mi_params.mi_rows; mi_row += mi_height) {
     for (int mi_col = 0; mi_col < cm->mi_params.mi_cols; mi_col += mi_width) {
       if (frame_idx) {
-        tpl_model_update(tpl_data, mi_row, mi_col, bsize, frame_idx);
+        tpl_model_update(tpl_data, mi_row, mi_col, frame_idx);
       }
     }
   }
@@ -1197,7 +1253,7 @@ static AOM_INLINE void init_gop_frames_for_tpl(
     GF_GROUP *gf_group, int gop_eval, int *tpl_group_frames,
     const EncodeFrameInput *const frame_input, int *pframe_qindex) {
   AV1_COMMON *cm = &cpi->common;
-  int cur_frame_idx = gf_group->index;
+  int cur_frame_idx = cpi->gf_frame_index;
   *pframe_qindex = 0;
 
   RefBufferStack ref_buffer_stack = cpi->ref_buffer_stack;
@@ -1250,11 +1306,11 @@ static AOM_INLINE void init_gop_frames_for_tpl(
 
     struct lookahead_entry *buf;
     if (gf_index == cur_frame_idx) {
-      buf = av1_lookahead_peek(cpi->lookahead, lookahead_index,
+      buf = av1_lookahead_peek(cpi->ppi->lookahead, lookahead_index,
                                cpi->compressor_stage);
       tpl_frame->gf_picture = gop_eval ? &buf->img : frame_input->source;
     } else {
-      buf = av1_lookahead_peek(cpi->lookahead, lookahead_index,
+      buf = av1_lookahead_peek(cpi->ppi->lookahead, lookahead_index,
                                cpi->compressor_stage);
       if (buf == NULL) break;
       tpl_frame->gf_picture = &buf->img;
@@ -1322,7 +1378,7 @@ static AOM_INLINE void init_gop_frames_for_tpl(
 
     int lookahead_index = frame_display_index - anc_frame_offset;
     struct lookahead_entry *buf = av1_lookahead_peek(
-        cpi->lookahead, lookahead_index, cpi->compressor_stage);
+        cpi->ppi->lookahead, lookahead_index, cpi->compressor_stage);
 
     if (buf == NULL) break;
 
@@ -1373,13 +1429,20 @@ static AOM_INLINE void init_gop_frames_for_tpl(
 }
 
 void av1_init_tpl_stats(TplParams *const tpl_data) {
-  for (int frame_idx = 0; frame_idx < MAX_LAG_BUFFERS; ++frame_idx) {
+  int frame_idx;
+  set_tpl_stats_block_size(&tpl_data->tpl_stats_block_mis_log2,
+                           &tpl_data->tpl_bsize_1d);
+  for (frame_idx = 0; frame_idx < MAX_LAG_BUFFERS; ++frame_idx) {
     TplDepFrame *tpl_frame = &tpl_data->tpl_stats_buffer[frame_idx];
     if (tpl_data->tpl_stats_pool[frame_idx] == NULL) continue;
     memset(tpl_data->tpl_stats_pool[frame_idx], 0,
            tpl_frame->height * tpl_frame->width *
                sizeof(*tpl_frame->tpl_stats_ptr));
     tpl_frame->is_valid = 0;
+  }
+  for (frame_idx = 0; frame_idx < MAX_LENGTH_TPL_FRAME_STATS; ++frame_idx) {
+    TplDepFrame *tpl_frame = &tpl_data->tpl_stats_buffer[frame_idx];
+    av1_tpl_stats_init_txfm_stats(tpl_frame, tpl_data->tpl_bsize_1d);
   }
 }
 
@@ -1404,7 +1467,8 @@ int av1_tpl_setup_stats(AV1_COMP *cpi, int gop_eval,
   }
 
   cm->current_frame.frame_type = frame_params->frame_type;
-  for (int gf_index = gf_group->index; gf_index < gf_group->size; ++gf_index) {
+  for (int gf_index = cpi->gf_frame_index; gf_index < gf_group->size;
+       ++gf_index) {
     cm->current_frame.frame_type = gf_group->frame_type[gf_index];
     av1_configure_buffer_updates(cpi, &this_frame_params.refresh_frame,
                                  gf_group->update_type[gf_index],
@@ -1439,31 +1503,32 @@ int av1_tpl_setup_stats(AV1_COMP *cpi, int gop_eval,
   if (frame_params->frame_type == KEY_FRAME) {
     av1_init_mv_probs(cm);
   }
-  av1_fill_mv_costs(cm->fc, cm->features.cur_frame_force_integer_mv,
+  av1_fill_mv_costs(&cm->fc->nmvc, cm->features.cur_frame_force_integer_mv,
                     cm->features.allow_high_precision_mv, cpi->td.mb.mv_costs);
 
   // Backward propagation from tpl_group_frames to 1.
-  for (int frame_idx = gf_group->index; frame_idx < tpl_gf_group_frames;
+  for (int frame_idx = cpi->gf_frame_index; frame_idx < tpl_gf_group_frames;
        ++frame_idx) {
     if (gf_group->update_type[frame_idx] == INTNL_OVERLAY_UPDATE ||
         gf_group->update_type[frame_idx] == OVERLAY_UPDATE)
       continue;
 
     init_mc_flow_dispenser(cpi, frame_idx, pframe_qindex);
-    if (mt_info->num_workers > 1 && !cpi->sf.tpl_sf.allow_compound_pred) {
+    if (mt_info->num_workers > 1) {
       tpl_row_mt->sync_read_ptr = av1_tpl_row_mt_sync_read;
       tpl_row_mt->sync_write_ptr = av1_tpl_row_mt_sync_write;
       av1_mc_flow_dispenser_mt(cpi);
     } else {
       mc_flow_dispenser(cpi);
     }
+    tpl_stats_update_abs_coeff_mean(tpl_data, &cpi->td.tpl_txfm_stats);
 
     aom_extend_frame_borders(tpl_data->tpl_frame[frame_idx].rec_picture,
                              av1_num_planes(cm));
   }
 
-  for (int frame_idx = tpl_gf_group_frames - 1; frame_idx >= gf_group->index;
-       --frame_idx) {
+  for (int frame_idx = tpl_gf_group_frames - 1;
+       frame_idx >= cpi->gf_frame_index; --frame_idx) {
     if (gf_group->update_type[frame_idx] == INTNL_OVERLAY_UPDATE ||
         gf_group->update_type[frame_idx] == OVERLAY_UPDATE)
       continue;
@@ -1472,10 +1537,17 @@ int av1_tpl_setup_stats(AV1_COMP *cpi, int gop_eval,
   }
 
   av1_configure_buffer_updates(cpi, &this_frame_params.refresh_frame,
-                               gf_group->update_type[gf_group->index],
+                               gf_group->update_type[cpi->gf_frame_index],
                                frame_params->frame_type, 0);
   cm->current_frame.frame_type = frame_params->frame_type;
   cm->show_frame = frame_params->show_frame;
+
+#if CONFIG_COLLECT_COMPONENT_TIMING
+  // Record the time if the function returns.
+  if (cpi->common.tiles.large_scale || gf_group->max_layer_depth_allowed == 0 ||
+      !gop_eval)
+    end_timing(cpi, av1_tpl_setup_stats_time);
+#endif
 
   if (cpi->common.tiles.large_scale) return 0;
   if (gf_group->max_layer_depth_allowed == 0) return 1;
@@ -1531,10 +1603,9 @@ int av1_tpl_setup_stats(AV1_COMP *cpi, int gop_eval,
 
 void av1_tpl_rdmult_setup(AV1_COMP *cpi) {
   const AV1_COMMON *const cm = &cpi->common;
-  const GF_GROUP *const gf_group = &cpi->gf_group;
-  const int tpl_idx = gf_group->index;
+  const int tpl_idx = cpi->gf_frame_index;
 
-  assert(IMPLIES(gf_group->size > 0, tpl_idx < gf_group->size));
+  assert(IMPLIES(cpi->gf_group.size > 0, tpl_idx < cpi->gf_group.size));
 
   TplParams *const tpl_data = &cpi->tpl_data;
   const TplDepFrame *const tpl_frame = &tpl_data->tpl_frame[tpl_idx];
@@ -1588,12 +1659,12 @@ void av1_tpl_rdmult_setup_sb(AV1_COMP *cpi, MACROBLOCK *const x,
   AV1_COMMON *const cm = &cpi->common;
   GF_GROUP *gf_group = &cpi->gf_group;
   assert(IMPLIES(cpi->gf_group.size > 0,
-                 cpi->gf_group.index < cpi->gf_group.size));
-  const int tpl_idx = cpi->gf_group.index;
+                 cpi->gf_frame_index < cpi->gf_group.size));
+  const int tpl_idx = cpi->gf_frame_index;
   TplDepFrame *tpl_frame = &cpi->tpl_data.tpl_frame[tpl_idx];
 
   if (tpl_frame->is_valid == 0) return;
-  if (!is_frame_tpl_eligible(gf_group, gf_group->index)) return;
+  if (!is_frame_tpl_eligible(gf_group, cpi->gf_frame_index)) return;
   if (tpl_idx >= MAX_TPL_FRAME_IDX) return;
   if (cpi->oxcf.q_cfg.aq_mode != NO_AQ) return;
 
@@ -1652,11 +1723,13 @@ void av1_tpl_rdmult_setup_sb(AV1_COMP *cpi, MACROBLOCK *const x,
 #define EPSILON (0.0000001)
 
 double av1_exponential_entropy(double q_step, double b) {
+  aom_clear_system_state();
   double z = fmax(exp(-q_step / b), EPSILON);
   return -log2(1 - z) - z * log2(z) / (1 - z);
 }
 
 double av1_laplace_entropy(double q_step, double b, double zero_bin_ratio) {
+  aom_clear_system_state();
   // zero bin's size is zero_bin_ratio * q_step
   // non-zero bin's size is q_step
   double z = fmax(exp(-zero_bin_ratio / 2 * q_step / b), EPSILON);
@@ -1668,6 +1741,7 @@ double av1_laplace_entropy(double q_step, double b, double zero_bin_ratio) {
 double av1_laplace_estimate_frame_rate(int q_index, int block_count,
                                        const double *abs_coeff_mean,
                                        int coeff_num) {
+  aom_clear_system_state();
   double zero_bin_ratio = 2;
   double dc_q_step = av1_dc_quant_QTX(q_index, 0, AOM_BITS_8) / 4.;
   double ac_q_step = av1_ac_quant_QTX(q_index, 0, AOM_BITS_8) / 4.;

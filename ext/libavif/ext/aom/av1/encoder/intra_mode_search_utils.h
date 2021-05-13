@@ -24,6 +24,7 @@
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/model_rd.h"
 #include "av1/encoder/palette.h"
+#include "av1/encoder/hybrid_fwd_txfm.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -382,56 +383,70 @@ static AOM_INLINE int intra_mode_info_cost_uv(const AV1_COMP *cpi,
   return total_rate;
 }
 
+/*!\brief Apply Hadamard or DCT transform
+ *
+ * \callergraph
+ */
+static void av1_quick_txfm(int use_hadamard, TX_SIZE tx_size, int is_hbd,
+                           int bd, const int16_t *src_diff, int src_stride,
+                           tran_low_t *coeff) {
+  if (use_hadamard) {
+    switch (tx_size) {
+      case TX_4X4: aom_hadamard_4x4(src_diff, src_stride, coeff); break;
+      case TX_8X8: aom_hadamard_8x8(src_diff, src_stride, coeff); break;
+      case TX_16X16: aom_hadamard_16x16(src_diff, src_stride, coeff); break;
+      case TX_32X32: aom_hadamard_32x32(src_diff, src_stride, coeff); break;
+      default: assert(0);
+    }
+  } else {
+    assert(IMPLIES(!is_hbd, bd == 8));
+    TxfmParam txfm_param;
+    txfm_param.tx_type = DCT_DCT;
+    txfm_param.tx_size = tx_size;
+    txfm_param.lossless = 0;
+    txfm_param.bd = bd;
+    txfm_param.is_hbd = is_hbd;
+    txfm_param.tx_set_type = EXT_TX_SET_ALL16;
+    av1_fwd_txfm(src_diff, coeff, src_stride, &txfm_param);
+  }
+}
+
 /*!\cond */
-// Makes a quick luma prediction and estimate the rdcost with a model without
+// Makes a quick intra prediction and estimate the rdcost with a model without
 // going through the whole txfm/quantize/itxfm process.
-static int64_t intra_model_yrd(const AV1_COMP *const cpi, MACROBLOCK *const x,
-                               BLOCK_SIZE bsize, int mode_cost) {
-  const AV1_COMMON *cm = &cpi->common;
+static int64_t intra_model_rd(const AV1_COMMON *cm, MACROBLOCK *const x,
+                              int plane, BLOCK_SIZE plane_bsize,
+                              TX_SIZE tx_size, int use_hadamard) {
   MACROBLOCKD *const xd = &x->e_mbd;
-  MB_MODE_INFO *const mbmi = xd->mi[0];
-  assert(!is_inter_block(mbmi));
-  RD_STATS this_rd_stats;
   int row, col;
-  int64_t temp_sse, this_rd;
-  const ModeCosts *mode_costs = &x->mode_costs;
-  const TxfmSearchParams *txfm_params = &x->txfm_search_params;
-  TX_SIZE tx_size =
-      tx_size_from_tx_mode(bsize, txfm_params->tx_mode_search_type);
+  assert(!is_inter_block(xd->mi[0]));
   const int stepr = tx_size_high_unit[tx_size];
   const int stepc = tx_size_wide_unit[tx_size];
-  const int max_blocks_wide = max_block_wide(xd, bsize, 0);
-  const int max_blocks_high = max_block_high(xd, bsize, 0);
-  mbmi->tx_size = tx_size;
+  const int txbw = tx_size_wide[tx_size];
+  const int txbh = tx_size_high[tx_size];
+  const int max_blocks_wide = max_block_wide(xd, plane_bsize, plane);
+  const int max_blocks_high = max_block_high(xd, plane_bsize, plane);
+  int64_t satd_cost = 0;
+  struct macroblock_plane *p = &x->plane[plane];
+  struct macroblockd_plane *pd = &xd->plane[plane];
   // Prediction.
   for (row = 0; row < max_blocks_high; row += stepr) {
     for (col = 0; col < max_blocks_wide; col += stepc) {
-      av1_predict_intra_block_facade(cm, xd, 0, col, row, tx_size);
+      av1_predict_intra_block_facade(cm, xd, plane, col, row, tx_size);
+      // Here we use p->src_diff and p->coeff as temporary buffers for
+      // prediction residue and transform coefficients. The buffers are only
+      // used in this for loop, therefore we don't need to properly add offset
+      // to the buffers.
+      av1_subtract_block(
+          xd, txbh, txbw, p->src_diff, block_size_wide[plane_bsize],
+          p->src.buf + (((row * p->src.stride) + col) << 2), p->src.stride,
+          pd->dst.buf + (((row * pd->dst.stride) + col) << 2), pd->dst.stride);
+      av1_quick_txfm(use_hadamard, tx_size, is_cur_buf_hbd(xd), xd->bd,
+                     p->src_diff, block_size_wide[plane_bsize], p->coeff);
+      satd_cost += aom_satd(p->coeff, tx_size_2d[tx_size]);
     }
   }
-  // RD estimation.
-  model_rd_sb_fn[cpi->sf.rt_sf.use_simple_rd_model ? MODELRD_LEGACY
-                                                   : MODELRD_TYPE_INTRA](
-      cpi, bsize, x, xd, 0, 0, &this_rd_stats.rate, &this_rd_stats.dist,
-      &this_rd_stats.skip_txfm, &temp_sse, NULL, NULL, NULL);
-  if (av1_is_directional_mode(mbmi->mode) && av1_use_angle_delta(bsize)) {
-    mode_cost += mode_costs->angle_delta_cost[mbmi->mode - V_PRED]
-                                             [MAX_ANGLE_DELTA +
-                                              mbmi->angle_delta[PLANE_TYPE_Y]];
-  }
-  if (mbmi->mode == DC_PRED &&
-      av1_filter_intra_allowed_bsize(cm, mbmi->bsize)) {
-    if (mbmi->filter_intra_mode_info.use_filter_intra) {
-      const int mode = mbmi->filter_intra_mode_info.filter_intra_mode;
-      mode_cost += mode_costs->filter_intra_cost[mbmi->bsize][1] +
-                   mode_costs->filter_intra_mode_cost[mode];
-    } else {
-      mode_cost += mode_costs->filter_intra_cost[mbmi->bsize][0];
-    }
-  }
-  this_rd =
-      RDCOST(x->rdmult, this_rd_stats.rate + mode_cost, this_rd_stats.dist);
-  return this_rd;
+  return satd_cost;
 }
 /*!\endcond */
 
@@ -441,17 +456,20 @@ static int64_t intra_model_yrd(const AV1_COMP *const cpi, MACROBLOCK *const x,
  * \callergraph
  * This function first makes a quick luma prediction and estimates the rdcost
  * with a model without going through the txfm, then try to prune the current
- * mode if the new estimate y_rd > 1.5 * best_model_rd.
+ * mode if the new estimate y_rd > 1.25 * best_model_rd.
  *
  * \return Returns 1 if the given mode is prune; 0 otherwise.
  */
 static AOM_INLINE int model_intra_yrd_and_prune(const AV1_COMP *const cpi,
                                                 MACROBLOCK *x, BLOCK_SIZE bsize,
-                                                int mode_info_cost,
                                                 int64_t *best_model_rd) {
-  const int64_t this_model_rd = intra_model_yrd(cpi, x, bsize, mode_info_cost);
+  const TX_SIZE tx_size = AOMMIN(TX_32X32, max_txsize_lookup[bsize]);
+  const int plane = 0;
+  const AV1_COMMON *cm = &cpi->common;
+  const int64_t this_model_rd =
+      intra_model_rd(cm, x, plane, bsize, tx_size, /*use_hadamard=*/1);
   if (*best_model_rd != INT64_MAX &&
-      this_model_rd > *best_model_rd + (*best_model_rd >> 1)) {
+      this_model_rd > *best_model_rd + (*best_model_rd >> 2)) {
     return 1;
   } else if (this_model_rd < *best_model_rd) {
     *best_model_rd = this_model_rd;

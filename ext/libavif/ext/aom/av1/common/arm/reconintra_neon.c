@@ -14,7 +14,6 @@
 
 #include "aom/aom_integer.h"
 #include "aom_dsp/arm/sum_neon.h"
-#include "common/tools_common.h"
 
 DECLARE_ALIGNED(16, const int8_t,
                 av1_filter_intra_taps_neon[FILTER_INTRA_MODES][8][8]) = {

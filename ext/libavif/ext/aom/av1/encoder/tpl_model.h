@@ -82,6 +82,11 @@ typedef struct AV1TplRowMultiThreadInfo {
 #define MAX_TPL_EXTEND (MAX_LAG_BUFFERS - MAX_GF_INTERVAL)
 #define TPL_DEP_COST_SCALE_LOG2 4
 
+typedef struct TplTxfmStats {
+  double abs_coeff_sum[256];  // Assume we are using 16x16 transform block
+  int txfm_block_count;
+} TplTxfmStats;
+
 typedef struct TplDepStats {
   int64_t intra_cost;
   int64_t inter_cost;
@@ -111,6 +116,10 @@ typedef struct TplDepFrame {
   int mi_cols;
   int base_rdmult;
   uint32_t frame_display_index;
+  double abs_coeff_sum[256];  // Assume we are using 16x16 transform block
+  double abs_coeff_mean[256];
+  int coeff_num;  // number of coefficients in a transform block
+  int txfm_block_count;
 } TplDepFrame;
 
 /*!\endcond */
@@ -194,6 +203,17 @@ typedef struct TplParams {
   int skip_tpl_setup_stats;
 } TplParams;
 
+/*!\brief Allocate buffers used by tpl model
+ *
+ * \param[in]    Top-level encode/decode structure
+ * \param[in]    lag_in_frames  number of lookahead frames
+ *
+ * \param[out]   tpl_data  tpl data structure
+ */
+
+void av1_setup_tpl_buffers(AV1_COMMON *const cm, TplParams *const tpl_data,
+                           int lag_in_frames);
+
 /*!\brief Implements temporal dependency modelling for a GOP (GF/ARF
  * group) and selects between 16 and 32 frame GOP structure.
  *
@@ -221,8 +241,9 @@ void av1_tpl_rdmult_setup(struct AV1_COMP *cpi);
 void av1_tpl_rdmult_setup_sb(struct AV1_COMP *cpi, MACROBLOCK *const x,
                              BLOCK_SIZE sb_size, int mi_row, int mi_col);
 
-void av1_mc_flow_dispenser_row(struct AV1_COMP *cpi, MACROBLOCK *x, int mi_row,
-                               BLOCK_SIZE bsize, TX_SIZE tx_size);
+void av1_mc_flow_dispenser_row(struct AV1_COMP *cpi,
+                               TplTxfmStats *tpl_txfm_stats, MACROBLOCK *x,
+                               int mi_row, BLOCK_SIZE bsize, TX_SIZE tx_size);
 
 /*!\brief  Compute the entropy of an exponential probability distribution
  * function (pdf) subjected to uniform quantization.
@@ -273,6 +294,17 @@ double av1_laplace_entropy(double q_step, double b, double zero_bin_ratio);
 double av1_laplace_estimate_frame_rate(int q_index, int block_count,
                                        const double *abs_coeff_mean,
                                        int coeff_num);
+
+/*!\brief  Init data structure storing transform stats
+ *
+ *\ingroup tpl_modelling
+ *
+ * \param[in]    tpl_frame       pointer of tpl frame data structure
+ * \param[in]    coeff_num       number of coefficients per transform block
+ *
+ */
+void av1_tpl_stats_init_txfm_stats(TplDepFrame *tpl_frame, int coeff_num);
+
 /*!\endcond */
 #ifdef __cplusplus
 }  // extern "C"

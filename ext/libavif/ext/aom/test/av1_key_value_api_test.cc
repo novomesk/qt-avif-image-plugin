@@ -9,7 +9,7 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#include <cstdlib>
+#include <cstring>
 #include <tuple>
 
 #include "aom/aom_codec.h"
@@ -17,7 +17,6 @@
 #include "aom/aom_encoder.h"
 #include "aom/aomcx.h"
 #include "aom/aomdx.h"
-#include "common/args_helper.h"
 #include "config/aom_config.h"
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 

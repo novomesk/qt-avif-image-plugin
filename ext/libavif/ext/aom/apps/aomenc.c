@@ -168,6 +168,7 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AV1E_SET_ENABLE_SMOOTH_INTRA,
                                         AV1E_SET_ENABLE_PAETH_INTRA,
                                         AV1E_SET_ENABLE_CFL_INTRA,
+                                        AV1E_SET_ENABLE_DIAGONAL_INTRA,
                                         AV1E_SET_FORCE_VIDEO_MODE,
                                         AV1E_SET_ENABLE_OBMC,
                                         AV1E_SET_ENABLE_OVERLAY,
@@ -212,6 +213,7 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
 #if CONFIG_DENOISE
                                         AV1E_SET_DENOISE_NOISE_LEVEL,
                                         AV1E_SET_DENOISE_BLOCK_SIZE,
+                                        AV1E_SET_ENABLE_DNL_DENOISING,
 #endif  // CONFIG_DENOISE
                                         AV1E_SET_MAX_REFERENCE_FRAMES,
                                         AV1E_SET_REDUCED_REFERENCE_SET,
@@ -220,6 +222,8 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AV1E_SET_TIER_MASK,
                                         AV1E_SET_MIN_CR,
                                         AV1E_SET_VBR_CORPUS_COMPLEXITY_LAP,
+                                        AV1E_SET_CHROMA_SUBSAMPLING_X,
+                                        AV1E_SET_CHROMA_SUBSAMPLING_Y,
 #if CONFIG_TUNE_VMAF
                                         AV1E_SET_VMAF_MODEL_PATH,
 #endif
@@ -237,6 +241,7 @@ const arg_def_t *main_args[] = { &g_av1_codec_arg_defs.help,
                                  &g_av1_codec_arg_defs.skip,
                                  &g_av1_codec_arg_defs.good_dl,
                                  &g_av1_codec_arg_defs.rt_dl,
+                                 &g_av1_codec_arg_defs.ai_dl,
                                  &g_av1_codec_arg_defs.quietarg,
                                  &g_av1_codec_arg_defs.verbosearg,
                                  &g_av1_codec_arg_defs.psnrarg,
@@ -269,11 +274,13 @@ const arg_def_t *global_args[] = {
   &g_av1_codec_arg_defs.framerate,
   &g_av1_codec_arg_defs.global_error_resilient,
   &g_av1_codec_arg_defs.bitdeptharg,
+  &g_av1_codec_arg_defs.inbitdeptharg,
   &g_av1_codec_arg_defs.lag_in_frames,
   &g_av1_codec_arg_defs.large_scale_tile,
   &g_av1_codec_arg_defs.monochrome,
   &g_av1_codec_arg_defs.full_still_picture_hdr,
   &g_av1_codec_arg_defs.use_16bit_internal,
+  &g_av1_codec_arg_defs.save_as_annexb,
   NULL
 };
 
@@ -303,9 +310,14 @@ const arg_def_t *rc_args[] = { &g_av1_codec_arg_defs.dropframe_thresh,
 const arg_def_t *kf_args[] = { &g_av1_codec_arg_defs.fwd_kf_enabled,
                                &g_av1_codec_arg_defs.kf_min_dist,
                                &g_av1_codec_arg_defs.kf_max_dist,
-                               &g_av1_codec_arg_defs.kf_disabled, NULL };
+                               &g_av1_codec_arg_defs.kf_disabled,
+                               &g_av1_codec_arg_defs.sframe_dist,
+                               &g_av1_codec_arg_defs.sframe_mode,
+                               NULL };
 
-const arg_def_t *av1_args[] = {
+// TODO(bohanli): Currently all options are supported by the key & value API.
+// Consider removing the control ID usages?
+const arg_def_t *av1_ctrl_args[] = {
   &g_av1_codec_arg_defs.cpu_used_av1,
   &g_av1_codec_arg_defs.auto_altref,
   &g_av1_codec_arg_defs.sharpness,
@@ -351,6 +363,7 @@ const arg_def_t *av1_args[] = {
   &g_av1_codec_arg_defs.enable_smooth_intra,
   &g_av1_codec_arg_defs.enable_paeth_intra,
   &g_av1_codec_arg_defs.enable_cfl_intra,
+  &g_av1_codec_arg_defs.enable_diagonal_intra,
   &g_av1_codec_arg_defs.force_video_mode,
   &g_av1_codec_arg_defs.enable_obmc,
   &g_av1_codec_arg_defs.enable_overlay,
@@ -395,6 +408,7 @@ const arg_def_t *av1_args[] = {
 #if CONFIG_DENOISE
   &g_av1_codec_arg_defs.denoise_noise_level,
   &g_av1_codec_arg_defs.denoise_block_size,
+  &g_av1_codec_arg_defs.enable_dnl_denoising,
 #endif  // CONFIG_DENOISE
   &g_av1_codec_arg_defs.max_reference_frames,
   &g_av1_codec_arg_defs.reduced_reference_set,
@@ -403,23 +417,22 @@ const arg_def_t *av1_args[] = {
   &g_av1_codec_arg_defs.set_tier_mask,
   &g_av1_codec_arg_defs.set_min_cr,
   &g_av1_codec_arg_defs.vbr_corpus_complexity_lap,
-  &g_av1_codec_arg_defs.bitdeptharg,
-  &g_av1_codec_arg_defs.inbitdeptharg,
   &g_av1_codec_arg_defs.input_chroma_subsampling_x,
   &g_av1_codec_arg_defs.input_chroma_subsampling_y,
-  &g_av1_codec_arg_defs.sframe_dist,
-  &g_av1_codec_arg_defs.sframe_mode,
-  &g_av1_codec_arg_defs.save_as_annexb,
 #if CONFIG_TUNE_VMAF
   &g_av1_codec_arg_defs.vmaf_model_path,
 #endif
-  NULL
+  NULL,
+};
+
+const arg_def_t *av1_key_val_args[] = {
+  NULL,
 };
 
 static const arg_def_t *no_args[] = { NULL };
 
 static void show_help(FILE *fout, int shorthelp) {
-  fprintf(fout, "Usage: %s <options> -o dst_filename src_filename \n",
+  fprintf(fout, "Usage: %s <options> -o dst_filename src_filename\n",
           exec_name);
 
   if (shorthelp) {
@@ -437,7 +450,8 @@ static void show_help(FILE *fout, int shorthelp) {
   arg_show_usage(fout, kf_args);
 #if CONFIG_AV1_ENCODER
   fprintf(fout, "\nAV1 Specific Options:\n");
-  arg_show_usage(fout, av1_args);
+  arg_show_usage(fout, av1_ctrl_args);
+  arg_show_usage(fout, av1_key_val_args);
 #endif
   fprintf(fout,
           "\nStream timebase (--timebase):\n"
@@ -463,6 +477,7 @@ void usage_exit(void) {
 
 #if CONFIG_AV1_ENCODER
 #define ARG_CTRL_CNT_MAX NELEMENTS(av1_arg_ctrl_map)
+#define ARG_KEY_VAL_CNT_MAX NELEMENTS(av1_key_val_args)
 #endif
 
 #if !CONFIG_WEBM_IO
@@ -480,6 +495,8 @@ struct stream_config {
   stereo_format_t stereo_fmt;
   int arg_ctrls[ARG_CTRL_CNT_MAX][2];
   int arg_ctrl_cnt;
+  const char *arg_key_vals[ARG_KEY_VAL_CNT_MAX][2];
+  int arg_key_val_cnt;
   int write_webm;
   const char *film_grain_filename;
   int write_ivf;
@@ -593,6 +610,8 @@ static void parse_global_config(struct AvxEncoderConfig *global, char ***argv) {
       global->usage = AOM_USAGE_GOOD_QUALITY;  // Good quality usage
     } else if (arg_match(&arg, &g_av1_codec_arg_defs.rt_dl, argi)) {
       global->usage = AOM_USAGE_REALTIME;  // Real-time usage
+    } else if (arg_match(&arg, &g_av1_codec_arg_defs.ai_dl, argi)) {
+      global->usage = AOM_USAGE_ALL_INTRA;  // All intra usage
     } else if (arg_match(&arg, &g_av1_codec_arg_defs.use_yv12, argi)) {
       global->color_type = YV12;
     } else if (arg_match(&arg, &g_av1_codec_arg_defs.use_i420, argi)) {
@@ -662,6 +681,11 @@ static void parse_global_config(struct AvxEncoderConfig *global, char ***argv) {
 
   if (global->usage == AOM_USAGE_REALTIME && global->passes > 1) {
     warn("Enforcing one-pass encoding in realtime mode\n");
+    global->passes = 1;
+  }
+
+  if (global->usage == AOM_USAGE_ALL_INTRA && global->passes > 1) {
+    warn("Enforcing one-pass encoding in all intra mode\n");
     global->passes = 1;
   }
 }
@@ -787,7 +811,7 @@ static void set_config_arg_ctrls(struct stream_config *config, int key,
   // so we simply append it.
   if (key == AV1E_SET_TARGET_SEQ_LEVEL_IDX) {
     j = config->arg_ctrl_cnt;
-    assert(j < (int)ARG_CTRL_CNT_MAX);
+    assert(j < ARG_CTRL_CNT_MAX);
     config->arg_ctrls[j][0] = key;
     config->arg_ctrls[j][1] = arg_parse_enum_or_int(arg);
     ++config->arg_ctrl_cnt;
@@ -801,7 +825,7 @@ static void set_config_arg_ctrls(struct stream_config *config, int key,
     if (config->arg_ctrls[j][0] == key) break;
 
   /* Update/insert */
-  assert(j < (int)ARG_CTRL_CNT_MAX);
+  assert(j < ARG_CTRL_CNT_MAX);
   config->arg_ctrls[j][0] = key;
   config->arg_ctrls[j][1] = arg_parse_enum_or_int(arg);
 
@@ -809,7 +833,45 @@ static void set_config_arg_ctrls(struct stream_config *config, int key,
     warn("auto-alt-ref > 1 is deprecated... setting auto-alt-ref=1\n");
     config->arg_ctrls[j][1] = 1;
   }
+
   if (j == config->arg_ctrl_cnt) config->arg_ctrl_cnt++;
+}
+
+static void set_config_arg_key_vals(struct stream_config *config,
+                                    const char *name, const struct arg *arg) {
+  int j;
+  const char *val = arg->val;
+  // For target level, the settings should accumulate rather than overwrite,
+  // so we simply append it.
+  if (strcmp(name, "target-seq-level-idx") == 0) {
+    j = config->arg_key_val_cnt;
+    assert(j < ARG_KEY_VAL_CNT_MAX);
+    config->arg_key_vals[j][0] = name;
+    config->arg_key_vals[j][1] = val;
+    ++config->arg_key_val_cnt;
+    return;
+  }
+
+  /* Point either to the next free element or the first instance of this
+   * option.
+   */
+  for (j = 0; j < config->arg_key_val_cnt; j++)
+    if (strcmp(name, config->arg_key_vals[j][0]) == 0) break;
+
+  /* Update/insert */
+  assert(j < ARG_KEY_VAL_CNT_MAX);
+  config->arg_key_vals[j][0] = name;
+  config->arg_key_vals[j][1] = val;
+
+  if (strcmp(name, g_av1_codec_arg_defs.auto_altref.long_name) == 0) {
+    int auto_altref = arg_parse_int(arg);
+    if (auto_altref > 1) {
+      warn("auto-alt-ref > 1 is deprecated... setting auto-alt-ref=1\n");
+      config->arg_key_vals[j][1] = "1";
+    }
+  }
+
+  if (j == config->arg_key_val_cnt) config->arg_key_val_cnt++;
 }
 
 static int parse_stream_params(struct AvxEncoderConfig *global,
@@ -817,6 +879,7 @@ static int parse_stream_params(struct AvxEncoderConfig *global,
   char **argi, **argj;
   struct arg arg;
   static const arg_def_t **ctrl_args = no_args;
+  static const arg_def_t **key_val_args = no_args;
   static const int *ctrl_args_map = NULL;
   struct stream_config *config = &stream->config;
   int eos_mark_found = 0;
@@ -828,8 +891,9 @@ static int parse_stream_params(struct AvxEncoderConfig *global,
   } else if (strcmp(get_short_name_by_aom_encoder(global->codec), "av1") == 0) {
     // TODO(jingning): Reuse AV1 specific encoder configuration parameters.
     // Consider to expand this set for AV1 encoder control.
-    ctrl_args = av1_args;
+    ctrl_args = av1_ctrl_args;
     ctrl_args_map = av1_arg_ctrl_map;
+    key_val_args = av1_key_val_args;
 #endif
   }
 
@@ -1027,13 +1091,24 @@ static int parse_stream_params(struct AvxEncoderConfig *global,
       }
     } else {
       int i, match = 0;
-      for (i = 0; ctrl_args[i]; i++) {
-        if (arg_match(&arg, ctrl_args[i], argi)) {
-          match = 1;
-          if (ctrl_args_map) {
+      // check if the control ID API supports this arg
+      if (ctrl_args_map) {
+        for (i = 0; ctrl_args[i]; i++) {
+          if (arg_match(&arg, ctrl_args[i], argi)) {
+            match = 1;
             set_config_arg_ctrls(config, ctrl_args_map[i], &arg);
+            break;
           }
-          break;
+        }
+      }
+      if (!match) {
+        // check if the key & value API supports this arg
+        for (i = 0; key_val_args[i]; i++) {
+          if (arg_match(&arg, key_val_args[i], argi)) {
+            match = 1;
+            set_config_arg_key_vals(config, key_val_args[i]->long_name, &arg);
+            break;
+          }
         }
       }
       if (!match) argj++;
@@ -1044,6 +1119,19 @@ static int parse_stream_params(struct AvxEncoderConfig *global,
   if (global->usage == AOM_USAGE_REALTIME && config->cfg.g_lag_in_frames != 0) {
     warn("non-zero lag-in-frames option ignored in realtime mode.\n");
     config->cfg.g_lag_in_frames = 0;
+  }
+
+  if (global->usage == AOM_USAGE_ALL_INTRA) {
+    if (config->cfg.g_lag_in_frames != 0) {
+      warn("non-zero lag-in-frames option ignored in all intra mode.\n");
+      config->cfg.g_lag_in_frames = 0;
+    }
+    if (config->cfg.kf_max_dist != 0) {
+      warn(
+          "non-zero max key frame distance option ignored in all intra "
+          "mode.\n");
+      config->cfg.kf_max_dist = 0;
+    }
   }
   return eos_mark_found;
 }
@@ -1331,6 +1419,15 @@ static void initialize_encoder(struct stream_state *stream,
       fprintf(stderr, "Error: Tried to set control %d = %d\n", ctrl, value);
 
     ctx_exit_on_error(&stream->encoder, "Failed to control codec");
+  }
+
+  for (i = 0; i < stream->config.arg_key_val_cnt; i++) {
+    const char *name = stream->config.arg_key_vals[i][0];
+    const char *val = stream->config.arg_key_vals[i][1];
+    if (aom_codec_set_option(&stream->encoder, name, val))
+      fprintf(stderr, "Error: Tried to set option %s = %s\n", name, val);
+
+    ctx_exit_on_error(&stream->encoder, "Failed to set codec option");
   }
 
 #if CONFIG_TUNE_VMAF

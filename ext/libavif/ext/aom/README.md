@@ -46,7 +46,7 @@ README.md                {#LREADME}
 
 ### Prerequisites {#prerequisites}
 
- 1. [CMake](https://cmake.org) version 3.5 or higher.
+ 1. [CMake](https://cmake.org) version 3.6 or higher.
  2. [Git](https://git-scm.com/).
  3. [Perl](https://www.perl.org/).
  4. For x86 targets, [yasm](http://yasm.tortall.net/), which is preferred, or a
@@ -326,7 +326,7 @@ you can use it with the encoder:
 ~~~
 
 Please note that the default VMAF model
-("/usr/local/share/model/vmaf_v0.6.1.pkl")
+("/usr/local/share/model/vmaf_v0.6.1.json")
 will be used unless you set the following flag when running the encoder:
 
 ~~~

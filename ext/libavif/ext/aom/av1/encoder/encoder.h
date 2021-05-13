@@ -63,6 +63,9 @@
 #if CONFIG_AV1_TEMPORAL_DENOISING
 #include "av1/encoder/av1_temporal_denoiser.h"
 #endif
+#if CONFIG_TUNE_BUTTERAUGLI
+#include "av1/encoder/tune_butteraugli.h"
+#endif
 
 #include "aom/internal/aom_codec_internal.h"
 #include "aom_util/aom_thread.h"
@@ -100,7 +103,9 @@ enum {
   GOOD,
   // Realtime Fast Encoding. Will force some restrictions on bitrate
   // constraints.
-  REALTIME
+  REALTIME,
+  // All intra mode. All the frames are coded as intra frames.
+  ALLINTRA
 } UENUM1BYTE(MODE);
 
 enum {
@@ -154,13 +159,6 @@ enum {
 /*!\cond */
 
 typedef enum {
-  COST_UPD_SB,
-  COST_UPD_SBROW,
-  COST_UPD_TILE,
-  COST_UPD_OFF,
-} COST_UPDATE_TYPE;
-
-typedef enum {
   MOD_FP,           // First pass
   MOD_TF,           // Temporal filtering
   MOD_TPL,          // TPL
@@ -173,6 +171,16 @@ typedef enum {
 } MULTI_THREADED_MODULES;
 
 /*!\endcond */
+
+/*!\enum COST_UPDATE_TYPE
+ * \brief This enum controls how often the entropy costs should be updated.
+ */
+typedef enum {
+  COST_UPD_SB,    /*!< Update every sb. */
+  COST_UPD_SBROW, /*!< Update every sb rows inside a tile. */
+  COST_UPD_TILE,  /*!< Update every tile. */
+  COST_UPD_OFF,   /*!< Turn off cost updates. */
+} COST_UPDATE_TYPE;
 
 /*!
  * \brief Encoder config related to resize.
@@ -247,6 +255,10 @@ typedef struct {
    * Flag to indicate if CFL uv intra mode should be enabled.
    */
   bool enable_cfl_intra;
+  /*!
+   * Flag to indicate if D45 to D203 intra prediction modes should be enabled.
+   */
+  bool enable_diagonal_intra;
   /*!
    * Flag to indicate if delta angles for directional intra prediction should be
    * enabled.
@@ -614,6 +626,8 @@ typedef struct {
   COST_UPDATE_TYPE mode;
   // Indicates the update frequency for mv costs.
   COST_UPDATE_TYPE mv;
+  // Indicates the update frequency for dv costs.
+  COST_UPDATE_TYPE dv;
 } CostUpdateFreq;
 
 typedef struct {
@@ -877,6 +891,8 @@ typedef struct AV1EncoderConfig {
   float noise_level;
   // Indicates the the denoisers block size.
   int noise_block_size;
+  // Indicates whether to apply denoising to the frame to be encoded
+  int enable_dnl_denoising;
 #endif
 
 #if CONFIG_AV1_TEMPORAL_DENOISING
@@ -1292,6 +1308,7 @@ typedef struct ThreadData {
   int32_t num_64x64_blocks;
   PICK_MODE_CONTEXT *firstpass_ctx;
   TemporalFilterData tf_data;
+  TplTxfmStats tpl_txfm_stats;
 } ThreadData;
 
 struct EncWorkerData;
@@ -2035,9 +2052,52 @@ typedef struct {
 } CoeffBufferPool;
 
 /*!
+ * \brief Top level primary encoder structure
+ */
+typedef struct AV1_PRIMARY {
+  /*!
+   * Encode stage top level structure
+   */
+  struct AV1_COMP *cpi;
+
+  /*!
+   * Lookahead processing stage top level structure
+   */
+  struct AV1_COMP *cpi_lap;
+
+  /*!
+   * Look-ahead context.
+   */
+  struct lookahead_ctx *lookahead;
+
+  /*!
+   * Sequence parameters have been transmitted already and locked
+   * or not. Once locked av1_change_config cannot change the seq
+   * parameters.
+   */
+  int seq_params_locked;
+
+  /*!
+   * Pointer to internal utility functions that manipulate aom_codec_* data
+   * structures.
+   */
+  struct aom_codec_pkt_list *output_pkt_list;
+
+  /*!
+   * When set, indicates that internal ARFs are enabled.
+   */
+  int internal_altref_allowed;
+} AV1_PRIMARY;
+
+/*!
  * \brief Top level encoder structure.
  */
 typedef struct AV1_COMP {
+  /*!
+   * Pointer to top level primary encoder structure
+   */
+  AV1_PRIMARY *ppi;
+
   /*!
    * Quantization and dequantization parameters for internal quantizer setup
    * in the encoder.
@@ -2083,11 +2143,6 @@ typedef struct AV1_COMP {
   AV1EncoderConfig oxcf;
 
   /*!
-   * Look-ahead context.
-   */
-  struct lookahead_ctx *lookahead;
-
-  /*!
    * When set, this flag indicates that the current frame is a forward keyframe.
    */
   int no_show_fwd_kf;
@@ -2107,7 +2162,10 @@ typedef struct AV1_COMP {
 
   /*!
    * Pointer to the frame buffer holding the last raw source frame.
-   * NULL for first frame and alt_ref frames.
+   * last_source is NULL for the following cases:
+   * 1) First frame
+   * 2) Alt-ref frames
+   * 3) All frames for all-intra frame encoding.
    */
   YV12_BUFFER_CONFIG *last_source;
 
@@ -2241,12 +2299,6 @@ typedef struct AV1_COMP {
   double framerate;
 
   /*!
-   * Pointer to internal utility functions that manipulate aom_codec_* data
-   * structures.
-   */
-  struct aom_codec_pkt_list *output_pkt_list;
-
-  /*!
    * Bitmask indicating which reference buffers may be referenced by this frame.
    */
   int ref_frame_flags;
@@ -2303,6 +2355,11 @@ typedef struct AV1_COMP {
    * Information related to a gf group.
    */
   GF_GROUP gf_group;
+
+  /*!
+   * The frame processing order within a GOP.
+   */
+  unsigned char gf_frame_index;
 
   /*!
    * Track prior gf group state.
@@ -2424,13 +2481,6 @@ typedef struct AV1_COMP {
   TokenInfo token_info;
 
   /*!
-   * Sequence parameters have been transmitted already and locked
-   * or not. Once locked av1_change_config cannot change the seq
-   * parameters.
-   */
-  int seq_params_locked;
-
-  /*!
    * VARIANCE_AQ segment map refresh.
    */
   int vaq_refresh;
@@ -2458,19 +2508,9 @@ typedef struct AV1_COMP {
   int existing_fb_idx_to_show;
 
   /*!
-   * When set, indicates that internal ARFs are enabled.
-   */
-  int internal_altref_allowed;
-
-  /*!
    * A flag to indicate if intrabc is ever used in current frame.
    */
   int intrabc_used;
-
-  /*!
-   * Tables to calculate IntraBC MV cost.
-   */
-  IntraBCMVCosts dv_costs;
 
   /*!
    * Mark which ref frames can be skipped for encoding current frame during RDO.
@@ -2579,6 +2619,13 @@ typedef struct AV1_COMP {
   TuneVMAFInfo vmaf_info;
 #endif
 
+#if CONFIG_TUNE_BUTTERAUGLI
+  /*!
+   * Parameters for Butteraugli tuning.
+   */
+  TuneButteraugliInfo butteraugli_info;
+#endif
+
   /*!
    * Indicates whether to use SVC.
    */
@@ -2653,6 +2700,12 @@ typedef struct AV1_COMP {
    * Block size of first pass encoding
    */
   BLOCK_SIZE fp_block_size;
+
+  /*!
+   * The counter of encoded super block, used to differentiate block names.
+   * This number starts from 0 and increases whenever a super block is encoded.
+   */
+  int sb_counter;
 } AV1_COMP;
 
 /*!
@@ -2730,14 +2783,20 @@ typedef struct {
 // Must not be called more than once.
 void av1_initialize_enc(void);
 
-struct AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf,
+struct AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, AV1EncoderConfig *oxcf,
                                        BufferPool *const pool,
                                        FIRSTPASS_STATS *frame_stats_buf,
                                        COMPRESSOR_STAGE stage,
                                        int num_lap_buffers,
                                        int lap_lag_in_frames,
                                        STATS_BUFFER_CTX *stats_buf_context);
+
+struct AV1_PRIMARY *av1_create_primary_compressor(
+    struct aom_codec_pkt_list *pkt_list_head);
+
 void av1_remove_compressor(AV1_COMP *cpi);
+
+void av1_remove_primary_compressor(AV1_PRIMARY *ppi);
 
 void av1_change_config(AV1_COMP *cpi, const AV1EncoderConfig *oxcf);
 
@@ -2904,7 +2963,8 @@ ticks_to_timebase_units(const aom_rational64_t *timestamp_ratio, int64_t n) {
 
 static INLINE int frame_is_kf_gf_arf(const AV1_COMP *cpi) {
   const GF_GROUP *const gf_group = &cpi->gf_group;
-  const FRAME_UPDATE_TYPE update_type = gf_group->update_type[gf_group->index];
+  const FRAME_UPDATE_TYPE update_type =
+      gf_group->update_type[cpi->gf_frame_index];
 
   return frame_is_intra_only(&cpi->common) || update_type == ARF_UPDATE ||
          update_type == GF_UPDATE;
@@ -2921,17 +2981,6 @@ static INLINE const YV12_BUFFER_CONFIG *get_ref_frame_yv12_buf(
     const AV1_COMMON *const cm, MV_REFERENCE_FRAME ref_frame) {
   const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
   return buf != NULL ? &buf->buf : NULL;
-}
-
-static INLINE int enc_is_ref_frame_buf(const AV1_COMMON *const cm,
-                                       const RefCntBuffer *const frame_buf) {
-  MV_REFERENCE_FRAME ref_frame;
-  for (ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
-    const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
-    if (buf == NULL) continue;
-    if (frame_buf == buf) break;
-  }
-  return (ref_frame <= ALTREF_FRAME);
 }
 
 static INLINE void alloc_frame_mvs(AV1_COMMON *const cm, RefCntBuffer *buf) {
@@ -3194,9 +3243,9 @@ static INLINE int is_frame_eligible_for_ref_pruning(const GF_GROUP *gf_group,
 }
 
 // Get update type of the current frame.
-static INLINE FRAME_UPDATE_TYPE
-get_frame_update_type(const GF_GROUP *gf_group) {
-  return gf_group->update_type[gf_group->index];
+static INLINE FRAME_UPDATE_TYPE get_frame_update_type(const GF_GROUP *gf_group,
+                                                      int gf_frame_index) {
+  return gf_group->update_type[gf_frame_index];
 }
 
 static INLINE int av1_pixels_to_mi(int pixels) {

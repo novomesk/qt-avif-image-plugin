@@ -44,6 +44,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t skip;
   arg_def_t good_dl;
   arg_def_t rt_dl;
+  arg_def_t ai_dl;
   arg_def_t quietarg;
   arg_def_t verbosearg;
   arg_def_t psnrarg;
@@ -153,6 +154,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t enable_smooth_intra;
   arg_def_t enable_paeth_intra;
   arg_def_t enable_cfl_intra;
+  arg_def_t enable_diagonal_intra;
   arg_def_t force_video_mode;
   arg_def_t enable_obmc;
   arg_def_t enable_overlay;
@@ -182,6 +184,7 @@ typedef struct av1_codec_arg_definitions {
 #if CONFIG_DENOISE
   arg_def_t denoise_noise_level;
   arg_def_t denoise_block_size;
+  arg_def_t enable_dnl_denoising;
 #endif
   arg_def_t enable_ref_frame_mvs;
   arg_def_t frame_parallel_decoding;

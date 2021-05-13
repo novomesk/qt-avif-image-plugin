@@ -78,6 +78,13 @@ static AOM_INLINE void alloc_compressor_data(AV1_COMP *cpi) {
   CHECK_MEM_ERROR(cm, cpi->td.mb.mv_costs,
                   (MvCosts *)aom_calloc(1, sizeof(MvCosts)));
 
+  if (cpi->td.mb.dv_costs) {
+    aom_free(cpi->td.mb.dv_costs);
+    cpi->td.mb.dv_costs = NULL;
+  }
+  CHECK_MEM_ERROR(cm, cpi->td.mb.dv_costs,
+                  (IntraBCMVCosts *)aom_malloc(sizeof(*cpi->td.mb.dv_costs)));
+
   av1_setup_shared_coeff_buffer(&cpi->common, &cpi->td.shared_coeff_buf);
   av1_setup_sms_tree(cpi, &cpi->td);
   cpi->td.firstpass_ctx =
@@ -103,64 +110,6 @@ static AOM_INLINE void realloc_segmentation_maps(AV1_COMP *cpi) {
   aom_free(cpi->active_map.map);
   CHECK_MEM_ERROR(cm, cpi->active_map.map,
                   aom_calloc(mi_params->mi_rows * mi_params->mi_cols, 1));
-}
-
-static AOM_INLINE void set_tpl_stats_block_size(uint8_t *block_mis_log2,
-                                                uint8_t *tpl_bsize_1d) {
-  // tpl stats bsize: 2 means 16x16
-  *block_mis_log2 = 2;
-  // Block size used in tpl motion estimation
-  *tpl_bsize_1d = 16;
-  // MIN_TPL_BSIZE_1D = 16;
-  assert(*tpl_bsize_1d >= 16);
-}
-
-static AOM_INLINE void setup_tpl_buffers(AV1_COMMON *const cm,
-                                         TplParams *const tpl_data,
-                                         int lag_in_frames) {
-  CommonModeInfoParams *const mi_params = &cm->mi_params;
-  set_tpl_stats_block_size(&tpl_data->tpl_stats_block_mis_log2,
-                           &tpl_data->tpl_bsize_1d);
-  const uint8_t block_mis_log2 = tpl_data->tpl_stats_block_mis_log2;
-  tpl_data->border_in_pixels =
-      ALIGN_POWER_OF_TWO(tpl_data->tpl_bsize_1d + 2 * AOM_INTERP_EXTEND, 5);
-
-  for (int frame = 0; frame < MAX_LENGTH_TPL_FRAME_STATS; ++frame) {
-    const int mi_cols =
-        ALIGN_POWER_OF_TWO(mi_params->mi_cols, MAX_MIB_SIZE_LOG2);
-    const int mi_rows =
-        ALIGN_POWER_OF_TWO(mi_params->mi_rows, MAX_MIB_SIZE_LOG2);
-
-    tpl_data->tpl_stats_buffer[frame].is_valid = 0;
-    tpl_data->tpl_stats_buffer[frame].width = mi_cols >> block_mis_log2;
-    tpl_data->tpl_stats_buffer[frame].height = mi_rows >> block_mis_log2;
-    tpl_data->tpl_stats_buffer[frame].stride =
-        tpl_data->tpl_stats_buffer[frame].width;
-    tpl_data->tpl_stats_buffer[frame].mi_rows = mi_params->mi_rows;
-    tpl_data->tpl_stats_buffer[frame].mi_cols = mi_params->mi_cols;
-  }
-  tpl_data->tpl_frame = &tpl_data->tpl_stats_buffer[REF_FRAMES + 1];
-
-  // If lag_in_frames <= 1, TPL module is not invoked. Hence tpl recon and
-  // stats buffers are not allocated.
-  if (lag_in_frames <= 1) return;
-
-  // TODO(aomedia:2873): Explore the allocation of tpl buffers based on
-  // lag_in_frames.
-  for (int frame = 0; frame < MAX_LAG_BUFFERS; ++frame) {
-    CHECK_MEM_ERROR(
-        cm, tpl_data->tpl_stats_pool[frame],
-        aom_calloc(tpl_data->tpl_stats_buffer[frame].width *
-                       tpl_data->tpl_stats_buffer[frame].height,
-                   sizeof(*tpl_data->tpl_stats_buffer[frame].tpl_stats_ptr)));
-    if (aom_alloc_frame_buffer(
-            &tpl_data->tpl_rec_pool[frame], cm->width, cm->height,
-            cm->seq_params.subsampling_x, cm->seq_params.subsampling_y,
-            cm->seq_params.use_highbitdepth, tpl_data->border_in_pixels,
-            cm->features.byte_alignment))
-      aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
-                         "Failed to allocate frame buffer");
-  }
 }
 
 static AOM_INLINE void alloc_obmc_buffers(OBMCBuffer *obmc_buffer,
@@ -253,10 +202,14 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
 #if CONFIG_TUNE_VMAF
   aom_free(cpi->vmaf_info.rdmult_scaling_factors);
   cpi->vmaf_info.rdmult_scaling_factors = NULL;
-
-#if CONFIG_USE_VMAF_RC
-  aom_close_vmaf_model_rc(cpi->vmaf_info.vmaf_model);
+  aom_close_vmaf_model(cpi->vmaf_info.vmaf_model);
 #endif
+
+#if CONFIG_TUNE_BUTTERAUGLI
+  aom_free(cpi->butteraugli_info.rdmult_scaling_factors);
+  cpi->butteraugli_info.rdmult_scaling_factors = NULL;
+  aom_free_frame_buffer(&cpi->butteraugli_info.source);
+  aom_free_frame_buffer(&cpi->butteraugli_info.resized_source);
 #endif
 
   release_obmc_buffers(&cpi->td.mb.obmc_buffer);
@@ -264,6 +217,11 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
   if (cpi->td.mb.mv_costs) {
     aom_free(cpi->td.mb.mv_costs);
     cpi->td.mb.mv_costs = NULL;
+  }
+
+  if (cpi->td.mb.dv_costs) {
+    aom_free(cpi->td.mb.dv_costs);
+    cpi->td.mb.dv_costs = NULL;
   }
 
   aom_free(cpi->td.mb.inter_modes_info);
@@ -298,7 +256,6 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
   aom_free_frame_buffer(&cpi->scaled_source);
   aom_free_frame_buffer(&cpi->scaled_last_source);
   aom_free_frame_buffer(&cpi->alt_ref_buffer);
-  av1_lookahead_destroy(cpi->lookahead);
 
   free_token_info(token_info);
 
@@ -367,7 +324,7 @@ static AOM_INLINE void alloc_altref_frame_buffer(AV1_COMP *cpi) {
           oxcf->frm_dim_cfg.height, seq_params->subsampling_x,
           seq_params->subsampling_y, seq_params->use_highbitdepth,
           cpi->oxcf.border_in_pixels, cm->features.byte_alignment, NULL, NULL,
-          NULL))
+          NULL, cpi->oxcf.tool_cfg.enable_global_motion))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate altref buffer");
 }
@@ -379,32 +336,49 @@ static AOM_INLINE void alloc_util_frame_buffers(AV1_COMP *cpi) {
   if (aom_realloc_frame_buffer(
           &cpi->last_frame_uf, cm->width, cm->height, seq_params->subsampling_x,
           seq_params->subsampling_y, seq_params->use_highbitdepth,
-          cpi->oxcf.border_in_pixels, byte_alignment, NULL, NULL, NULL))
+          cpi->oxcf.border_in_pixels, byte_alignment, NULL, NULL, NULL, 0))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate last frame buffer");
 
-  if (aom_realloc_frame_buffer(
-          &cpi->trial_frame_rst, cm->superres_upscaled_width,
-          cm->superres_upscaled_height, seq_params->subsampling_x,
-          seq_params->subsampling_y, seq_params->use_highbitdepth,
-          AOM_RESTORATION_FRAME_BORDER, byte_alignment, NULL, NULL, NULL))
-    aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
-                       "Failed to allocate trial restored frame buffer");
+  // The frame buffer trial_frame_rst is used during loop restoration filter
+  // search. Hence it is allocated only when loop restoration is used.
+  const int use_restoration = cm->seq_params.enable_restoration &&
+                              !cm->features.all_lossless &&
+                              !cm->tiles.large_scale;
+  if (use_restoration) {
+    if (aom_realloc_frame_buffer(
+            &cpi->trial_frame_rst, cm->superres_upscaled_width,
+            cm->superres_upscaled_height, seq_params->subsampling_x,
+            seq_params->subsampling_y, seq_params->use_highbitdepth,
+            AOM_RESTORATION_FRAME_BORDER, byte_alignment, NULL, NULL, NULL, 0))
+      aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
+                         "Failed to allocate trial restored frame buffer");
+  }
 
   if (aom_realloc_frame_buffer(
           &cpi->scaled_source, cm->width, cm->height, seq_params->subsampling_x,
           seq_params->subsampling_y, seq_params->use_highbitdepth,
-          cpi->oxcf.border_in_pixels, byte_alignment, NULL, NULL, NULL))
+          cpi->oxcf.border_in_pixels, byte_alignment, NULL, NULL, NULL,
+          cpi->oxcf.tool_cfg.enable_global_motion))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate scaled source buffer");
 
-  if (aom_realloc_frame_buffer(
-          &cpi->scaled_last_source, cm->width, cm->height,
-          seq_params->subsampling_x, seq_params->subsampling_y,
-          seq_params->use_highbitdepth, cpi->oxcf.border_in_pixels,
-          byte_alignment, NULL, NULL, NULL))
-    aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
-                       "Failed to allocate scaled last source buffer");
+  // The frame buffer cpi->scaled_last_source is used to hold the previous
+  // source frame information. As the previous source frame buffer allocation in
+  // the lookahead queue is avoided for all-intra frame encoding,
+  // cpi->unscaled_last_source will be NULL in such cases. As
+  // cpi->unscaled_last_source is NULL, cpi->scaled_last_source will not be used
+  // for all-intra frame encoding. Hence, the buffer is allocated conditionally.
+  if (cpi->oxcf.kf_cfg.key_freq_max > 0) {
+    if (aom_realloc_frame_buffer(
+            &cpi->scaled_last_source, cm->width, cm->height,
+            seq_params->subsampling_x, seq_params->subsampling_y,
+            seq_params->use_highbitdepth, cpi->oxcf.border_in_pixels,
+            byte_alignment, NULL, NULL, NULL,
+            cpi->oxcf.tool_cfg.enable_global_motion))
+      aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
+                         "Failed to allocate scaled last source buffer");
+  }
 }
 
 static AOM_INLINE YV12_BUFFER_CONFIG *realloc_and_scale_source(
@@ -421,7 +395,8 @@ static AOM_INLINE YV12_BUFFER_CONFIG *realloc_and_scale_source(
           &cpi->scaled_source, scaled_width, scaled_height,
           cm->seq_params.subsampling_x, cm->seq_params.subsampling_y,
           cm->seq_params.use_highbitdepth, AOM_BORDER_IN_PIXELS,
-          cm->features.byte_alignment, NULL, NULL, NULL))
+          cm->features.byte_alignment, NULL, NULL, NULL,
+          cpi->oxcf.tool_cfg.enable_global_motion))
     aom_internal_error(&cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to reallocate scaled source buffer");
   assert(cpi->scaled_source.y_crop_width == scaled_width);

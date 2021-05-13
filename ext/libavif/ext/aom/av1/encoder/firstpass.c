@@ -177,8 +177,9 @@ static int get_num_mbs(const BLOCK_SIZE fp_block_size,
 }
 
 void av1_end_first_pass(AV1_COMP *cpi) {
-  if (cpi->twopass.stats_buf_ctx->total_stats)
-    output_stats(cpi->twopass.stats_buf_ctx->total_stats, cpi->output_pkt_list);
+  if (cpi->twopass.stats_buf_ctx->total_stats && !cpi->lap_enabled)
+    output_stats(cpi->twopass.stats_buf_ctx->total_stats,
+                 cpi->ppi->output_pkt_list);
 }
 
 static aom_variance_fn_t get_block_variance_fn(BLOCK_SIZE bsize) {
@@ -482,9 +483,11 @@ static int firstpass_intra_prediction(
 
   const int hbd = is_cur_buf_hbd(xd);
   const int stride = x->plane[0].src.stride;
-  uint8_t *buf = x->plane[0].src.buf;
-  for (int r8 = 0; r8 < 2; ++r8) {
-    for (int c8 = 0; c8 < 2; ++c8) {
+  const int num_8x8_rows = block_size_high[fp_block_size] / 8;
+  const int num_8x8_cols = block_size_wide[fp_block_size] / 8;
+  const uint8_t *buf = x->plane[0].src.buf;
+  for (int r8 = 0; r8 < num_8x8_rows; ++r8) {
+    for (int c8 = 0; c8 < num_8x8_cols; ++c8) {
       stats->frame_avg_wavelet_energy += av1_haar_ac_sad_8x8_uint8_input(
           buf + c8 * 8 + r8 * 8 * stride, stride, hbd);
     }
@@ -635,7 +638,7 @@ static int firstpass_inter_prediction(
   raw_motion_err_list[raw_motion_err_counts] = raw_motion_error;
 
   // TODO(pengchong): Replace the hard-coded threshold
-  if (raw_motion_error > LOW_MOTION_ERROR_THRESH) {
+  if (raw_motion_error > LOW_MOTION_ERROR_THRESH || cpi->oxcf.speed <= 2) {
     // Test last reference frame using the previous best mv as the
     // starting point (best reference) for the search.
     first_pass_motion_search(cpi, x, best_ref_mv, &mv, &motion_error);
@@ -850,7 +853,8 @@ static void update_firstpass_stats(AV1_COMP *cpi,
   // We will store the stats inside the persistent twopass struct (and NOT the
   // local variable 'fps'), and then cpi->output_pkt_list will point to it.
   *this_frame_stats = fps;
-  output_stats(this_frame_stats, cpi->output_pkt_list);
+  if (!cpi->lap_enabled)
+    output_stats(this_frame_stats, cpi->ppi->output_pkt_list);
   if (cpi->twopass.stats_buf_ctx->total_stats != NULL) {
     av1_accumulate_stats(cpi->twopass.stats_buf_ctx->total_stats, &fps);
   }
@@ -980,11 +984,27 @@ static void first_pass_tiles(AV1_COMP *cpi, const BLOCK_SIZE fp_block_size) {
   AV1_COMMON *const cm = &cpi->common;
   const int tile_cols = cm->tiles.cols;
   const int tile_rows = cm->tiles.rows;
+  const int num_planes = av1_num_planes(&cpi->common);
+  for (int plane = 0; plane < num_planes; plane++) {
+    const int subsampling_xy =
+        plane ? cm->seq_params.subsampling_x + cm->seq_params.subsampling_y : 0;
+    const int sb_size = MAX_SB_SQUARE >> subsampling_xy;
+    CHECK_MEM_ERROR(
+        cm, cpi->td.mb.plane[plane].src_diff,
+        (int16_t *)aom_memalign(
+            32, sizeof(*cpi->td.mb.plane[plane].src_diff) * sb_size));
+  }
   for (int tile_row = 0; tile_row < tile_rows; ++tile_row) {
     for (int tile_col = 0; tile_col < tile_cols; ++tile_col) {
       TileDataEnc *const tile_data =
           &cpi->tile_data[tile_row * tile_cols + tile_col];
       first_pass_tile(cpi, &cpi->td, tile_data, fp_block_size);
+    }
+  }
+  for (int plane = 0; plane < num_planes; plane++) {
+    if (cpi->td.mb.plane[plane].src_diff) {
+      aom_free(cpi->td.mb.plane[plane].src_diff);
+      cpi->td.mb.plane[plane].src_diff = NULL;
     }
   }
 }
@@ -1024,7 +1044,7 @@ void av1_first_pass_row(AV1_COMP *cpi, ThreadData *td, TileDataEnc *tile_data,
       (current_frame->frame_number % FIRST_PASS_ALT_REF_DISTANCE);
   if (alt_ref_offset < FIRST_PASS_ALT_REF_DISTANCE) {
     const struct lookahead_entry *const alt_ref_frame_buffer =
-        av1_lookahead_peek(cpi->lookahead, alt_ref_offset,
+        av1_lookahead_peek(cpi->ppi->lookahead, alt_ref_offset,
                            cpi->compressor_stage);
     if (alt_ref_frame_buffer != NULL) {
       alt_ref_frame = &alt_ref_frame_buffer->img;

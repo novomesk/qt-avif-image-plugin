@@ -81,20 +81,6 @@ typedef struct RD_OPT {
   double r0;
 } RD_OPT;
 
-typedef struct {
-  // Cost of transmitting the actual motion vector.
-  // mv_component[0][i] is the cost of motion vector with horizontal component
-  // (mv_row) equal to i - MV_MAX.
-  // mv_component[1][i] is the cost of motion vector with vertical component
-  // (mv_col) equal to i - MV_MAX.
-  int mv_component[2][MV_VALS];
-
-  // joint_mv[i] is the cost of transmitting joint mv(MV_JOINT_TYPE) of
-  // type i.
-  // TODO(huisu@google.com): we can update dv_joint_cost per SB.
-  int joint_mv[MV_JOINTS];
-} IntraBCMVCosts;
-
 static INLINE void av1_init_rd_stats(RD_STATS *rd_stats) {
 #if CONFIG_RD_DEBUG
   int plane;
@@ -110,12 +96,6 @@ static INLINE void av1_init_rd_stats(RD_STATS *rd_stats) {
   // encoded, as there will only be 1 plane
   for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
     rd_stats->txb_coeff_cost[plane] = 0;
-    {
-      int r, c;
-      for (r = 0; r < TXB_COEFF_COST_MAP_SIZE; ++r)
-        for (c = 0; c < TXB_COEFF_COST_MAP_SIZE; ++c)
-          rd_stats->txb_coeff_cost_map[plane][r][c] = 0;
-    }
   }
 #endif
 }
@@ -135,12 +115,6 @@ static INLINE void av1_invalid_rd_stats(RD_STATS *rd_stats) {
   // encoded, as there will only be 1 plane
   for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
     rd_stats->txb_coeff_cost[plane] = INT_MAX;
-    {
-      int r, c;
-      for (r = 0; r < TXB_COEFF_COST_MAP_SIZE; ++r)
-        for (c = 0; c < TXB_COEFF_COST_MAP_SIZE; ++c)
-          rd_stats->txb_coeff_cost_map[plane][r][c] = INT16_MAX;
-    }
   }
 #endif
 }
@@ -160,18 +134,6 @@ static INLINE void av1_merge_rd_stats(RD_STATS *rd_stats_dst,
   // encoded, as there will only be 1 plane
   for (int plane = 0; plane < MAX_MB_PLANE; ++plane) {
     rd_stats_dst->txb_coeff_cost[plane] += rd_stats_src->txb_coeff_cost[plane];
-    {
-      // TODO(angiebird): optimize this part
-      int r, c;
-      int ref_txb_coeff_cost = 0;
-      for (r = 0; r < TXB_COEFF_COST_MAP_SIZE; ++r)
-        for (c = 0; c < TXB_COEFF_COST_MAP_SIZE; ++c) {
-          rd_stats_dst->txb_coeff_cost_map[plane][r][c] +=
-              rd_stats_src->txb_coeff_cost_map[plane][r][c];
-          ref_txb_coeff_cost += rd_stats_dst->txb_coeff_cost_map[plane][r][c];
-        }
-      assert(ref_txb_coeff_cost == rd_stats_dst->txb_coeff_cost[plane]);
-    }
   }
 #endif
 }
@@ -372,8 +334,10 @@ void av1_fill_lr_rates(ModeCosts *mode_costs, FRAME_CONTEXT *fc);
 void av1_fill_coeff_costs(CoeffCosts *coeff_costs, FRAME_CONTEXT *fc,
                           const int num_planes);
 
-void av1_fill_mv_costs(const FRAME_CONTEXT *fc, int integer_mv, int usehp,
+void av1_fill_mv_costs(const nmv_context *nmvc, int integer_mv, int usehp,
                        MvCosts *mv_costs);
+
+void av1_fill_dv_costs(const nmv_context *ndvc, IntraBCMVCosts *dv_costs);
 
 int av1_get_adaptive_rdmult(const struct AV1_COMP *cpi, double beta);
 
