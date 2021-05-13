@@ -218,9 +218,11 @@ bool QAVIFHandler::decode_one_frame()
     }
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+    QColorSpace colorspace;
     if (m_decoder->image->icc.data && (m_decoder->image->icc.size > 0)) {
-        result.setColorSpace(QColorSpace::fromIccProfile(QByteArray::fromRawData((const char *)m_decoder->image->icc.data, (int)m_decoder->image->icc.size)));
-        if (!result.colorSpace().isValid()) {
+        const QByteArray icc_data((const char *)m_decoder->image->icc.data, (int)m_decoder->image->icc.size);
+        colorspace = QColorSpace::fromIccProfile(icc_data);
+        if (!colorspace.isValid()) {
             qWarning("AVIF image has Qt-unsupported or invalid ICC profile!");
         }
     } else {
@@ -271,22 +273,24 @@ bool QAVIFHandler::decode_one_frame()
             case 0:
             case 1:
             case 2: /* AVIF_COLOR_PRIMARIES_UNSPECIFIED */
-                result.setColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, q_trc, q_trc_gamma));
+                colorspace = QColorSpace(QColorSpace::Primaries::SRgb, q_trc, q_trc_gamma);
                 break;
             /* AVIF_COLOR_PRIMARIES_SMPTE432 */
             case 12:
-                result.setColorSpace(QColorSpace(QColorSpace::Primaries::DciP3D65, q_trc, q_trc_gamma));
+                colorspace = QColorSpace(QColorSpace::Primaries::DciP3D65, q_trc, q_trc_gamma);
                 break;
             default:
-                result.setColorSpace(QColorSpace(whitePoint, redPoint, greenPoint, bluePoint, q_trc, q_trc_gamma));
+                colorspace = QColorSpace(whitePoint, redPoint, greenPoint, bluePoint, q_trc, q_trc_gamma);
                 break;
             }
         }
 
-        if (!result.colorSpace().isValid()) {
+        if (!colorspace.isValid()) {
             qWarning("AVIF plugin created invalid QColorSpace from NCLX/CICP!");
         }
     }
+
+    result.setColorSpace(colorspace);
 #endif
 
     avifRGBImage rgb;
