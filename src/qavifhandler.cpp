@@ -392,11 +392,15 @@ bool QAVIFHandler::decode_one_frame()
     }
 
     if (m_decoder->image->transformFlags & AVIF_TRANSFORM_IMIR) {
+#if AVIF_VERSION > 90100
+        switch (m_decoder->image->imir.mode) {
+#else
         switch (m_decoder->image->imir.axis) {
-        case 0: // vertical
+#endif
+        case 0: // top-to-bottom
             result = result.mirrored(false, true);
             break;
-        case 1: // horizontal
+        case 1: // left-to-right
             result = result.mirrored(true, false);
             break;
         }
