@@ -124,6 +124,10 @@ bool QAVIFHandler::ensureDecoder()
 
     m_decoder = avifDecoderCreate();
 
+#if AVIF_VERSION >= 90100
+    m_decoder->strictFlags = AVIF_STRICT_DISABLED;
+#endif
+
     avifResult decodeResult;
 
     decodeResult = avifDecoderSetIOMemory(m_decoder, m_rawAvifData.data, m_rawAvifData.size);
