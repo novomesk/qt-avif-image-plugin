@@ -1,3 +1,26 @@
+2021-06-08 v3.1.1
+  This release includes several bug fixes.
+
+  - Bug fixes:
+    Issue 2965: Cherry-picked the following four commits for the
+    tune=butteraugli mode.
+      1. Add libjxl to pkg_config if enabled:
+         https://aomedia-review.googlesource.com/c/aom/+/136044
+      2. Declare set_mb_butteraugli_rdmult_scaling static:
+         https://aomedia-review.googlesource.com/c/aom/+/134506
+      3. Add color range detection in tune=butteraugli mode:
+         https://aomedia-review.googlesource.com/c/aom/+/135521
+      4. Enable tune=butteraugli in all-intra mode:
+         https://aomedia-review.googlesource.com/c/aom/+/136082
+
+    Issue 3021: Fix vmaf model initialization error when not set to
+    tune=vmaf
+
+    Issue 3050: Compilation fails with -DCONFIG_TUNE_VMAF=1
+
+    Issue 3054: Consistent crash on near-static screen content, keyframe
+    related
+
 2021-05-03 v3.1.0
   This release adds an "all intra" mode to the encoder, which significantly
   speeds up the encoding of AVIF still images at speed 6.

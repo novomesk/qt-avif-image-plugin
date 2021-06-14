@@ -2314,6 +2314,12 @@ static int encode_without_recode(AV1_COMP *cpi) {
   printf("\n Encoding a frame:");
 #endif
 
+#if CONFIG_TUNE_BUTTERAUGLI
+  if (cpi->oxcf.tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
+    av1_setup_butteraugli_rdmult(cpi);
+  }
+#endif
+
   aom_clear_system_state();
 
   cpi->source = av1_scale_if_required(cm, unscaled, &cpi->scaled_source,
@@ -2687,7 +2693,7 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest) {
 #if CONFIG_TUNE_BUTTERAUGLI
     if (loop_count == 0 && oxcf->tune_cfg.tuning == AOM_TUNE_BUTTERAUGLI) {
       loop = 1;
-      av1_restore_butteraugli_source(cpi);
+      av1_setup_butteraugli_rdmult_and_restore_source(cpi, 0.4);
     }
 #endif
 

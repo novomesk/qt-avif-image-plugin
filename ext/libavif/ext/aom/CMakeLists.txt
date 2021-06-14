@@ -43,7 +43,7 @@ endif()
 #
 # We set SO_FILE_VERSION = [c-a].a.r
 set(LT_CURRENT 4)
-set(LT_REVISION 0)
+set(LT_REVISION 1)
 set(LT_AGE 1)
 math(EXPR SO_VERSION "${LT_CURRENT} - ${LT_AGE}")
 set(SO_FILE_VERSION "${SO_VERSION}.${LT_AGE}.${LT_REVISION}")
@@ -525,8 +525,12 @@ if(CONFIG_AV1_ENCODER)
     find_package(PkgConfig)
     if(PKG_CONFIG_FOUND)
       pkg_check_modules(VMAF REQUIRED libvmaf)
-      target_link_libraries(aom
-                            PRIVATE ${VMAF_LDFLAGS} ${VMAF_LIBRARIES} -static)
+      if(BUILD_SHARED_LIBS)
+        target_link_libraries(aom PRIVATE ${VMAF_LDFLAGS} ${VMAF_LIBRARIES})
+      else()
+        target_link_libraries(aom
+                              PRIVATE ${VMAF_LDFLAGS} ${VMAF_LIBRARIES} -static)
+      endif()
       target_include_directories(aom PRIVATE ${VMAF_INCLUDE_DIRS})
       if(VMAF_CFLAGS)
         append_compiler_flag("${VMAF_CFLAGS}")

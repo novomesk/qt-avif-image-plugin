@@ -331,14 +331,14 @@ static void init_ref_frame_space(AV1_COMP *cpi, ThreadData *td, int mi_row,
   MACROBLOCK *x = &td->mb;
   const int frame_idx = cpi->gf_frame_index;
   TplParams *const tpl_data = &cpi->tpl_data;
-  TplDepFrame *tpl_frame = &tpl_data->tpl_frame[frame_idx];
   const uint8_t block_mis_log2 = tpl_data->tpl_stats_block_mis_log2;
 
   av1_zero(x->tpl_keep_ref_frame);
 
+  if (frame_idx >= MAX_TPL_FRAME_IDX) return;
+  TplDepFrame *tpl_frame = &tpl_data->tpl_frame[frame_idx];
   if (tpl_frame->is_valid == 0) return;
   if (!is_frame_tpl_eligible(gf_group, cpi->gf_frame_index)) return;
-  if (frame_idx >= MAX_TPL_FRAME_IDX) return;
   if (cpi->oxcf.q_cfg.aq_mode != NO_AQ) return;
 
   const int is_overlay = cpi->gf_group.update_type[frame_idx] == OVERLAY_UPDATE;

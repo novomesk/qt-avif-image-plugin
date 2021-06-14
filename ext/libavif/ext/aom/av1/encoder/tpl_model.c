@@ -1661,11 +1661,11 @@ void av1_tpl_rdmult_setup_sb(AV1_COMP *cpi, MACROBLOCK *const x,
   assert(IMPLIES(cpi->gf_group.size > 0,
                  cpi->gf_frame_index < cpi->gf_group.size));
   const int tpl_idx = cpi->gf_frame_index;
-  TplDepFrame *tpl_frame = &cpi->tpl_data.tpl_frame[tpl_idx];
 
+  if (tpl_idx >= MAX_TPL_FRAME_IDX) return;
+  TplDepFrame *tpl_frame = &cpi->tpl_data.tpl_frame[tpl_idx];
   if (tpl_frame->is_valid == 0) return;
   if (!is_frame_tpl_eligible(gf_group, cpi->gf_frame_index)) return;
-  if (tpl_idx >= MAX_TPL_FRAME_IDX) return;
   if (cpi->oxcf.q_cfg.aq_mode != NO_AQ) return;
 
   const int mi_col_sr =

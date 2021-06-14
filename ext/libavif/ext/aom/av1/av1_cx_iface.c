@@ -613,10 +613,11 @@ static aom_codec_err_t validate_img(aom_codec_alg_priv_t *ctx,
     if (img->bit_depth > 8) {
       ERROR("Only 8 bit depth images supported in tune=butteraugli mode.");
     }
-    if ((img->cp != 0 && img->cp != AOM_CICP_CP_BT_709) ||
-        (img->tc != 0 && img->tc != AOM_CICP_TC_BT_709) ||
-        (img->mc != 0 && img->mc != AOM_CICP_MC_BT_709)) {
-      ERROR("Only BT.709 images supported in tune=butteraugli mode.");
+    if (img->mc != 0 && img->mc != AOM_CICP_MC_BT_709 &&
+        img->mc != AOM_CICP_MC_BT_601 && img->mc != AOM_CICP_MC_BT_470_B_G) {
+      ERROR(
+          "Only BT.709 and BT.601 matrix coefficients supported in "
+          "tune=butteraugli mode. Identity matrix is treated as BT.601.");
     }
   }
 #endif
@@ -2243,8 +2244,11 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
   }
 
 #if CONFIG_TUNE_VMAF
-  aom_init_vmaf_model(&cpi->vmaf_info.vmaf_model,
-                      cpi->oxcf.tune_cfg.vmaf_model_path);
+  if (ctx->extra_cfg.tuning >= AOM_TUNE_VMAF_WITH_PREPROCESSING &&
+      ctx->extra_cfg.tuning <= AOM_TUNE_VMAF_NEG_MAX_GAIN) {
+    aom_init_vmaf_model(&cpi->vmaf_info.vmaf_model,
+                        cpi->oxcf.tune_cfg.vmaf_model_path);
+  }
 #endif
 
   // Handle fixed keyframe intervals

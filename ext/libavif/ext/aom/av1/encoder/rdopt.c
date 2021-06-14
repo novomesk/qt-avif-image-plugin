@@ -2178,8 +2178,11 @@ static AOM_INLINE void get_block_level_tpl_stats(
                  cpi->gf_frame_index < cpi->gf_group.size));
   const int tpl_idx = cpi->gf_frame_index;
   TplParams *const tpl_data = &cpi->tpl_data;
+  if (tpl_idx >= MAX_TPL_FRAME_IDX) {
+    return;
+  }
   const TplDepFrame *tpl_frame = &tpl_data->tpl_frame[tpl_idx];
-  if (tpl_idx >= MAX_TPL_FRAME_IDX || !tpl_frame->is_valid) {
+  if (!tpl_frame->is_valid) {
     return;
   }
 
@@ -2591,10 +2594,10 @@ static int64_t handle_inter_mode(
   const PREDICTION_MODE this_mode = mbmi->mode;
 
   const int tpl_idx = cpi->gf_frame_index;
-  TplDepFrame *tpl_frame = &cpi->tpl_data.tpl_frame[tpl_idx];
+  TplParams *const tpl_data = &cpi->tpl_data;
   const int prune_modes_based_on_tpl =
       cpi->sf.inter_sf.prune_inter_modes_based_on_tpl &&
-      tpl_idx < MAX_TPL_FRAME_IDX && tpl_frame->is_valid;
+      tpl_idx < MAX_TPL_FRAME_IDX && tpl_data->tpl_frame[tpl_idx].is_valid;
   int i;
   // Reference frames for this mode
   const int refs[2] = { mbmi->ref_frame[0],
