@@ -860,7 +860,7 @@ bool QAVIFHandler::jumpToNextImage()
         return true;
     }
 
-    if (m_decoder->imageIndex >= m_decoder->imageCount - 1) { // start from begining
+    if (m_decoder->imageIndex >= m_decoder->imageCount - 1) { // start from beginning
         avifDecoderReset(m_decoder);
     }
 
