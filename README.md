@@ -172,3 +172,7 @@ AVIF thumbnails in dolphin:
 ### VookiImageViewer
 
 ![AVIF image in vooki-image-viewer](img/app_vooki-image-viewer.png)
+
+### YACReader
+
+![AVIF image in YACReader - Yet Another Comic Reader](img/app_yacreader.png)
