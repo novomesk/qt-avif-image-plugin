@@ -756,7 +756,7 @@ bool QAVIFHandler::write(const QImage &image)
         encoder->maxQuantizerAlpha = maxQuantizerAlpha;
     }
 
-    encoder->speed = 8;
+    encoder->speed = 7;
 
     res = avifEncoderWrite(encoder, avif, &raw);
     avifEncoderDestroy(encoder);
