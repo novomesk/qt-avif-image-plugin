@@ -51,7 +51,7 @@ static void syntax(void)
     printf("Options:\n");
     printf("    -h,--help                         : Show syntax help\n");
     printf("    -V,--version                      : Show the version number\n");
-    printf("    -j,--jobs J                       : Number of jobs (worker threads, default: 1)\n");
+    printf("    -j,--jobs J                       : Number of jobs (worker threads, default: 1. Use \"all\" to use all available cores)\n");
     printf("    -o,--output FILENAME              : Instead of using the last filename given as output, use this filename\n");
     printf("    -l,--lossless                     : Set all defaults to encode losslessly, and emit warnings when settings/input don't allow for it\n");
     printf("    -d,--depth D                      : Output depth [8,10,12]. (JPEG/PNG only; For y4m or stdin, depth is retained)\n");
@@ -103,7 +103,7 @@ static void syntax(void)
     printf("    --crop CROPX,CROPY,CROPW,CROPH    : Add clap property (clean aperture), but calculated from a crop rectangle\n");
     printf("    --clap WN,WD,HN,HD,HON,HOD,VON,VOD: Add clap property (clean aperture). Width, Height, HOffset, VOffset (in num/denom pairs)\n");
     printf("    --irot ANGLE                      : Add irot property (rotation). [0-3], makes (90 * ANGLE) degree rotation anti-clockwise\n");
-    printf("    --imir AXIS                       : Add imir property (mirroring). 0=vertical axis (\"left-to-right\"), 1=horizontal axis (\"top-to-bottom\")\n");
+    printf("    --imir MODE                       : Add imir property (mirroring). 0=top-to-bottom, 1=left-to-right\n");
     printf("\n");
     if (avifCodecName(AVIF_CODEC_CHOICE_AOM, 0)) {
         printf("aom-specific advanced options:\n");
@@ -439,7 +439,7 @@ int main(int argc, char * argv[])
     uint32_t clapValues[8];
     avifBool cropConversionRequired = AVIF_FALSE;
     uint8_t irotAngle = 0xff; // sentinel value indicating "unused"
-    uint8_t imirAxis = 0xff;  // sentinel value indicating "unused"
+    uint8_t imirMode = 0xff;  // sentinel value indicating "unused"
     avifCodecChoice codecChoice = AVIF_CODEC_CHOICE_AUTO;
     avifRange requestedRange = AVIF_RANGE_FULL;
     avifBool lossless = AVIF_FALSE;
@@ -487,9 +487,13 @@ int main(int argc, char * argv[])
             goto cleanup;
         } else if (!strcmp(arg, "-j") || !strcmp(arg, "--jobs")) {
             NEXTARG();
-            jobs = atoi(arg);
-            if (jobs < 1) {
-                jobs = 1;
+            if (!strcmp(arg, "all")) {
+                jobs = avifQueryCPUCount();
+            } else {
+                jobs = atoi(arg);
+                if (jobs < 1) {
+                    jobs = 1;
+                }
             }
         } else if (!strcmp(arg, "--stdin")) {
             input.useStdin = AVIF_TRUE;
@@ -729,9 +733,9 @@ int main(int argc, char * argv[])
             }
         } else if (!strcmp(arg, "--imir")) {
             NEXTARG();
-            imirAxis = (uint8_t)atoi(arg);
-            if (imirAxis > 1) {
-                fprintf(stderr, "ERROR: Invalid imir axis: %s\n", arg);
+            imirMode = (uint8_t)atoi(arg);
+            if (imirMode > 1) {
+                fprintf(stderr, "ERROR: Invalid imir mode: %s\n", arg);
                 returnCode = 1;
                 goto cleanup;
             }
@@ -793,11 +797,9 @@ int main(int argc, char * argv[])
 
     if ((image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_IDENTITY) && (input.requestedFormat != AVIF_PIXEL_FORMAT_NONE) &&
         (input.requestedFormat != AVIF_PIXEL_FORMAT_YUV444)) {
-        // This protects against this code misbehaving if AVIF_APP_DEFAULT_PIXEL_FORMAT is ever changed from AVIF_PIXEL_FORMAT_YUV444
-        assert((input.requestedFormat != AVIF_PIXEL_FORMAT_NONE) || (AVIF_APP_DEFAULT_PIXEL_FORMAT == AVIF_PIXEL_FORMAT_YUV444));
-
-        // matrixCoefficients was likely set to AVIF_MATRIX_COEFFICIENTS_IDENTITY as a side effect
-        // of --lossless, and Identity is only valid with YUV444. Set this back to the default.
+        // User explicitly asked for non YUV444 yuvFormat, while matrixCoefficients was likely
+        // set to AVIF_MATRIX_COEFFICIENTS_IDENTITY as a side effect of --lossless,
+        // and Identity is only valid with YUV444. Set matrixCoefficients back to the default.
         image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT601;
 
         if (cicpExplicitlySet) {
@@ -911,9 +913,9 @@ int main(int argc, char * argv[])
         image->transformFlags |= AVIF_TRANSFORM_IROT;
         image->irot.angle = irotAngle;
     }
-    if (imirAxis != 0xff) {
+    if (imirMode != 0xff) {
         image->transformFlags |= AVIF_TRANSFORM_IMIR;
-        image->imir.axis = imirAxis;
+        image->imir.mode = imirMode;
     }
 
     avifBool usingAOM = AVIF_FALSE;

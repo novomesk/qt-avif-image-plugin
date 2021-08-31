@@ -151,6 +151,8 @@ typedef struct RefCntBuffer {
   aom_film_grain_t film_grain_params;
   aom_codec_frame_buffer_t raw_frame_buffer;
   YV12_BUFFER_CONFIG buf;
+  int temporal_id;  // Temporal layer ID of the frame
+  int spatial_id;   // Spatial layer ID of the frame
   FRAME_TYPE frame_type;
 
   // This is only used in the encoder but needs to be indexed per ref frame

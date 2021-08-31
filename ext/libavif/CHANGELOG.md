@@ -6,6 +6,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2021-06-23
+
+### Added
+
+* avifenc, avifdec: Allow "-j all" to automatically use all of the cores on the machine (#670)
+
+### Changed
+
+* Refactor imir implementation to match HEIF Draft Amendment 2 (#665)
+* Merge avifCodec's open call with its getNextImage call to avoid codec init during parse, and simplify the codec API (#637)
+* Update aom.cmd: v3.1.1 (#674)
+* Update svt-av1: v0.8.7 (#627)
+* Make tests/compare.h and tests/testcase.h C++ safe (#678)
+* Print width and height as %ux%u instead of %u/%u (#676)
+* Allocate codec->internal->svt_config statically (#675)
+* Cleanup related to avifDiagnosticsClearError() (#673)
+* Cleanup avifutil.h comment to match libavif style (#671)
+* Fix the clang -Wunused-macros warning (#672)
+* Check for int32_t overflows in 'clap' code (#663)
+* Have avifdec print chroma sample position for 420 (#666)
+* Enable CMake configs in VCPKG mode (#659)
+* Avoid multiplying widthN and heightN by 2 (#662)
+* Correct AVIF_PIXEL_FORMAT_NONE handling logic (#654)
+* Cast extent->offset (a uint64_t) to size_t safely (#660)
+* Disallow negative clap width or height (#656)
+* Check for int32_t cast and unsigned add overflows (#655)
+* Some straightforward changes to clapFraction code (#653)
+* Fix box name of avifParseChunkOffsetBox (#652)
+* No need to pass diag to functions that have 'data' (#651)
+* Simplify the assertion in avifROStreamStart() (#650)
+* Don't clear error in avifEncoderSetCodecSpecificOp (#648)
+* Simplify avifCodecConfigurationBoxGetFormat (#646)
+* Print the fraction in "not an integer" messages (#641)
+* Fix a typo in the diagnostic context for 'ipco' (#644)
+* Remove const from non-pointer function parameters (#634)
+* Declare the param of avifDumpDiagnostics as const (#633)
+* Adjust gdk-pixbuf loader for new API change (#668)
+* Fix gdk-pixbuf loader install path (#615)
+* Don't need to disable MSVC warnings 5031 and 5032 (#681)
+
 ## [0.9.1] - 2021-05-19
 
 ### Added
@@ -17,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * avifenc: New default for `--yuv`: `"auto"`, which will use a source JPEG's internal YUV format instead of YUV444, if detected
   * Uses: Prevent colorspace conversion when reading from JPEG if possible (tongyuantongyu)
 * avifenc/avifdec: Add helpful values/calculations when dumping clap box
-* Added avifDiagnostics, which allows for a detailed, freeform error string upon decode error
+* Added avifDiagnostics, which allows for a detailed, freeform error string upon decode or encode error
 * Create helper avifCropRect struct and methods for helping to manipulate/populate/validate avifCleanApertureBox
 * Added ability to set codec-specific options for color or alpha only
 * Support for libaom's ALL_INTRA mode (if available)
@@ -45,8 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Tweaks to compiler flags (analyze related)
 * Use libyuv BT.709 & 2020 full range YuvConstants (wantehchang)
 * Multiply color with alpha for opaque RGB format during conversion (see #520)
-* switch docker to ubuntu 20.04, fix tzdata install (paskal)
-
+* Switch docker to ubuntu 20.04, fix tzdata install (paskal)
 * Added an "Understanding maxThreads" explanatory comment block in avif.h
 * Minor fixes to support AVIF_CODEC_AOM_ENCODE
 * Various minor code/comments cleanup
@@ -625,7 +664,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/AOMediaCodec/libavif/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/AOMediaCodec/libavif/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/AOMediaCodec/libavif/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/AOMediaCodec/libavif/compare/v0.8.3...v0.8.4
