@@ -15,7 +15,19 @@ install:
 
     nasm -v
 
-    cd ext\libavif\ext\dav1d
+    cd ext\libavif\ext\libyuv
+
+    mkdir build
+
+    cd build
+
+    cmake -G "NMake Makefiles" -DBUILD_SHARED_LIBS=0 -DCMAKE_BUILD_TYPE=Release ..
+
+    nmake yuv
+
+    copy yuv.lib libyuv.a
+
+    cd ..\..\dav1d
 
     mkdir build
 
@@ -43,7 +55,7 @@ install:
 
     cd build
 
-    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON -DAVIF_CODEC_AOM_DECODE=OFF -DAVIF_CODEC_AOM_ENCODE=ON -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON ..
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON -DAVIF_CODEC_AOM_DECODE=OFF -DAVIF_CODEC_AOM_ENCODE=ON -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON -DAVIF_LOCAL_LIBYUV=ON ..
 
     ninja
 
