@@ -124,6 +124,10 @@ bool QAVIFHandler::ensureDecoder()
 
     m_decoder = avifDecoderCreate();
 
+#if AVIF_VERSION >= 80400
+    m_decoder->maxThreads = qBound(1, QThread::idealThreadCount(), 64);
+#endif
+
 #if AVIF_VERSION >= 90100
     m_decoder->strictFlags = AVIF_STRICT_DISABLED;
 #endif
