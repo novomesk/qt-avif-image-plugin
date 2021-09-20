@@ -5,8 +5,8 @@ if ! [ -x "$(command -v cmake)" ]; then
   exit 1
 fi
 
-if ! [ -x "$(command -v make)" ]; then
-  echo 'Error: make is not installed.' >&2
+if ! [ -x "$(command -v ninja)" ]; then
+  echo 'Error: ninja is not installed.' >&2
   exit 1
 fi
 
@@ -19,8 +19,8 @@ if ! [ -f libavif/ext/aom/build.libavif/libaom.a ]; then
   mkdir -p build.libavif
   cd build.libavif
 
-  cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTDATA=0 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 -DCONFIG_PIC=1 ..
-  make
+  cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONFIG_AV1_DECODER=0 -DCONFIG_AV1_ENCODER=1 -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTDATA=0 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 -DCONFIG_PIC=1 ..
+  ninja
 
   if ! [ -f libaom.a ]; then
     echo 'Error: libaom.a build failed!' >&2
@@ -29,6 +29,21 @@ if ! [ -f libavif/ext/aom/build.libavif/libaom.a ]; then
   cd ../../../..
 fi
 
+if ! [ -f libavif/ext/dav1d/build/src/libdav1d.a ]; then
+ echo 'We are going to build libdav1d.a'
+ cd libavif/ext/dav1d
+ mkdir -p build
+ cd build
+
+ meson --default-library=static --buildtype release ..
+ ninja
+
+ if ! [ -f src/libdav1d.a ]; then
+  echo 'Error: libdav1d.a build failed!' >&2
+  exit 1
+ fi
+ cd ../../../..
+fi
 
 if ! [ -f libavif/build/libavif.a ]; then
   echo 'We are going to build libavif.a'
@@ -36,8 +51,8 @@ if ! [ -f libavif/build/libavif.a ]; then
   mkdir -p build
   cd build
 
-  CFLAGS="-fPIC" cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON ..
-  make
+  CFLAGS="-fPIC" cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON -DAVIF_CODEC_AOM_DECODE=OFF -DAVIF_CODEC_AOM_ENCODE=ON -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON ..
+  ninja
 
   if ! [ -f libavif.a ]; then
     echo 'Error: libavif.a build failed!' >&2
