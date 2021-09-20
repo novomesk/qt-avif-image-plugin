@@ -13,6 +13,22 @@ fi
 RELATIVE_PATH=`dirname "$BASH_SOURCE"`
 cd "$RELATIVE_PATH"
 
+if ! [ -f libavif/ext/libavif/ext/libyuv/build/libyuv.a ]; then
+  echo 'We are going to build libyuv.a'
+  cd libavif/ext/libyuv
+  mkdir -p build
+  cd build
+
+  cmake -G Ninja -DBUILD_SHARED_LIBS=0 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-fPIC" -DCMAKE_CXX_FLAGS="-fPIC" ..
+  ninja yuv
+
+  if ! [ -f libyuv.a ]; then
+    echo 'Error: libyuv.a build failed!' >&2
+  fi
+
+  cd ../../../..
+fi
+
 if ! [ -f libavif/ext/aom/build.libavif/libaom.a ]; then
   echo 'We are going to build libaom.a'
   cd libavif/ext/aom
@@ -51,7 +67,7 @@ if ! [ -f libavif/build/libavif.a ]; then
   mkdir -p build
   cd build
 
-  CFLAGS="-fPIC" cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON -DAVIF_CODEC_AOM_DECODE=OFF -DAVIF_CODEC_AOM_ENCODE=ON -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON ..
+  CFLAGS="-fPIC" cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON -DAVIF_CODEC_AOM_DECODE=OFF -DAVIF_CODEC_AOM_ENCODE=ON -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON -DAVIF_LOCAL_LIBYUV=ON ..
   ninja
 
   if ! [ -f libavif.a ]; then
