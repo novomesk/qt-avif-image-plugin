@@ -318,6 +318,14 @@ bool QAVIFHandler::decode_one_frame()
     } else {
         rgb.depth = 8;
         rgb.format = AVIF_RGB_FORMAT_RGBA;
+
+#if AVIF_VERSION >= 80400
+        if (m_decoder->imageCount > 1) {
+            /* accelerate animated AVIF */
+            rgb.chromaUpsampling = AVIF_CHROMA_UPSAMPLING_FASTEST;
+        }
+#endif
+
         if (loadalpha) {
             resultformat = QImage::Format_ARGB32;
         } else {
