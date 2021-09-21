@@ -13,7 +13,7 @@ fi
 RELATIVE_PATH=`dirname "$BASH_SOURCE"`
 cd "$RELATIVE_PATH"
 
-if ! [ -f libavif/ext/libavif/ext/libyuv/build/libyuv.a ]; then
+if ! [ -f libavif/ext/libyuv/build/libyuv.a ]; then
   echo 'We are going to build libyuv.a'
   cd libavif/ext/libyuv
   mkdir -p build
