@@ -215,7 +215,7 @@ bool QAVIFHandler::decode_one_frame()
         if (loadalpha) {
             resultformat = QImage::Format_RGBA8888;
         } else {
-            resultformat = QImage::Format_RGB888;
+            resultformat = QImage::Format_RGBX8888;
         }
     }
     QImage result(m_decoder->image->width, m_decoder->image->height, resultformat);
@@ -309,8 +309,6 @@ bool QAVIFHandler::decode_one_frame()
         rgb.format = AVIF_RGB_FORMAT_RGBA;
 
         if (!loadalpha) {
-            rgb.ignoreAlpha = AVIF_TRUE;
-            result.fill(Qt::black);
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
             if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
                 resultformat = QImage::Format_Grayscale16;
@@ -319,12 +317,10 @@ bool QAVIFHandler::decode_one_frame()
         }
     } else {
         rgb.depth = 8;
+        rgb.format = AVIF_RGB_FORMAT_RGBA;
         if (loadalpha) {
-            rgb.format = AVIF_RGB_FORMAT_RGBA;
             resultformat = QImage::Format_ARGB32;
         } else {
-            rgb.format = AVIF_RGB_FORMAT_RGB;
-
             if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
                 resultformat = QImage::Format_Grayscale8;
             } else {
