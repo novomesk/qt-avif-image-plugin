@@ -44,6 +44,7 @@ function(add_intrinsics_object_library flag opt_name target_to_update sources)
   endif()
   set(target_name ${target_to_update}_${opt_name}_intrinsics)
   add_library(${target_name} OBJECT ${${sources}})
+  set_property(TARGET ${target_name} PROPERTY FOLDER ${AOM_TARGET_CPU})
 
   if(MSVC)
     get_msvc_intrinsic_flag(${flag} "flag")
@@ -142,6 +143,7 @@ function(add_asm_library lib_name asm_sources)
   # targets, make this OBJECT instead of STATIC to hide the target from
   # consumers of the AOM cmake build.
   add_library(${lib_name} STATIC ${${asm_sources}})
+  set_property(TARGET ${lib_name} PROPERTY FOLDER ${AOM_TARGET_CPU})
 
   foreach(asm_source ${${asm_sources}})
     get_filename_component(asm_source_name "${asm_source}" NAME)
@@ -238,5 +240,5 @@ function(add_rtcd_build_step config output source symbol)
     WORKING_DIRECTORY ${AOM_CONFIG_DIR}
     VERBATIM)
   set_property(SOURCE ${source} PROPERTY OBJECT_DEPENDS ${output})
-  set_property(SOURCE ${output} PROPERTY GENERATED)
+  set_property(SOURCE ${output} PROPERTY GENERATED TRUE)
 endfunction()

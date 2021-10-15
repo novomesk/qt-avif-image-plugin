@@ -266,7 +266,8 @@ get_prediction_mode_idx(PREDICTION_MODE this_mode, MV_REFERENCE_FRAME ref_frame,
     return single_inter_to_mode_idx[this_mode - SINGLE_INTER_MODE_START]
                                    [ref_frame];
   }
-  if (this_mode >= COMP_INTER_MODE_START && this_mode < COMP_INTER_MODE_END) {
+  if (this_mode >= COMP_INTER_MODE_START && this_mode < COMP_INTER_MODE_END &&
+      second_ref_frame != NONE_FRAME) {
     assert((ref_frame > INTRA_FRAME) && (ref_frame <= ALTREF_FRAME));
     assert((second_ref_frame > INTRA_FRAME) &&
            (second_ref_frame <= ALTREF_FRAME));
@@ -386,7 +387,7 @@ static INLINE int is_winner_mode_processing_enabled(
   // TODO(any): Move block independent condition checks to frame level
   if (is_inter_block(mbmi)) {
     if (is_inter_mode(best_mode) &&
-        sf->tx_sf.tx_type_search.fast_inter_tx_type_search &&
+        (sf->tx_sf.tx_type_search.fast_inter_tx_type_prob_thresh != INT_MAX) &&
         !cpi->oxcf.txfm_cfg.use_inter_dct_only)
       return 1;
   } else {
@@ -433,8 +434,10 @@ static INLINE void set_tx_type_prune(const SPEED_FEATURES *sf,
   txfm_params->prune_2d_txfm_mode = sf->tx_sf.tx_type_search.prune_2d_txfm_mode;
   if (!winner_mode_tx_type_pruning) return;
 
-  const int prune_mode[2][2] = { { TX_TYPE_PRUNE_4, TX_TYPE_PRUNE_0 },
-                                 { TX_TYPE_PRUNE_5, TX_TYPE_PRUNE_2 } };
+  const int prune_mode[4][2] = { { TX_TYPE_PRUNE_3, TX_TYPE_PRUNE_0 },
+                                 { TX_TYPE_PRUNE_4, TX_TYPE_PRUNE_0 },
+                                 { TX_TYPE_PRUNE_5, TX_TYPE_PRUNE_2 },
+                                 { TX_TYPE_PRUNE_5, TX_TYPE_PRUNE_3 } };
   txfm_params->prune_2d_txfm_mode =
       prune_mode[winner_mode_tx_type_pruning - 1][is_winner_mode];
 }
@@ -475,7 +478,7 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
 
   switch (mode_eval_type) {
     case DEFAULT_EVAL:
-      txfm_params->use_default_inter_tx_type = 0;
+      txfm_params->default_inter_tx_type_prob_thresh = INT_MAX;
       txfm_params->use_default_intra_tx_type = 0;
       txfm_params->skip_txfm_level =
           winner_mode_params->skip_txfm_level[DEFAULT_EVAL];
@@ -497,8 +500,8 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
       txfm_params->use_default_intra_tx_type =
           (cpi->sf.tx_sf.tx_type_search.fast_intra_tx_type_search ||
            cpi->oxcf.txfm_cfg.use_intra_default_tx_only);
-      txfm_params->use_default_inter_tx_type =
-          cpi->sf.tx_sf.tx_type_search.fast_inter_tx_type_search;
+      txfm_params->default_inter_tx_type_prob_thresh =
+          cpi->sf.tx_sf.tx_type_search.fast_inter_tx_type_prob_thresh;
       txfm_params->skip_txfm_level =
           winner_mode_params->skip_txfm_level[MODE_EVAL];
       txfm_params->predict_dc_level =
@@ -524,7 +527,7 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
                         0);
       break;
     case WINNER_MODE_EVAL:
-      txfm_params->use_default_inter_tx_type = 0;
+      txfm_params->default_inter_tx_type_prob_thresh = INT_MAX;
       txfm_params->use_default_intra_tx_type = 0;
       txfm_params->skip_txfm_level =
           winner_mode_params->skip_txfm_level[WINNER_MODE_EVAL];
@@ -569,7 +572,7 @@ static INLINE CFL_ALLOWED_TYPE store_cfl_required_rdo(const AV1_COMMON *cm,
                                                       const MACROBLOCK *x) {
   const MACROBLOCKD *xd = &x->e_mbd;
 
-  if (cm->seq_params.monochrome || !xd->is_chroma_ref) return CFL_DISALLOWED;
+  if (cm->seq_params->monochrome || !xd->is_chroma_ref) return CFL_DISALLOWED;
 
   if (!xd->is_chroma_ref) {
     // For non-chroma-reference blocks, we should always store the luma pixels,

@@ -24,6 +24,8 @@ struct AV1Common;
 struct BufferPool;
 struct CommonContexts;
 struct CommonModeInfoParams;
+struct AV1CdefWorker;
+struct AV1CdefSyncData;
 
 void av1_remove_common(struct AV1Common *cm);
 
@@ -36,6 +38,13 @@ void av1_init_mi_buffers(struct CommonModeInfoParams *mi_params);
 void av1_free_context_buffers(struct AV1Common *cm);
 
 void av1_free_ref_frame_buffers(struct BufferPool *pool);
+void av1_alloc_cdef_buffers(struct AV1Common *const cm,
+                            struct AV1CdefWorker **cdef_worker,
+                            struct AV1CdefSyncData *cdef_sync, int num_workers,
+                            int init_worker);
+void av1_free_cdef_buffers(struct AV1Common *const cm,
+                           struct AV1CdefWorker **cdef_worker,
+                           struct AV1CdefSyncData *cdef_sync, int num_workers);
 #if !CONFIG_REALTIME_ONLY
 void av1_alloc_restoration_buffers(struct AV1Common *cm);
 void av1_free_restoration_buffers(struct AV1Common *cm);
@@ -45,11 +54,6 @@ int av1_alloc_state_buffers(struct AV1Common *cm, int width, int height);
 void av1_free_state_buffers(struct AV1Common *cm);
 
 int av1_get_MBs(int width, int height);
-
-#if CONFIG_LPF_MASK
-int av1_alloc_loop_filter_mask(struct AV1Common *cm);
-void av1_free_loop_filter_mask(struct AV1Common *cm);
-#endif
 
 #ifdef __cplusplus
 }  // extern "C"

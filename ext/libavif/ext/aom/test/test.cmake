@@ -19,17 +19,19 @@ include(ProcessorCount)
 include("${AOM_ROOT}/test/test_data_util.cmake")
 
 set(AOM_UNIT_TEST_DATA_LIST_FILE "${AOM_ROOT}/test/test-data.sha1")
+set(AOM_IDE_TEST_FOLDER "test")
+set(AOM_IDE_TESTDATA_FOLDER "testdata")
 
 list(APPEND AOM_UNIT_TEST_WRAPPER_SOURCES "${AOM_GEN_SRC_DIR}/usage_exit.c"
             "${AOM_ROOT}/test/test_libaom.cc")
 
 list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
             "${AOM_ROOT}/test/acm_random.h"
+            "${AOM_ROOT}/test/aom_image_test.cc"
             "${AOM_ROOT}/test/aom_integer_test.cc"
             "${AOM_ROOT}/test/av1_config_test.cc"
             "${AOM_ROOT}/test/av1_key_value_api_test.cc"
             "${AOM_ROOT}/test/block_test.cc"
-            "${AOM_ROOT}/test/clear_system_state.h"
             "${AOM_ROOT}/test/codec_factory.h"
             "${AOM_ROOT}/test/function_equivalence_test.h"
             "${AOM_ROOT}/test/log2_test.cc"
@@ -48,7 +50,7 @@ if(CONFIG_AV1_DECODER)
               "${AOM_ROOT}/test/decode_test_driver.h")
 endif()
 
-if(CONFIG_INTERNAL_STATS)
+if(CONFIG_INTERNAL_STATS AND CONFIG_AV1_HIGHBITDEPTH)
   list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
               "${AOM_ROOT}/test/hbd_metrics_test.cc")
 endif()
@@ -59,12 +61,19 @@ list(APPEND AOM_UNIT_TEST_DECODER_SOURCES "${AOM_ROOT}/test/decode_api_test.cc"
             "${AOM_ROOT}/test/invalid_file_test.cc"
             "${AOM_ROOT}/test/test_vector_test.cc"
             "${AOM_ROOT}/test/ivf_video_source.h")
+if(CONFIG_REALTIME_ONLY)
+  list(REMOVE_ITEM AOM_UNIT_TEST_DECODER_SOURCES
+                   "${AOM_ROOT}/test/invalid_file_test.cc"
+                   "${AOM_ROOT}/test/test_vector_test.cc")
+endif()
 
 list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/active_map_test.cc"
             "${AOM_ROOT}/test/aq_segment_test.cc"
+            "${AOM_ROOT}/test/av1_external_partition_test.cc"
             "${AOM_ROOT}/test/borders_test.cc"
             "${AOM_ROOT}/test/cpu_speed_test.cc"
+            "${AOM_ROOT}/test/cpu_used_firstpass_test.cc"
             "${AOM_ROOT}/test/datarate_test.cc"
             "${AOM_ROOT}/test/datarate_test.h"
             "${AOM_ROOT}/test/svc_datarate_test.cc"
@@ -72,7 +81,7 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/encode_small_width_height_test.cc"
             "${AOM_ROOT}/test/encode_test_driver.cc"
             "${AOM_ROOT}/test/encode_test_driver.h"
-            "${AOM_ROOT}/test/end_to_end_test.cc"
+            "${AOM_ROOT}/test/end_to_end_psnr_test.cc"
             "${AOM_ROOT}/test/gf_pyr_height_test.cc"
             "${AOM_ROOT}/test/rt_end_to_end_test.cc"
             "${AOM_ROOT}/test/frame_size_tests.cc"
@@ -82,17 +91,35 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/monochrome_test.cc"
             "${AOM_ROOT}/test/resize_test.cc"
             "${AOM_ROOT}/test/scalability_test.cc"
+            "${AOM_ROOT}/test/sharpness_test.cc"
             "${AOM_ROOT}/test/y4m_test.cc"
             "${AOM_ROOT}/test/y4m_video_source.h"
             "${AOM_ROOT}/test/yuv_video_source.h"
             "${AOM_ROOT}/test/time_stamp_test.cc")
+
+if(CONFIG_REALTIME_ONLY)
+  list(REMOVE_ITEM AOM_UNIT_TEST_ENCODER_SOURCES
+                   "${AOM_ROOT}/test/av1_external_partition_test.cc"
+                   "${AOM_ROOT}/test/borders_test.cc"
+                   "${AOM_ROOT}/test/cpu_speed_test.cc"
+                   "${AOM_ROOT}/test/cpu_used_firstpass_test.cc"
+                   "${AOM_ROOT}/test/end_to_end_psnr_test.cc"
+                   "${AOM_ROOT}/test/gf_pyr_height_test.cc"
+                   "${AOM_ROOT}/test/horz_superres_test.cc"
+                   "${AOM_ROOT}/test/level_test.cc"
+                   "${AOM_ROOT}/test/monochrome_test.cc"
+                   "${AOM_ROOT}/test/sharpness_test.cc")
+endif()
 
 if(CONFIG_AV1_TEMPORAL_DENOISING AND (HAVE_SSE2 OR HAVE_NEON))
   list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
               "${AOM_ROOT}/test/av1_temporal_denoiser_test.cc")
 endif()
 
-list(APPEND AOM_DECODE_PERF_TEST_SOURCES "${AOM_ROOT}/test/decode_perf_test.cc")
+if(NOT CONFIG_REALTIME_ONLY)
+  list(APPEND AOM_DECODE_PERF_TEST_SOURCES
+              "${AOM_ROOT}/test/decode_perf_test.cc")
+endif()
 list(APPEND AOM_ENCODE_PERF_TEST_SOURCES "${AOM_ROOT}/test/encode_perf_test.cc")
 list(APPEND AOM_UNIT_TEST_WEBM_SOURCES "${AOM_ROOT}/test/webm_video_source.h")
 list(APPEND AOM_TEST_INTRA_PRED_SPEED_SOURCES "${AOM_GEN_SRC_DIR}/usage_exit.c"
@@ -140,17 +167,33 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/kf_test.cc"
                 "${AOM_ROOT}/test/lossless_test.cc"
                 "${AOM_ROOT}/test/quant_test.cc"
+                "${AOM_ROOT}/test/ratectrl_test.cc"
+                "${AOM_ROOT}/test/rd_test.cc"
                 "${AOM_ROOT}/test/sb_multipass_test.cc"
                 "${AOM_ROOT}/test/screen_content_test.cc"
                 "${AOM_ROOT}/test/segment_binarization_sync.cc"
                 "${AOM_ROOT}/test/still_picture_test.cc"
+                "${AOM_ROOT}/test/temporal_filter_test.cc"
                 "${AOM_ROOT}/test/tile_config_test.cc"
                 "${AOM_ROOT}/test/tile_independence_test.cc"
-                "${AOM_ROOT}/test/temporal_filter_test.cc")
+                "${AOM_ROOT}/test/tpl_model_test.cc")
     if(CONFIG_REALTIME_ONLY)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
+                       "${AOM_ROOT}/test/altref_test.cc"
+                       "${AOM_ROOT}/test/av1_encoder_parms_get_to_decoder.cc"
+                       "${AOM_ROOT}/test/av1_ext_tile_test.cc"
                        "${AOM_ROOT}/test/cnn_test.cc"
-                       "${AOM_ROOT}/test/selfguided_filter_test.cc")
+                       "${AOM_ROOT}/test/decode_multithreaded_test.cc"
+                       "${AOM_ROOT}/test/error_resilience_test.cc"
+                       "${AOM_ROOT}/test/fwd_kf_test.cc"
+                       "${AOM_ROOT}/test/kf_test.cc"
+                       "${AOM_ROOT}/test/lossless_test.cc"
+                       "${AOM_ROOT}/test/sb_multipass_test.cc"
+                       "${AOM_ROOT}/test/selfguided_filter_test.cc"
+                       "${AOM_ROOT}/test/screen_content_test.cc"
+                       "${AOM_ROOT}/test/still_picture_test.cc"
+                       "${AOM_ROOT}/test/tile_independence_test.cc"
+                       "${AOM_ROOT}/test/tpl_model_test.cc")
     endif()
     if(NOT CONFIG_AV1_HIGHBITDEPTH)
       list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
@@ -205,6 +248,7 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/av1_inv_txfm2d_test.cc"
               "${AOM_ROOT}/test/av1_nn_predict_test.cc"
               "${AOM_ROOT}/test/av1_round_shift_array_test.cc"
+              "${AOM_ROOT}/test/av1_softmax_test.cc"
               "${AOM_ROOT}/test/av1_txfm_test.cc"
               "${AOM_ROOT}/test/av1_txfm_test.h"
               "${AOM_ROOT}/test/av1_wedge_utils_test.cc"
@@ -215,9 +259,12 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/comp_avg_pred_test.h"
               "${AOM_ROOT}/test/comp_mask_variance_test.cc"
               "${AOM_ROOT}/test/edge_detect_test.cc"
+              "${AOM_ROOT}/test/encodemb_test.cc"
               "${AOM_ROOT}/test/encodetxb_test.cc"
+              "${AOM_ROOT}/test/end_to_end_ssim_test.cc"
               "${AOM_ROOT}/test/error_block_test.cc"
               "${AOM_ROOT}/test/fft_test.cc"
+              "${AOM_ROOT}/test/firstpass_test.cc"
               "${AOM_ROOT}/test/fwht4x4_test.cc"
               "${AOM_ROOT}/test/fdct4x4_test.cc"
               "${AOM_ROOT}/test/hadamard_test.cc"
@@ -230,6 +277,7 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/obmc_variance_test.cc"
               "${AOM_ROOT}/test/pickrst_test.cc"
               "${AOM_ROOT}/test/quantize_func_test.cc"
+              "${AOM_ROOT}/test/quantize_lp_func_test.cc"
               "${AOM_ROOT}/test/sad_test.cc"
               "${AOM_ROOT}/test/subtract_test.cc"
               "${AOM_ROOT}/test/reconinter_test.cc"
@@ -246,7 +294,10 @@ if(NOT BUILD_SHARED_LIBS)
 
   if(CONFIG_REALTIME_ONLY)
     list(REMOVE_ITEM AOM_UNIT_TEST_ENCODER_SOURCES
+                     "${AOM_ROOT}/test/end_to_end_ssim_test.cc"
+                     "${AOM_ROOT}/test/firstpass_test.cc"
                      "${AOM_ROOT}/test/frame_error_test.cc"
+                     "${AOM_ROOT}/test/motion_vector_test.cc"
                      "${AOM_ROOT}/test/obmc_sad_test.cc"
                      "${AOM_ROOT}/test/obmc_variance_test.cc"
                      "${AOM_ROOT}/test/pickrst_test.cc"
@@ -273,7 +324,8 @@ if(NOT BUILD_SHARED_LIBS)
 
   if(NOT (HAVE_SSE2 OR HAVE_NEON))
     list(REMOVE_ITEM AOM_UNIT_TEST_ENCODER_SOURCES
-                     "${AOM_ROOT}/test/quantize_func_test.cc")
+                     "${AOM_ROOT}/test/quantize_func_test.cc"
+                     "${AOM_ROOT}/test/quantize_lp_func_test.cc")
   endif()
 
   if(HAVE_SSE4_1)
@@ -310,6 +362,7 @@ if(ENABLE_TESTS)
   add_library(
     aom_gtest STATIC
     "${AOM_ROOT}/third_party/googletest/src/googletest/src/gtest-all.cc")
+  set_property(TARGET aom_gtest PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
   if(MSVC OR WIN32)
     target_compile_definitions(aom_gtest PRIVATE GTEST_OS_WINDOWS=1)
   elseif(CONFIG_MULTITHREAD AND CMAKE_USE_PTHREADS_INIT)
@@ -329,21 +382,25 @@ function(setup_aom_test_targets)
   # list into separate object library targets, and then linking them into
   # test_libaom.
   add_library(test_aom_common OBJECT ${AOM_UNIT_TEST_COMMON_SOURCES})
+  set_property(TARGET test_aom_common PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
   add_dependencies(test_aom_common aom)
 
   if(CONFIG_AV1_DECODER)
     add_library(test_aom_decoder OBJECT ${AOM_UNIT_TEST_DECODER_SOURCES})
+    set_property(TARGET test_aom_decoder PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
     add_dependencies(test_aom_decoder aom)
   endif()
 
   if(CONFIG_AV1_ENCODER)
     add_library(test_aom_encoder OBJECT ${AOM_UNIT_TEST_ENCODER_SOURCES})
+    set_property(TARGET test_aom_encoder PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
     add_dependencies(test_aom_encoder aom)
   endif()
 
   add_executable(test_libaom ${AOM_UNIT_TEST_WRAPPER_SOURCES}
                              $<TARGET_OBJECTS:aom_common_app_util>
                              $<TARGET_OBJECTS:test_aom_common>)
+  set_property(TARGET test_libaom PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
   list(APPEND AOM_APP_TARGETS test_libaom)
 
   if(CONFIG_AV1_DECODER)
@@ -367,6 +424,8 @@ function(setup_aom_test_targets)
       add_executable(test_intra_pred_speed
                      ${AOM_TEST_INTRA_PRED_SPEED_SOURCES}
                      $<TARGET_OBJECTS:aom_common_app_util>)
+      set_property(TARGET test_intra_pred_speed
+                   PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
       target_link_libraries(test_intra_pred_speed ${AOM_LIB_LINK_TYPE} aom
                             aom_gtest)
       list(APPEND AOM_APP_TARGETS test_intra_pred_speed)
@@ -425,12 +484,15 @@ function(setup_aom_test_targets)
                 -DAOM_TEST_FILE="${test_file}"
                 -DAOM_TEST_CHECKSUM=${test_file_checksum} -P
                 "${AOM_ROOT}/test/test_data_download_worker.cmake")
+      set_property(TARGET testdata_${test_index}
+                   PROPERTY FOLDER ${AOM_IDE_TESTDATA_FOLDER})
       list(APPEND testdata_targets testdata_${test_index})
     endforeach()
 
     # Create a custom build target for running each test data download target.
     add_custom_target(testdata)
     add_dependencies(testdata ${testdata_targets})
+    set_property(TARGET testdata PROPERTY FOLDER ${AOM_IDE_TESTDATA_FOLDER})
 
     # Skip creation of test run targets when generating for Visual Studio and
     # Xcode unless the user explicitly requests IDE test hosting. This is done
@@ -456,9 +518,11 @@ function(setup_aom_test_targets)
                                   -DTEST_LIBAOM=$<TARGET_FILE:test_libaom> -P
                                   "${AOM_ROOT}/test/test_runner.cmake"
                           DEPENDS testdata test_libaom)
+        set_property(TARGET ${test_name} PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
         list(APPEND test_targets ${test_name})
       endforeach()
       add_custom_target(runtests)
+      set_property(TARGET runtests PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
       add_dependencies(runtests ${test_targets})
     endif()
   endif()

@@ -19,6 +19,13 @@
 
 namespace {
 
+const libaom_test::TestMode kTestModeParams[] =
+#if CONFIG_REALTIME_ONLY
+    { ::libaom_test::kRealTime };
+#else
+    { ::libaom_test::kRealTime, ::libaom_test::kOnePassGood };
+#endif
+
 class AqSegmentTest
     : public ::libaom_test::CodecTestWith3Params<libaom_test::TestMode, int,
                                                  int>,
@@ -40,6 +47,11 @@ class AqSegmentTest
       encoder->Control(AV1E_SET_AQ_MODE, aq_mode_);
       encoder->Control(AV1E_SET_DELTAQ_MODE, deltaq_mode_);
       encoder->Control(AOME_SET_MAX_INTRA_BITRATE_PCT, 100);
+      if (mode_ == ::libaom_test::kRealTime) {
+        encoder->Control(AV1E_SET_ALLOW_WARPED_MOTION, 0);
+        encoder->Control(AV1E_SET_ENABLE_GLOBAL_MOTION, 0);
+        encoder->Control(AV1E_SET_ENABLE_OBMC, 0);
+      }
     }
   }
 
@@ -69,10 +81,7 @@ class AqSegmentTest
 // 3-cyclic_refresh_aq) encodes and decodes without a mismatch.
 TEST_P(AqSegmentTest, TestNoMisMatch) { DoTest(GET_PARAM(3)); }
 
-class AqSegmentTestLarge : public AqSegmentTest {};
-
-TEST_P(AqSegmentTestLarge, TestNoMisMatch) { DoTest(GET_PARAM(3)); }
-
+#if !CONFIG_REALTIME_ONLY
 // Validate that this delta q mode
 // encodes and decodes without a mismatch.
 TEST_P(AqSegmentTest, TestNoMisMatchExtDeltaQ) {
@@ -84,13 +93,18 @@ TEST_P(AqSegmentTest, TestNoMisMatchExtDeltaQ) {
 
   ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
 }
+#endif
 
-AV1_INSTANTIATE_TEST_SUITE(AqSegmentTest,
-                           ::testing::Values(::libaom_test::kRealTime,
-                                             ::libaom_test::kOnePassGood),
+AV1_INSTANTIATE_TEST_SUITE(AqSegmentTest, ::testing::ValuesIn(kTestModeParams),
                            ::testing::Range(5, 9), ::testing::Range(0, 4));
+
+#if !CONFIG_REALTIME_ONLY
+class AqSegmentTestLarge : public AqSegmentTest {};
+
+TEST_P(AqSegmentTestLarge, TestNoMisMatch) { DoTest(GET_PARAM(3)); }
+
 AV1_INSTANTIATE_TEST_SUITE(AqSegmentTestLarge,
-                           ::testing::Values(::libaom_test::kRealTime,
-                                             ::libaom_test::kOnePassGood),
+                           ::testing::Values(::libaom_test::kOnePassGood),
                            ::testing::Range(3, 5), ::testing::Range(0, 4));
+#endif
 }  // namespace

@@ -10,7 +10,6 @@
  */
 
 #include <ostream>
-#include <string>
 
 #include "test/codec_factory.h"
 #include "test/decode_test_driver.h"
@@ -63,8 +62,7 @@ class DecodeScalabilityTest
   void RunTest() {
     const DecodeParam input = GET_PARAM(1);
     aom_codec_dec_cfg_t cfg = { 1, 0, 0, !FORCE_HIGHBITDEPTH_DECODING };
-    const std::string filename = input.filename;
-    libaom_test::IVFVideoSource decode_video(filename);
+    libaom_test::IVFVideoSource decode_video(input.filename);
     decode_video.Init();
 
     ASSERT_NO_FATAL_FAILURE(RunLoop(&decode_video, cfg));

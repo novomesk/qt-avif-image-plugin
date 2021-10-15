@@ -31,7 +31,7 @@ extern "C" {
  */
 typedef struct {
   // This structure is compared element-by-element in the function
-  // av1_check_grain_params_equiv: this function must be updated if any changes
+  // aom_check_grain_params_equiv: this function must be updated if any changes
   // are made to this structure.
   int apply_grain;
 
@@ -85,7 +85,7 @@ typedef struct {
 
   uint16_t random_seed;
   // This structure is compared element-by-element in the function
-  // av1_check_grain_params_equiv: this function must be updated if any changes
+  // aom_check_grain_params_equiv: this function must be updated if any changes
   // are made to this structure.
 } aom_film_grain_t;
 
@@ -98,7 +98,7 @@ typedef struct {
  * \param[in]    pb               The second set of parameters to compare
  * \return       Returns 1 if the params are equivalent, 0 otherwise
  */
-static INLINE int av1_check_grain_params_equiv(
+static INLINE int aom_check_grain_params_equiv(
     const aom_film_grain_t *const pa, const aom_film_grain_t *const pb) {
   if (pa->apply_grain != pb->apply_grain) return 0;
   // Don't compare update_parameters

@@ -39,8 +39,8 @@ static void yv12_copy_plane(const YV12_BUFFER_CONFIG *src_bc,
 
 int av1_get_max_filter_level(const AV1_COMP *cpi) {
   if (is_stat_consumption_stage_twopass(cpi)) {
-    return cpi->twopass.section_intra_rating > 8 ? MAX_LOOP_FILTER * 3 / 4
-                                                 : MAX_LOOP_FILTER;
+    return cpi->ppi->twopass.section_intra_rating > 8 ? MAX_LOOP_FILTER * 3 / 4
+                                                      : MAX_LOOP_FILTER;
   } else {
     return MAX_LOOP_FILTER;
   }
@@ -69,25 +69,12 @@ static int64_t try_filter_frame(const YV12_BUFFER_CONFIG *sd,
     case 2: cm->lf.filter_level_v = filter_level[0]; break;
   }
 
-  // TODO(any): please enable multi-thread and remove the flag when loop
-  // filter mask is compatible with multi-thread.
-  if (num_workers > 1)
-    av1_loop_filter_frame_mt(&cm->cur_frame->buf, cm, &cpi->td.mb.e_mbd, plane,
-                             plane + 1, partial_frame,
-#if CONFIG_LPF_MASK
-                             0,
-#endif
-                             mt_info->workers, num_workers,
-                             &mt_info->lf_row_sync);
-  else
-    av1_loop_filter_frame(&cm->cur_frame->buf, cm, &cpi->td.mb.e_mbd,
-#if CONFIG_LPF_MASK
-                          0,
-#endif
-                          plane, plane + 1, partial_frame);
+  av1_loop_filter_frame_mt(&cm->cur_frame->buf, cm, &cpi->td.mb.e_mbd, plane,
+                           plane + 1, partial_frame, mt_info->workers,
+                           num_workers, &mt_info->lf_row_sync, 0);
 
   filt_err = aom_get_sse_plane(sd, &cm->cur_frame->buf, plane,
-                               cm->seq_params.use_highbitdepth);
+                               cm->seq_params->use_highbitdepth);
 
   // Re-instate the unfiltered frame
   yv12_copy_plane(&cpi->last_frame_uf, &cm->cur_frame->buf, plane);
@@ -153,8 +140,8 @@ static int search_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
     int64_t bias = (best_err >> (15 - (filt_mid / 8))) * filter_step;
 
     if ((is_stat_consumption_stage_twopass(cpi)) &&
-        (cpi->twopass.section_intra_rating < 20))
-      bias = (bias * cpi->twopass.section_intra_rating) / 20;
+        (cpi->ppi->twopass.section_intra_rating < 20))
+      bias = (bias * cpi->ppi->twopass.section_intra_rating) / 20;
 
     // yx, bias less for large block size
     if (cm->features.tx_mode != ONLY_4X4) bias >>= 1;
@@ -205,7 +192,7 @@ static int search_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
 
   if (best_cost_ret)
     *best_cost_ret = RDCOST_DBL_WITH_NATIVE_BD_DIST(
-        x->rdmult, 0, (best_err << 4), cm->seq_params.bit_depth);
+        x->rdmult, 0, (best_err << 4), cm->seq_params->bit_depth);
   return filt_best;
 }
 
@@ -226,7 +213,7 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
     const int min_filter_level = 0;
     const int max_filter_level = av1_get_max_filter_level(cpi);
     const int q = av1_ac_quant_QTX(cm->quant_params.base_qindex, 0,
-                                   cm->seq_params.bit_depth);
+                                   cm->seq_params->bit_depth);
     // based on tests result for rtc test set
     // 0.04590 boosted or 0.02295 non-booseted in 18-bit fixed point
     const int strength_boost_q_treshold = 0;
@@ -244,7 +231,7 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
     // And high bit depth separately:
     // filt_guess = q * 0.316206 + 3.87252
     int filt_guess;
-    switch (cm->seq_params.bit_depth) {
+    switch (cm->seq_params->bit_depth) {
       case AOM_BITS_8:
         filt_guess =
             (cm->current_frame.frame_type == KEY_FRAME)
@@ -263,7 +250,7 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
                "or AOM_BITS_12");
         return;
     }
-    if (cm->seq_params.bit_depth != AOM_BITS_8 &&
+    if (cm->seq_params->bit_depth != AOM_BITS_8 &&
         cm->current_frame.frame_type == KEY_FRAME)
       filt_guess -= 4;
     // TODO(chengchen): retrain the model for Y, U, V filter levels
@@ -272,10 +259,20 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
     lf->filter_level_u = clamp(filt_guess, min_filter_level, max_filter_level);
     lf->filter_level_v = clamp(filt_guess, min_filter_level, max_filter_level);
   } else {
-    const int last_frame_filter_level[4] = { lf->filter_level[0],
-                                             lf->filter_level[1],
-                                             lf->filter_level_u,
-                                             lf->filter_level_v };
+    int last_frame_filter_level[4] = { 0 };
+    if (!frame_is_intra_only(cm)) {
+#if CONFIG_FRAME_PARALLEL_ENCODE
+      last_frame_filter_level[0] = cpi->ppi->filter_level[0];
+      last_frame_filter_level[1] = cpi->ppi->filter_level[1];
+      last_frame_filter_level[2] = cpi->ppi->filter_level_u;
+      last_frame_filter_level[3] = cpi->ppi->filter_level_v;
+#else
+      last_frame_filter_level[0] = lf->filter_level[0];
+      last_frame_filter_level[1] = lf->filter_level[1];
+      last_frame_filter_level[2] = lf->filter_level_u;
+      last_frame_filter_level[3] = lf->filter_level_v;
+#endif
+    }
 
     lf->filter_level[0] = lf->filter_level[1] =
         search_filter_level(sd, cpi, method == LPF_PICK_FROM_SUBIMAGE,

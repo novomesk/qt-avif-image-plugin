@@ -18,7 +18,6 @@
 #include "av1/common/seg_common.h"
 #include "av1/encoder/segmentation.h"
 #include "aom_dsp/aom_dsp_common.h"
-#include "aom_ports/system_state.h"
 
 #define AQ_C_SEGMENTS 5
 #define DEFAULT_AQ2_SEG 3  // Neutral Q segment
@@ -69,7 +68,6 @@ void av1_setup_in_frame_q_adj(AV1_COMP *cpi) {
                          cm->height != cm->prev_frame->height);
 
   // Make SURE use of floating point in this function is safe.
-  aom_clear_system_state();
 
   if (resolution_change) {
     memset(cpi->enc_seg.map, 0, cm->mi_params.mi_rows * cm->mi_params.mi_cols);
@@ -81,7 +79,7 @@ void av1_setup_in_frame_q_adj(AV1_COMP *cpi) {
   if (is_frame_aq_enabled(cpi)) {
     int segment;
     const int aq_strength =
-        get_aq_c_strength(base_qindex, cm->seq_params.bit_depth);
+        get_aq_c_strength(base_qindex, cm->seq_params->bit_depth);
 
     // Clear down the segment map.
     memset(cpi->enc_seg.map, DEFAULT_AQ2_SEG,
@@ -108,7 +106,7 @@ void av1_setup_in_frame_q_adj(AV1_COMP *cpi) {
       qindex_delta = av1_compute_qdelta_by_rate(
           &cpi->rc, cm->current_frame.frame_type, base_qindex,
           aq_c_q_adj_factor[aq_strength][segment], cpi->is_screen_content_type,
-          cm->seq_params.bit_depth);
+          cm->seq_params->bit_depth);
 
       // For AQ complexity mode, we dont allow Q0 in a segment if the base
       // Q is not 0. Q0 (lossless) implies 4x4 only and in AQ mode 2 a segment
@@ -150,18 +148,17 @@ void av1_caq_select_segment(const AV1_COMP *cpi, MACROBLOCK *mb, BLOCK_SIZE bs,
     // It is converted to bits << AV1_PROB_COST_SHIFT units.
     const int64_t num = (int64_t)(cpi->rc.sb64_target_rate * xmis * ymis)
                         << AV1_PROB_COST_SHIFT;
-    const int denom = cm->seq_params.mib_size * cm->seq_params.mib_size;
+    const int denom = cm->seq_params->mib_size * cm->seq_params->mib_size;
     const int target_rate = (int)(num / denom);
     double logvar;
     double low_var_thresh;
     const int aq_strength = get_aq_c_strength(cm->quant_params.base_qindex,
-                                              cm->seq_params.bit_depth);
+                                              cm->seq_params->bit_depth);
 
-    aom_clear_system_state();
-    low_var_thresh =
-        (is_stat_consumption_stage_twopass(cpi))
-            ? AOMMAX(exp(cpi->twopass.mb_av_energy), MIN_DEFAULT_LV_THRESH)
-            : DEFAULT_LV_THRESH;
+    low_var_thresh = (is_stat_consumption_stage_twopass(cpi))
+                         ? AOMMAX(exp(cpi->twopass_frame.mb_av_energy),
+                                  MIN_DEFAULT_LV_THRESH)
+                         : DEFAULT_LV_THRESH;
 
     av1_setup_src_planes(mb, cpi->source, mi_row, mi_col, num_planes, bs);
     logvar = av1_log_block_var(cpi, mb, bs);

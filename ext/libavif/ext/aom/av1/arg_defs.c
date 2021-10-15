@@ -145,8 +145,8 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .use_i422 = ARG_DEF(NULL, "i422", 0, "Input file is I422"),
   .use_i444 = ARG_DEF(NULL, "i444", 0, "Input file is I444"),
   .codecarg = ARG_DEF(NULL, "codec", 1, "Codec to use"),
-  .passes = ARG_DEF("p", "passes", 1, "Number of passes (1/2)"),
-  .pass_arg = ARG_DEF(NULL, "pass", 1, "Pass to execute (1/2)"),
+  .passes = ARG_DEF("p", "passes", 1, "Number of passes (1/2/3)"),
+  .pass_arg = ARG_DEF(NULL, "pass", 1, "Pass to execute (1/2/3)"),
   .fpf_name = ARG_DEF(NULL, "fpf", 1, "First pass statistics file name"),
   .limit = ARG_DEF(NULL, "limit", 1, "Stop encoding after n input frames"),
   .skip = ARG_DEF(NULL, "skip", 1, "Skip the first n input frames"),
@@ -271,7 +271,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .noise_sens = ARG_DEF(NULL, "noise-sensitivity", 1,
                         "Noise sensitivity (frames to blur)"),
   .sharpness = ARG_DEF(NULL, "sharpness", 1,
-                       "Loop filter sharpness (0..7), default is 0"),
+                       "Bias towards block sharpness in rate-distortion "
+                       "optimization of transform coefficients "
+                       "(0..7), default is 0"),
   .static_thresh =
       ARG_DEF(NULL, "static-thresh", 1, "Motion detection threshold"),
   .auto_altref =
@@ -405,10 +407,15 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .enable_cfl_intra = ARG_DEF(NULL, "enable-cfl-intra", 1,
                               "Enable chroma from luma intra prediction mode "
                               "(0: false, 1: true (default))"),
+  .enable_directional_intra =
+      ARG_DEF(NULL, "enable-directional-intra", 1,
+              "Enable directional intra prediction modes "
+              "(0: false, 1: true (default))"),
   .enable_diagonal_intra =
       ARG_DEF(NULL, "enable-diagonal-intra", 1,
-              "Enable diagonal (D45 to D203) intra prediction modes "
-              "(0: false, 1: true (default))"),
+              "Enable diagonal (D45 to D203) intra prediction modes, which are "
+              "a subset of directional modes. Has no effect if "
+              "enable-directional-intra is 0 (0: false, 1: true (default))"),
   .force_video_mode = ARG_DEF(NULL, "force-video-mode", 1,
                               "Force video mode (0: false, 1: true (default))"),
   .enable_obmc = ARG_DEF(NULL, "enable-obmc", 1,
@@ -448,13 +455,16 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "Use Default-transform only for INTRA modes"),
   .quant_b_adapt = ARG_DEF(NULL, "quant-b-adapt", 1, "Use adaptive quantize_b"),
   .coeff_cost_upd_freq = ARG_DEF(NULL, "coeff-cost-upd-freq", 1,
-                                 "Update freq for coeff costs"
+                                 "Update freq for coeff costs. "
                                  "0: SB, 1: SB Row per Tile, 2: Tile, 3: Off"),
   .mode_cost_upd_freq = ARG_DEF(NULL, "mode-cost-upd-freq", 1,
-                                "Update freq for mode costs"
+                                "Update freq for mode costs. "
                                 "0: SB, 1: SB Row per Tile, 2: Tile, 3: Off"),
   .mv_cost_upd_freq = ARG_DEF(NULL, "mv-cost-upd-freq", 1,
-                              "Update freq for mv costs"
+                              "Update freq for mv costs. "
+                              "0: SB, 1: SB Row per Tile, 2: Tile, 3: Off"),
+  .dv_cost_upd_freq = ARG_DEF(NULL, "dv-cost-upd-freq", 1,
+                              "Update freq for dv costs. "
                               "0: SB, 1: SB Row per Tile, 2: Tile, 3: Off"),
   .num_tg = ARG_DEF(NULL, "num-tile-groups", 1,
                     "Maximum number of tile groups, default is 1"),
@@ -471,6 +481,8 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .vmaf_model_path =
       ARG_DEF(NULL, "vmaf-model-path", 1, "Path to the VMAF model file"),
 #endif
+  .partition_info_path = ARG_DEF(NULL, "partition-info-path", 1,
+                                 "Partition information read and write path"),
   .film_grain_test = ARG_DEF(
       NULL, "film-grain-test", 1,
       "Film grain test vectors (0: none (default), 1: test-1  2: test-2, "
@@ -505,7 +517,8 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .deltaq_mode =
       ARG_DEF(NULL, "deltaq-mode", 1,
               "Delta qindex mode (0: off, 1: deltaq objective (default), "
-              "2: deltaq perceptual). "
+              "2: deltaq placeholder, 3: key frame visual quality, 4: user "
+              "rating based visual quality optimization). "
               "Currently this requires enable-tpl-model as a prerequisite."),
   .deltalf_mode = ARG_DEF(NULL, "delta-lf-mode", 1,
                           "Enable delta-lf-mode (0: off (default), 1: on)"),
@@ -605,6 +618,28 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .vbr_corpus_complexity_lap = ARG_DEF(
       NULL, "vbr-corpus-complexity-lap", 1,
       "Set average corpus complexity per mb for single pass VBR using lap. "
-      "(0..10000), default is 0")
+      "(0..10000), default is 0"),
+
+  .fwd_kf_dist =
+      ARG_DEF(NULL, "fwd-kf-dist", -1,
+              "Set distance between forward keyframes. A value of -1 means no "
+              "repetitive forward keyframes. Default is -1."),
+
+  .enable_tx_size_search = ARG_DEF(
+      NULL, "enable-tx-size-search", 1,
+      "Enable transform size search to find the best size for each block. "
+      "If false, transforms always have the largest possible size "
+      "(0: false, 1: true (default))"),
+
+  .two_pass_input =
+      ARG_DEF(NULL, "two-pass-input", 1,
+              "The input file for the second pass for three-pass encoding."),
+  .two_pass_output = ARG_DEF(
+      NULL, "two-pass-output", 1,
+      "The output file for the first two passes for three-pass encoding."),
+  .two_pass_width =
+      ARG_DEF(NULL, "two-pass-width", 1, "The width of two-pass-input."),
+  .two_pass_height =
+      ARG_DEF(NULL, "two-pass-height", 1, "The height of two-pass-input."),
 #endif  // CONFIG_AV1_ENCODER
 };

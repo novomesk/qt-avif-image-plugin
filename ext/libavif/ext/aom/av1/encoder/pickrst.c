@@ -19,17 +19,16 @@
 
 #include "aom_dsp/aom_dsp_common.h"
 #include "aom_dsp/binary_codes_writer.h"
+#include "aom_dsp/mathutils.h"
 #include "aom_dsp/psnr.h"
 #include "aom_mem/aom_mem.h"
 #include "aom_ports/mem.h"
-#include "aom_ports/system_state.h"
 #include "av1/common/av1_common_int.h"
 #include "av1/common/quant_common.h"
 #include "av1/common/restoration.h"
 
 #include "av1/encoder/av1_quantize.h"
 #include "av1/encoder/encoder.h"
-#include "av1/encoder/mathutils.h"
 #include "av1/encoder/picklpf.h"
 #include "av1/encoder/pickrst.h"
 
@@ -199,8 +198,8 @@ static int64_t try_restoration_unit(const RestSearchCtxt *rsc,
   const int is_uv = plane > 0;
   const RestorationInfo *rsi = &cm->rst_info[plane];
   RestorationLineBuffers rlbs;
-  const int bit_depth = cm->seq_params.bit_depth;
-  const int highbd = cm->seq_params.use_highbitdepth;
+  const int bit_depth = cm->seq_params->bit_depth;
+  const int highbd = cm->seq_params->use_highbitdepth;
 
   const YV12_BUFFER_CONFIG *fts = &cm->cur_frame->buf;
   // TODO(yunqing): For now, only use optimized LR filter in decoder. Can be
@@ -209,8 +208,8 @@ static int64_t try_restoration_unit(const RestSearchCtxt *rsc,
 
   av1_loop_restoration_filter_unit(
       limits, rui, &rsi->boundaries, &rlbs, tile_rect, rsc->tile_stripe0,
-      is_uv && cm->seq_params.subsampling_x,
-      is_uv && cm->seq_params.subsampling_y, highbd, bit_depth,
+      is_uv && cm->seq_params->subsampling_x,
+      is_uv && cm->seq_params->subsampling_y, highbd, bit_depth,
       fts->buffers[plane], fts->strides[is_uv], rsc->dst->buffers[plane],
       rsc->dst->strides[is_uv], cm->rst_tmpbuf, optimized_lr);
 
@@ -774,12 +773,10 @@ static AOM_INLINE void compute_sgrproj_err(
   int exq[2];
   apply_sgr(ep, dat8, width, height, dat_stride, use_highbitdepth, bit_depth,
             pu_width, pu_height, flt0, flt1, flt_stride);
-  aom_clear_system_state();
   const sgr_params_type *const params = &av1_sgr_params[ep];
   get_proj_subspace(src8, width, height, src_stride, dat8, dat_stride,
                     use_highbitdepth, flt0, flt_stride, flt1, flt_stride, exq,
                     params);
-  aom_clear_system_state();
   encode_xq(exq, exqd, params);
   *err = finer_search_pixel_proj_error(
       src8, width, height, src_stride, dat8, dat_stride, use_highbitdepth, flt0,
@@ -886,8 +883,8 @@ static AOM_INLINE void search_sgrproj(const RestorationTileLimits *limits,
 
   const MACROBLOCK *const x = rsc->x;
   const AV1_COMMON *const cm = rsc->cm;
-  const int highbd = cm->seq_params.use_highbitdepth;
-  const int bit_depth = cm->seq_params.bit_depth;
+  const int highbd = cm->seq_params->use_highbitdepth;
+  const int bit_depth = cm->seq_params->bit_depth;
 
   const int64_t bits_none = x->mode_costs.sgrproj_restore_cost[0];
   // Prune evaluation of RESTORE_SGRPROJ if 'skip_sgr_eval' is set
@@ -905,8 +902,8 @@ static AOM_INLINE void search_sgrproj(const RestorationTileLimits *limits,
       rsc->src_buffer + limits->v_start * rsc->src_stride + limits->h_start;
 
   const int is_uv = rsc->plane > 0;
-  const int ss_x = is_uv && cm->seq_params.subsampling_x;
-  const int ss_y = is_uv && cm->seq_params.subsampling_y;
+  const int ss_x = is_uv && cm->seq_params->subsampling_x;
+  const int ss_y = is_uv && cm->seq_params->subsampling_y;
   const int procunit_width = RESTORATION_PROC_UNIT_SIZE >> ss_x;
   const int procunit_height = RESTORATION_PROC_UNIT_SIZE >> ss_y;
 
@@ -1247,8 +1244,6 @@ static int64_t compute_score(int wiener_win, int64_t *M, int64_t *H,
   const int plane_off = (WIENER_WIN - wiener_win) >> 1;
   const int wiener_win2 = wiener_win * wiener_win;
 
-  aom_clear_system_state();
-
   a[WIENER_HALFWIN] = b[WIENER_HALFWIN] = WIENER_FILT_STEP;
   for (i = 0; i < WIENER_HALFWIN; ++i) {
     a[i] = a[WIENER_WIN - i - 1] = vfilt[i];
@@ -1474,12 +1469,12 @@ static AOM_INLINE void search_wiener(const RestorationTileLimits *limits,
     const int scale[3] = { 0, 1, 2 };
     // Obtain the normalized Qscale
     const int qs = av1_dc_quant_QTX(rsc->cm->quant_params.base_qindex, 0,
-                                    rsc->cm->seq_params.bit_depth) >>
+                                    rsc->cm->seq_params->bit_depth) >>
                    3;
     // Derive threshold as sqr(normalized Qscale) * scale / 16,
     const uint64_t thresh =
         (qs * qs * scale[rsc->lpf_sf->prune_wiener_based_on_src_var]) >> 4;
-    const int highbd = rsc->cm->seq_params.use_highbitdepth;
+    const int highbd = rsc->cm->seq_params->use_highbitdepth;
     const uint64_t src_var =
         var_restoration_unit(limits, rsc->src, rsc->plane, highbd);
     // Do not perform Wiener search if source variance is lower than threshold
@@ -1510,11 +1505,11 @@ static AOM_INLINE void search_wiener(const RestorationTileLimits *limits,
 
 #if CONFIG_AV1_HIGHBITDEPTH
   const AV1_COMMON *const cm = rsc->cm;
-  if (cm->seq_params.use_highbitdepth) {
+  if (cm->seq_params->use_highbitdepth) {
     av1_compute_stats_highbd(reduced_wiener_win, rsc->dgd_buffer,
                              rsc->src_buffer, limits->h_start, limits->h_end,
                              limits->v_start, limits->v_end, rsc->dgd_stride,
-                             rsc->src_stride, M, H, cm->seq_params.bit_depth);
+                             rsc->src_stride, M, H, cm->seq_params->bit_depth);
   } else {
     av1_compute_stats(reduced_wiener_win, rsc->dgd_buffer, rsc->src_buffer,
                       limits->h_start, limits->h_end, limits->v_start,
@@ -1547,8 +1542,6 @@ static AOM_INLINE void search_wiener(const RestorationTileLimits *limits,
     return;
   }
 
-  aom_clear_system_state();
-
   rusi->sse[RESTORE_WIENER] = finer_tile_search_wiener(
       rsc, limits, tile_rect, &rui, reduced_wiener_win);
   rusi->wiener = rui.wiener_info;
@@ -1567,10 +1560,10 @@ static AOM_INLINE void search_wiener(const RestorationTileLimits *limits,
 
   double cost_none = RDCOST_DBL_WITH_NATIVE_BD_DIST(
       x->rdmult, bits_none >> 4, rusi->sse[RESTORE_NONE],
-      rsc->cm->seq_params.bit_depth);
+      rsc->cm->seq_params->bit_depth);
   double cost_wiener = RDCOST_DBL_WITH_NATIVE_BD_DIST(
       x->rdmult, bits_wiener >> 4, rusi->sse[RESTORE_WIENER],
-      rsc->cm->seq_params.bit_depth);
+      rsc->cm->seq_params->bit_depth);
 
   RestorationType rtype =
       (cost_wiener < cost_none) ? RESTORE_WIENER : RESTORE_NONE;
@@ -1601,7 +1594,7 @@ static AOM_INLINE void search_norestore(const RestorationTileLimits *limits,
   RestSearchCtxt *rsc = (RestSearchCtxt *)priv;
   RestUnitSearchInfo *rusi = &rsc->rusi[rest_unit_idx];
 
-  const int highbd = rsc->cm->seq_params.use_highbitdepth;
+  const int highbd = rsc->cm->seq_params->use_highbitdepth;
   rusi->sse[RESTORE_NONE] = sse_restoration_unit(
       limits, rsc->src, &rsc->cm->cur_frame->buf, rsc->plane, highbd);
 
@@ -1653,8 +1646,8 @@ static AOM_INLINE void search_switchable(const RestorationTileLimits *limits,
     }
     const int64_t coeff_bits = coeff_pcost << AV1_PROB_COST_SHIFT;
     const int64_t bits = x->mode_costs.switchable_restore_cost[r] + coeff_bits;
-    double cost = RDCOST_DBL_WITH_NATIVE_BD_DIST(x->rdmult, bits >> 4, sse,
-                                                 rsc->cm->seq_params.bit_depth);
+    double cost = RDCOST_DBL_WITH_NATIVE_BD_DIST(
+        x->rdmult, bits >> 4, sse, rsc->cm->seq_params->bit_depth);
     if (r == RESTORE_SGRPROJ && rusi->sgrproj.ep < 10)
       cost *= (1 + DUAL_SGR_PENALTY_MULT * rsc->lpf_sf->dual_sgr_penalty_level);
     if (r == 0 || cost < best_cost) {
@@ -1694,7 +1687,7 @@ static double search_rest_type(RestSearchCtxt *rsc, RestorationType rtype) {
   av1_foreach_rest_unit_in_plane(rsc->cm, rsc->plane, funs[rtype], rsc,
                                  &rsc->tile_rect, rsc->cm->rst_tmpbuf, NULL);
   return RDCOST_DBL_WITH_NATIVE_BD_DIST(
-      rsc->x->rdmult, rsc->bits >> 4, rsc->sse, rsc->cm->seq_params.bit_depth);
+      rsc->x->rdmult, rsc->bits >> 4, rsc->sse, rsc->cm->seq_params->bit_depth);
 }
 
 static int rest_tiles_in_plane(const AV1_COMMON *cm, int plane) {
@@ -1740,8 +1733,9 @@ void av1_pick_filter_restoration(const YV12_BUFFER_CONFIG *src, AV1_COMP *cpi) {
     double best_cost = 0;
     RestorationType best_rtype = RESTORE_NONE;
 
-    const int highbd = rsc.cm->seq_params.use_highbitdepth;
-    if (!cpi->sf.lpf_sf.disable_loop_restoration_chroma || !plane) {
+    const int highbd = rsc.cm->seq_params->use_highbitdepth;
+    if ((plane && !cpi->sf.lpf_sf.disable_loop_restoration_chroma) ||
+        (!plane && !cpi->sf.lpf_sf.disable_loop_restoration_luma)) {
       av1_extend_frame(rsc.dgd_buffer, rsc.plane_width, rsc.plane_height,
                        rsc.dgd_stride, RESTORATION_BORDER, RESTORATION_BORDER,
                        highbd);

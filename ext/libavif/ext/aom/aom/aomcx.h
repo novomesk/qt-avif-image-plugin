@@ -18,6 +18,7 @@
  */
 #include "aom/aom.h"
 #include "aom/aom_encoder.h"
+#include "aom/aom_external_partition.h"
 
 /*!\file
  * \brief Provides definitions for using AOM or AV1 encoder algorithm within the
@@ -222,10 +223,14 @@ enum aome_enc_control_id {
 
   /* NOTE: enum 15 unused */
 
-  /*!\brief Codec control function to set loop filter sharpness,
+  /*!\brief Codec control function to set the sharpness parameter,
    * unsigned int parameter.
    *
-   * Valid range: 0..7. The default is 0.
+   * This parameter controls the level at which rate-distortion optimization of
+   * transform coefficients favours sharpness in the block.
+   *
+   * Valid range: 0..7. The default is 0. Values 1-7 will avoid eob and skip
+   * block optimization and will change rdmult in favour of block sharpness.
    */
   AOME_SET_SHARPNESS = AOME_SET_ENABLEAUTOALTREF + 2,  // 16
 
@@ -1108,7 +1113,9 @@ enum aome_enc_control_id {
    *
    * - 0 = deltaq signaling off
    * - 1 = use modulation to maximize objective quality (default)
-   * - 2 = use modulation to maximize perceptual quality
+   * - 2 = use modulation for local test
+   * - 3 = use modulation for key frame perceptual quality optimization
+   * - 4 = use modulation for user rating based perceptual quality optimization
    */
   AV1E_SET_DELTAQ_MODE = 107,
 
@@ -1320,12 +1327,55 @@ enum aome_enc_control_id {
   /*!\brief Codec control function to turn on / off D45 to D203 intra mode
    * usage, int parameter
    *
-   * This will enable or disable usage of D45 to D203 intra modes.
+   * This will enable or disable usage of D45 to D203 intra modes, which are a
+   * subset of directional modes. This control has no effect if directional
+   * modes are disabled (AV1E_SET_ENABLE_DIRECTIONAL_INTRA set to 0).
    *
    * - 0 = disable
    * - 1 = enable (default)
    */
   AV1E_SET_ENABLE_DIAGONAL_INTRA = 141,
+
+  /*!\brief Control to set frequency of the cost updates for intrabc motion
+   * vectors, unsigned int parameter
+   *
+   * - 0 = update at SB level (default)
+   * - 1 = update at SB row level in tile
+   * - 2 = update at tile level
+   * - 3 = turn off
+   */
+  AV1E_SET_DV_COST_UPD_FREQ = 142,
+
+  /*!\brief Codec control to set the path for partition stats read and write.
+   * const char * parameter.
+   */
+  AV1E_SET_PARTITION_INFO_PATH = 143,
+
+  /*!\brief Codec control to use an external partition model
+   * A set of callback functions is passed through this control
+   * to let the encoder encode with given partitions.
+   */
+  AV1E_SET_EXTERNAL_PARTITION = 144,
+
+  /*!\brief Codec control function to turn on / off directional intra mode
+   * usage, int parameter
+   *
+   * - 0 = disable
+   * - 1 = enable (default)
+   */
+  AV1E_SET_ENABLE_DIRECTIONAL_INTRA = 145,
+
+  /*!\brief Control to turn on / off transform size search.
+   *
+   * - 0 = disable, transforms always have the largest possible size
+   * - 1 = enable, search for the best transform size for each block (default)
+   */
+  AV1E_SET_ENABLE_TX_SIZE_SEARCH = 146,
+
+  /*!\brief Codec control function to set reference frame compound prediction.
+   * aom_svc_ref_frame_comp_pred_t* parameter
+   */
+  AV1E_SET_SVC_REF_FRAME_COMP_PRED = 147,
 
   // Any new encoder control IDs should be added above.
   // Maximum allowed encoder control ID is 229.
@@ -1460,6 +1510,13 @@ typedef struct aom_svc_ref_frame_config {
   int ref_idx[7];
   int refresh[8]; /**< Refresh flag for each of the 8 slots. */
 } aom_svc_ref_frame_config_t;
+
+/*!brief Parameters for setting ref frame compound prediction */
+typedef struct aom_svc_ref_frame_comp_pred {
+  // Use compound prediction for the ref_frame pairs GOLDEN_LAST (0),
+  // LAST2_LAST (1), and ALTREF_LAST (2).
+  int use_comp_pred[3]; /**<Compound reference flag. */
+} aom_svc_ref_frame_comp_pred_t;
 
 /*!\cond */
 /*!\brief Encoder control function parameter type
@@ -1859,6 +1916,25 @@ AOM_CTRL_USE_TYPE(AV1E_SET_VBR_CORPUS_COMPLEXITY_LAP, unsigned int)
 
 AOM_CTRL_USE_TYPE(AV1E_SET_ENABLE_DNL_DENOISING, int)
 #define AOM_CTRL_AV1E_SET_ENABLE_DNL_DENOISING
+
+AOM_CTRL_USE_TYPE(AV1E_SET_DV_COST_UPD_FREQ, unsigned int)
+#define AOM_CTRL_AV1E_SET_DV_COST_UPD_FREQ
+
+AOM_CTRL_USE_TYPE(AV1E_SET_PARTITION_INFO_PATH, const char *)
+#define AOM_CTRL_AV1E_SET_PARTITION_INFO_PATH
+
+AOM_CTRL_USE_TYPE(AV1E_SET_EXTERNAL_PARTITION, aom_ext_part_funcs_t *)
+#define AOM_CTRL_AV1E_SET_EXTERNAL_PARTITION
+
+AOM_CTRL_USE_TYPE(AV1E_SET_ENABLE_DIRECTIONAL_INTRA, int)
+#define AOM_CTRL_AV1E_SET_ENABLE_DIRECTIONAL_INTRA
+
+AOM_CTRL_USE_TYPE(AV1E_SET_ENABLE_TX_SIZE_SEARCH, int)
+#define AOM_CTRL_AV1E_SET_ENABLE_TX_SIZE_SEARCH
+
+AOM_CTRL_USE_TYPE(AV1E_SET_SVC_REF_FRAME_COMP_PRED,
+                  aom_svc_ref_frame_comp_pred_t *)
+#define AOME_CTRL_AV1E_SET_SVC_REF_FRAME_COMP_PRED
 
 /*!\endcond */
 /*! @} - end defgroup aom_encoder */

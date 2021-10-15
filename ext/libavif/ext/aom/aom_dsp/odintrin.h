@@ -11,8 +11,8 @@
 
 /* clang-format off */
 
-#ifndef AOM_AV1_COMMON_ODINTRIN_H_
-#define AOM_AV1_COMMON_ODINTRIN_H_
+#ifndef AOM_AOM_DSP_ODINTRIN_H_
+#define AOM_AOM_DSP_ODINTRIN_H_
 
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +20,6 @@
 #include "aom/aom_integer.h"
 #include "aom_dsp/aom_dsp_common.h"
 #include "aom_ports/bitops.h"
-#include "av1/common/enums.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -93,4 +92,4 @@ extern uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2];
 }  // extern "C"
 #endif
 
-#endif  // AOM_AV1_COMMON_ODINTRIN_H_
+#endif  // AOM_AOM_DSP_ODINTRIN_H_

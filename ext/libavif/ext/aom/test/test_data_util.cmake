@@ -11,6 +11,7 @@
 
 list(APPEND AOM_TEST_DATA_FILE_NAMES
             "desktop1.320_180.yuv"
+            "hantro_collage_w176h144.yuv"
             "hantro_collage_w352h288.yuv"
             "hantro_odd.yuv"
             "paris_352_288_30.y4m"
@@ -555,6 +556,8 @@ if(CONFIG_AV1_DECODER)
               "invalid-oss-fuzz-16437.ivf.res.2"
               "invalid-oss-fuzz-24706.ivf"
               "invalid-oss-fuzz-24706.ivf.res"
+              "invalid-oss-fuzz-33030.ivf"
+              "invalid-oss-fuzz-33030.ivf.res"
               "invalid-oss-fuzz-9288.ivf"
               "invalid-oss-fuzz-9288.ivf.res"
               "invalid-oss-fuzz-9463.ivf"

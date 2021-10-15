@@ -35,19 +35,19 @@
 #include "av1/encoder/rd.h"
 #include "av1/encoder/rdopt.h"
 
-void av1_subtract_block(const MACROBLOCKD *xd, int rows, int cols,
-                        int16_t *diff, ptrdiff_t diff_stride,
-                        const uint8_t *src8, ptrdiff_t src_stride,
-                        const uint8_t *pred8, ptrdiff_t pred_stride) {
+void av1_subtract_block(BitDepthInfo bd_info, int rows, int cols, int16_t *diff,
+                        ptrdiff_t diff_stride, const uint8_t *src8,
+                        ptrdiff_t src_stride, const uint8_t *pred8,
+                        ptrdiff_t pred_stride) {
   assert(rows >= 4 && cols >= 4);
 #if CONFIG_AV1_HIGHBITDEPTH
-  if (is_cur_buf_hbd(xd)) {
+  if (bd_info.use_highbitdepth_buf) {
     aom_highbd_subtract_block(rows, cols, diff, diff_stride, src8, src_stride,
-                              pred8, pred_stride, xd->bd);
+                              pred8, pred_stride, bd_info.bit_depth);
     return;
   }
 #endif
-  (void)xd;
+  (void)bd_info;
   aom_subtract_block(rows, cols, diff, diff_stride, src8, src_stride, pred8,
                      pred_stride);
 }
@@ -55,6 +55,7 @@ void av1_subtract_block(const MACROBLOCKD *xd, int rows, int cols,
 void av1_subtract_txb(MACROBLOCK *x, int plane, BLOCK_SIZE plane_bsize,
                       int blk_col, int blk_row, TX_SIZE tx_size) {
   MACROBLOCKD *const xd = &x->e_mbd;
+  const BitDepthInfo bd_info = get_bit_depth_info(xd);
   struct macroblock_plane *const p = &x->plane[plane];
   const struct macroblockd_plane *const pd = &x->e_mbd.plane[plane];
   const int diff_stride = block_size_wide[plane_bsize];
@@ -66,8 +67,8 @@ void av1_subtract_txb(MACROBLOCK *x, int plane, BLOCK_SIZE plane_bsize,
   uint8_t *src = &p->src.buf[(blk_row * src_stride + blk_col) << MI_SIZE_LOG2];
   int16_t *src_diff =
       &p->src_diff[(blk_row * diff_stride + blk_col) << MI_SIZE_LOG2];
-  av1_subtract_block(xd, tx1d_height, tx1d_width, src_diff, diff_stride, src,
-                     src_stride, dst, dst_stride);
+  av1_subtract_block(bd_info, tx1d_height, tx1d_width, src_diff, diff_stride,
+                     src, src_stride, dst, dst_stride);
 }
 
 void av1_subtract_plane(MACROBLOCK *x, BLOCK_SIZE plane_bsize, int plane) {
@@ -77,9 +78,10 @@ void av1_subtract_plane(MACROBLOCK *x, BLOCK_SIZE plane_bsize, int plane) {
   const int bw = block_size_wide[plane_bsize];
   const int bh = block_size_high[plane_bsize];
   const MACROBLOCKD *xd = &x->e_mbd;
+  const BitDepthInfo bd_info = get_bit_depth_info(xd);
 
-  av1_subtract_block(xd, bh, bw, p->src_diff, bw, p->src.buf, p->src.stride,
-                     pd->dst.buf, pd->dst.stride);
+  av1_subtract_block(bd_info, bh, bw, p->src_diff, bw, p->src.buf,
+                     p->src.stride, pd->dst.buf, pd->dst.stride);
 }
 
 int av1_optimize_b(const struct AV1_COMP *cpi, MACROBLOCK *x, int plane,
@@ -132,13 +134,8 @@ const int DROPOUT_MULTIPLIER_Q_BASE = 32;  // Base Q to compute multiplier.
 
 void av1_dropout_qcoeff(MACROBLOCK *mb, int plane, int block, TX_SIZE tx_size,
                         TX_TYPE tx_type, int qindex) {
-  const struct macroblock_plane *const p = &mb->plane[plane];
-  tran_low_t *const qcoeff = p->qcoeff + BLOCK_OFFSET(block);
-  tran_low_t *const dqcoeff = p->dqcoeff + BLOCK_OFFSET(block);
   const int tx_width = tx_size_wide[tx_size];
   const int tx_height = tx_size_high[tx_size];
-  const int max_eob = av1_get_max_eob(tx_size);
-  const SCAN_ORDER *const scan_order = get_scan(tx_size, tx_type);
 
   // Early return if `qindex` is out of range.
   if (qindex > DROPOUT_Q_MAX || qindex < DROPOUT_Q_MIN) {
@@ -156,6 +153,19 @@ void av1_dropout_qcoeff(MACROBLOCK *mb, int plane, int block, TX_SIZE tx_size,
       multiplier *
       CLIP(base_size, DROPOUT_AFTER_BASE_MIN, DROPOUT_AFTER_BASE_MAX);
 
+  av1_dropout_qcoeff_num(mb, plane, block, tx_size, tx_type, dropout_num_before,
+                         dropout_num_after);
+}
+
+void av1_dropout_qcoeff_num(MACROBLOCK *mb, int plane, int block,
+                            TX_SIZE tx_size, TX_TYPE tx_type,
+                            int dropout_num_before, int dropout_num_after) {
+  const struct macroblock_plane *const p = &mb->plane[plane];
+  tran_low_t *const qcoeff = p->qcoeff + BLOCK_OFFSET(block);
+  tran_low_t *const dqcoeff = p->dqcoeff + BLOCK_OFFSET(block);
+  const int max_eob = av1_get_max_eob(tx_size);
+  const SCAN_ORDER *const scan_order = get_scan(tx_size, tx_type);
+
   // Early return if there are not enough non-zero coefficients.
   if (p->eobs[block] == 0 || p->eobs[block] <= dropout_num_before) {
     return;
@@ -172,7 +182,8 @@ void av1_dropout_qcoeff(MACROBLOCK *mb, int plane, int block, TX_SIZE tx_size,
 
   for (int i = 0; i < p->eobs[block]; ++i) {
     const int scan_idx = scan_order->scan[i];
-    if (qcoeff[scan_idx] > DROPOUT_COEFF_MAX) {  // Keep large coefficients.
+    if (abs(qcoeff[scan_idx]) > DROPOUT_COEFF_MAX) {
+      // Keep large coefficients.
       count_zeros_before = 0;
       count_zeros_after = 0;
       idx = -1;
@@ -197,6 +208,7 @@ void av1_dropout_qcoeff(MACROBLOCK *mb, int plane, int block, TX_SIZE tx_size,
     if (count_nonzeros > DROPOUT_CONTINUITY_MAX) {
       count_zeros_before = 0;
       count_zeros_after = 0;
+      count_nonzeros = 0;
       idx = -1;
       eob = i + 1;
     }

@@ -15,11 +15,10 @@
 #include <string.h>
 
 #include "aom_dsp/aom_dsp_common.h"
+#include "aom_dsp/mathutils.h"
 #include "aom_dsp/noise_model.h"
 #include "aom_dsp/noise_util.h"
 #include "aom_mem/aom_mem.h"
-#include "av1/common/common.h"
-#include "av1/encoder/mathutils.h"
 
 #define kLowPolyNumParams 3
 
@@ -214,7 +213,7 @@ static void set_chroma_coefficient_fallback_soln(aom_equation_system_t *eqns) {
 
 int aom_noise_strength_lut_init(aom_noise_strength_lut_t *lut, int num_points) {
   if (!lut) return 0;
-  if (num_points < 0) return 0;
+  if (num_points <= 0) return 0;
   lut->num_points = 0;
   lut->points = (double(*)[2])aom_malloc(num_points * sizeof(*lut->points));
   if (!lut->points) return 0;
@@ -1153,12 +1152,24 @@ int aom_noise_model_get_grain_parameters(aom_noise_model_t *const noise_model,
 
   // Convert the scaling functions to 8 bit values
   aom_noise_strength_lut_t scaling_points[3];
-  aom_noise_strength_solver_fit_piecewise(
-      &noise_model->combined_state[0].strength_solver, 14, scaling_points + 0);
-  aom_noise_strength_solver_fit_piecewise(
-      &noise_model->combined_state[1].strength_solver, 10, scaling_points + 1);
-  aom_noise_strength_solver_fit_piecewise(
-      &noise_model->combined_state[2].strength_solver, 10, scaling_points + 2);
+  if (!aom_noise_strength_solver_fit_piecewise(
+          &noise_model->combined_state[0].strength_solver, 14,
+          scaling_points + 0)) {
+    return 0;
+  }
+  if (!aom_noise_strength_solver_fit_piecewise(
+          &noise_model->combined_state[1].strength_solver, 10,
+          scaling_points + 1)) {
+    aom_noise_strength_lut_free(scaling_points + 0);
+    return 0;
+  }
+  if (!aom_noise_strength_solver_fit_piecewise(
+          &noise_model->combined_state[2].strength_solver, 10,
+          scaling_points + 2)) {
+    aom_noise_strength_lut_free(scaling_points + 0);
+    aom_noise_strength_lut_free(scaling_points + 1);
+    return 0;
+  }
 
   // Both the domain and the range of the scaling functions in the film_grain
   // are normalized to 8-bit (e.g., they are implicitly scaled during grain

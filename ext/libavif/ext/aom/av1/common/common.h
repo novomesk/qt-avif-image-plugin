@@ -26,8 +26,6 @@
 extern "C" {
 #endif
 
-#define PI 3.141592653589793238462643383279502884
-
 // Only need this for fixed-size arrays, for structs just assign.
 #define av1_copy(dest, src)              \
   {                                      \
@@ -50,7 +48,7 @@ static INLINE int get_unsigned_bits(unsigned int num_values) {
 }
 
 #define CHECK_MEM_ERROR(cm, lval, expr) \
-  AOM_CHECK_MEM_ERROR(&cm->error, lval, expr)
+  AOM_CHECK_MEM_ERROR(cm->error, lval, expr)
 
 #define AOM_FRAME_MARKER 0x2
 

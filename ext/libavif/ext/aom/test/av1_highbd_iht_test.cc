@@ -17,7 +17,6 @@
 
 #include "test/acm_random.h"
 #include "test/av1_txfm_test.h"
-#include "test/clear_system_state.h"
 #include "test/register_state_check.h"
 #include "test/util.h"
 #include "av1/common/enums.h"
@@ -94,7 +93,6 @@ class AV1HighbdInvHTNxN : public ::testing::TestWithParam<IHbdHtParam> {
     aom_free(coeffs_);
     aom_free(output_);
     aom_free(output_ref_);
-    libaom_test::ClearSystemState();
   }
 
  protected:
@@ -146,7 +144,7 @@ void AV1HighbdInvHTNxN::RunBitexactCheck() {
 
     txfm_ref_(input_, coeffs_, stride, tx_type_, bit_depth_);
     inv_txfm_ref_(coeffs_, output_ref_, stride, tx_type_, bit_depth_);
-    ASM_REGISTER_STATE_CHECK(
+    API_REGISTER_STATE_CHECK(
         inv_txfm_(coeffs_, output_, stride, tx_type_, bit_depth_));
 
     for (int j = 0; j < num_coeffs_; ++j) {
@@ -210,6 +208,11 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AV1HighbdInvTxfm2d);
 void AV1HighbdInvTxfm2d::RunAV1InvTxfm2dTest(TX_TYPE tx_type_, TX_SIZE tx_size_,
                                              int run_times, int bit_depth_,
                                              int gt_int16) {
+#if CONFIG_REALTIME_ONLY
+  if (tx_size_ >= TX_4X16) {
+    return;
+  }
+#endif
   FwdTxfm2dFunc fwd_func_ = libaom_test::fwd_txfm_func_ls[tx_size_];
   TxfmParam txfm_param;
   const int BLK_WIDTH = 64;

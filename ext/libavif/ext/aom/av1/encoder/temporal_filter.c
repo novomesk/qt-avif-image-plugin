@@ -14,9 +14,14 @@
 
 #include "config/aom_config.h"
 
+#include "aom_dsp/aom_dsp_common.h"
+#include "aom_dsp/odintrin.h"
+#include "aom_mem/aom_mem.h"
+#include "aom_ports/aom_timer.h"
+#include "aom_ports/mem.h"
+#include "aom_scale/aom_scale.h"
 #include "av1/common/alloccommon.h"
 #include "av1/common/av1_common_int.h"
-#include "av1/common/odintrin.h"
 #include "av1/common/quant_common.h"
 #include "av1/common/reconinter.h"
 #include "av1/encoder/av1_quantize.h"
@@ -30,12 +35,6 @@
 #include "av1/encoder/reconinter_enc.h"
 #include "av1/encoder/segmentation.h"
 #include "av1/encoder/temporal_filter.h"
-#include "aom_dsp/aom_dsp_common.h"
-#include "aom_mem/aom_mem.h"
-#include "aom_ports/aom_timer.h"
-#include "aom_ports/mem.h"
-#include "aom_ports/system_state.h"
-#include "aom_scale/aom_scale.h"
 
 /*!\cond */
 
@@ -155,7 +154,7 @@ static void tf_motion_search(AV1_COMP *cpi, MACROBLOCK *mb,
     best_mv.as_mv.row = GET_MV_SUBPEL(mv_row);
     best_mv.as_mv.col = GET_MV_SUBPEL(mv_col);
     const int mv_offset = mv_row * y_stride + mv_col;
-    error = cpi->fn_ptr[block_size].vf(
+    error = cpi->ppi->fn_ptr[block_size].vf(
         ref_frame->y_buffer + y_offset + mv_offset, y_stride,
         frame_to_filter->y_buffer + y_offset, y_stride, &sse);
     block_mse = DIVIDE_AND_ROUND(error, mb_pels);
@@ -561,9 +560,16 @@ void av1_apply_temporal_filter_c(
       (double)TF_WINDOW_BLOCK_BALANCE_WEIGHT * inv_factor;
   // Decay factors for non-local mean approach.
   double decay_factor[MAX_MB_PLANE] = { 0 };
-  // Smaller q -> smaller filtering weight.
+  // Adjust filtering based on q.
+  // Larger q -> stronger filtering -> larger weight.
+  // Smaller q -> weaker filtering -> smaller weight.
   double q_decay = pow((double)q_factor / TF_Q_DECAY_THRESHOLD, 2);
   q_decay = CLIP(q_decay, 1e-5, 1);
+  if (q_factor >= TF_QINDEX_CUTOFF) {
+    // Max q_factor is 255, therefore the upper bound of q_decay is 8.
+    // We do not need a clip here.
+    q_decay = 0.5 * pow((double)q_factor / 64, 2);
+  }
   // Smaller strength -> smaller filtering weight.
   double s_decay = pow((double)filter_strength / TF_STRENGTH_THRESHOLD, 2);
   s_decay = CLIP(s_decay, 1e-5, 1);
@@ -745,10 +751,11 @@ static void tf_normalize_filtered_frame(
 }
 
 int av1_get_q(const AV1_COMP *cpi) {
-  const GF_GROUP *gf_group = &cpi->gf_group;
+  const GF_GROUP *gf_group = &cpi->ppi->gf_group;
   const FRAME_TYPE frame_type = gf_group->frame_type[cpi->gf_frame_index];
-  const int q = (int)av1_convert_qindex_to_q(
-      cpi->rc.avg_frame_qindex[frame_type], cpi->common.seq_params.bit_depth);
+  const int q =
+      (int)av1_convert_qindex_to_q(cpi->ppi->p_rc.avg_frame_qindex[frame_type],
+                                   cpi->common.seq_params->bit_depth);
   return q;
 }
 
@@ -818,7 +825,6 @@ void av1_tf_do_filtering_row(AV1_COMP *cpi, ThreadData *td, int mb_row) {
 
         // All variants of av1_apply_temporal_filter() contain floating point
         // operations. Hence, clear the system state.
-        aom_clear_system_state();
 
         // TODO(any): avx2/sse2 version should be changed to align with C
         // function before using. In particular, current avx2/sse2 function
@@ -855,23 +861,24 @@ void av1_tf_do_filtering_row(AV1_COMP *cpi, ThreadData *td, int mb_row) {
       }
     }
     tf_normalize_filtered_frame(mbd, block_size, mb_row, mb_col, num_planes,
-                                accum, count, &cpi->alt_ref_buffer);
+                                accum, count, &cpi->ppi->alt_ref_buffer);
 
     if (check_show_existing) {
       const int y_height = mb_height >> mbd->plane[0].subsampling_y;
       const int y_width = mb_width >> mbd->plane[0].subsampling_x;
       const int source_y_stride = frame_to_filter->y_stride;
-      const int filter_y_stride = cpi->alt_ref_buffer.y_stride;
+      const int filter_y_stride = cpi->ppi->alt_ref_buffer.y_stride;
       const int source_offset =
           mb_row * y_height * source_y_stride + mb_col * y_width;
       const int filter_offset =
           mb_row * y_height * filter_y_stride + mb_col * y_width;
       unsigned int sse = 0;
-      cpi->fn_ptr[block_size].vf(
+      cpi->ppi->fn_ptr[block_size].vf(
           frame_to_filter->y_buffer + source_offset, source_y_stride,
-          cpi->alt_ref_buffer.y_buffer + filter_offset, filter_y_stride, &sse);
+          cpi->ppi->alt_ref_buffer.y_buffer + filter_offset, filter_y_stride,
+          &sse);
       diff->sum += sse;
-      diff->sse += sse * sse;
+      diff->sse += sse * (int64_t)sse;
     }
   }
 }
@@ -939,8 +946,9 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   const int lookahead_depth =
       av1_lookahead_depth(cpi->ppi->lookahead, cpi->compressor_stage);
 
-  int arf_src_offset = cpi->gf_group.arf_src_offset[cpi->gf_frame_index];
-  const FRAME_TYPE frame_type = cpi->gf_group.frame_type[cpi->gf_frame_index];
+  int arf_src_offset = cpi->ppi->gf_group.arf_src_offset[cpi->gf_frame_index];
+  const FRAME_TYPE frame_type =
+      cpi->ppi->gf_group.frame_type[cpi->gf_frame_index];
 
   // Temporal filtering should not go beyond key frames
   const int key_to_curframe =
@@ -949,10 +957,10 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
       AOMMAX(cpi->rc.frames_to_key - arf_src_offset - 1, 0);
 
   // Number of buffered frames before the to-filter frame.
-  const int max_before = AOMMIN(filter_frame_lookahead_idx, key_to_curframe);
+  int max_before = AOMMIN(filter_frame_lookahead_idx, key_to_curframe);
 
   // Number of buffered frames after the to-filter frame.
-  const int max_after =
+  int max_after =
       AOMMIN(lookahead_depth - filter_frame_lookahead_idx - 1, curframe_to_key);
 
   // Estimate noises for each plane.
@@ -964,26 +972,34 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   double *noise_levels = tf_ctx->noise_levels;
   for (int plane = 0; plane < num_planes; ++plane) {
     noise_levels[plane] = av1_estimate_noise_from_single_plane(
-        to_filter_frame, plane, cpi->common.seq_params.bit_depth);
+        to_filter_frame, plane, cpi->common.seq_params->bit_depth);
   }
   // Get quantization factor.
   const int q = av1_get_q(cpi);
-  // Get correlation estimates from first-pass
-  RATE_CONTROL *rc = &cpi->rc;
-  const double *coeff = rc->cor_coeff;
-  const int offset = rc->regions_offset;
-  int cur_frame_idx =
-      filter_frame_lookahead_idx + rc->frames_since_key - offset;
-
+  // Get correlation estimates from first-pass;
+  const FIRSTPASS_STATS *stats =
+      cpi->twopass_frame.stats_in - (cpi->rc.frames_since_key == 0);
   double accu_coeff0 = 1.0, accu_coeff1 = 1.0;
   for (int i = 1; i <= max_after; i++) {
-    accu_coeff1 *= coeff[cur_frame_idx + i];
+    if (stats + filter_frame_lookahead_idx + i >=
+        cpi->ppi->twopass.stats_buf_ctx->stats_in_end) {
+      max_after = i - 1;
+      break;
+    }
+    accu_coeff1 *=
+        AOMMAX(stats[filter_frame_lookahead_idx + i].cor_coeff, 0.001);
   }
   if (max_after >= 1) {
     accu_coeff1 = pow(accu_coeff1, 1.0 / (double)max_after);
   }
   for (int i = 1; i <= max_before; i++) {
-    accu_coeff0 *= coeff[cur_frame_idx - i + 1];
+    if (stats + filter_frame_lookahead_idx - i + 1 <=
+        cpi->ppi->twopass.stats_buf_ctx->stats_in_start) {
+      max_before = i - 1;
+      break;
+    }
+    accu_coeff0 *=
+        AOMMAX(stats[filter_frame_lookahead_idx - i + 1].cor_coeff, 0.001);
   }
   if (max_before >= 1) {
     accu_coeff0 = pow(accu_coeff0, 1.0 / (double)max_before);
@@ -996,19 +1012,16 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   int adjust_num = 6;
   if (num_frames == 1) {  // `arnr_max_frames = 1` is used to disable filtering.
     adjust_num = 0;
-  } else if ((update_type == KF_UPDATE || is_forward_keyframe) && q <= 10) {
+  } else if ((update_type == KF_UPDATE) && q <= 10) {
     adjust_num = 0;
   }
   num_frames = AOMMIN(num_frames + adjust_num, lookahead_depth);
 
-  if (frame_type == KEY_FRAME && !is_forward_keyframe) {
-    num_before = 0;
+  if (frame_type == KEY_FRAME) {
+    num_before = is_forward_keyframe ? num_frames / 2 : 0;
     num_after = AOMMIN(num_frames - 1, max_after);
-  } else if (is_forward_keyframe) {  // Key frame in one-pass mode.
-    num_before = AOMMIN(num_frames - 1, max_before);
-    num_after = 0;
   } else {
-    num_frames = AOMMIN(num_frames, cpi->rc.gfu_boost / 150);
+    num_frames = AOMMIN(num_frames, cpi->ppi->p_rc.gfu_boost / 150);
     num_frames += !(num_frames & 1);  // Make the number odd.
     // Only use 2 neighbours for the second ARF.
     if (is_second_arf) num_frames = AOMMIN(num_frames, 3);
@@ -1051,10 +1064,10 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   assert(frames[tf_ctx->filter_frame_idx] == to_filter_frame);
 
   av1_setup_src_planes(&cpi->td.mb, &to_filter_buf->img, 0, 0, num_planes,
-                       cpi->common.seq_params.sb_size);
+                       cpi->common.seq_params->sb_size);
   av1_setup_block_planes(&cpi->td.mb.e_mbd,
-                         cpi->common.seq_params.subsampling_x,
-                         cpi->common.seq_params.subsampling_y, num_planes);
+                         cpi->common.seq_params->subsampling_x,
+                         cpi->common.seq_params->subsampling_y, num_planes);
 }
 
 /*!\cond */
@@ -1174,21 +1187,27 @@ int av1_temporal_filter(AV1_COMP *cpi, const int filter_frame_lookahead_idx,
                         int *show_existing_arf) {
   MultiThreadInfo *const mt_info = &cpi->mt_info;
   // Basic informaton of the current frame.
-  const GF_GROUP *const gf_group = &cpi->gf_group;
+  const GF_GROUP *const gf_group = &cpi->ppi->gf_group;
   const uint8_t group_idx = cpi->gf_frame_index;
   TemporalFilterCtx *tf_ctx = &cpi->tf_ctx;
   TemporalFilterData *tf_data = &cpi->td.tf_data;
   // Filter one more ARF if the lookahead index is leq 7 (w.r.t. 9-th frame).
   // This frame is ALWAYS a show existing frame.
   const int is_second_arf =
-      (update_type == INTNL_ARF_UPDATE) && (filter_frame_lookahead_idx >= 7) &&
-      (is_forward_keyframe == 0) && cpi->sf.hl_sf.second_alt_ref_filtering;
+      (update_type == INTNL_ARF_UPDATE) &&
+      (filter_frame_lookahead_idx >= TF_LOOKAHEAD_IDX_THR) &&
+      cpi->sf.hl_sf.second_alt_ref_filtering;
   // TODO(anyone): Currently, we enforce the filtering strength on internal
   // ARFs except the second ARF to be zero. We should investigate in which case
   // it is more beneficial to use non-zero strength filtering.
   if (update_type == INTNL_ARF_UPDATE && !is_second_arf) {
     return 0;
   }
+
+#if CONFIG_FRAME_PARALLEL_ENCODE
+  // Only parallel level 0 frames go through temporal filtering.
+  assert(gf_group->frame_parallel_level[group_idx] == 0);
+#endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
   // Initialize temporal filter context structure.
   init_tf_ctx(cpi, filter_frame_lookahead_idx, is_second_arf, update_type,
@@ -1229,16 +1248,15 @@ int av1_temporal_filter(AV1_COMP *cpi, const int filter_frame_lookahead_idx,
     const float mean = (float)diff->sum / num_mbs;
     const float std = (float)sqrt((float)diff->sse / num_mbs - mean * mean);
 
-    aom_clear_system_state();
     // TODO(yunqing): This can be combined with TPL q calculation later.
     cpi->rc.base_frame_target = gf_group->bit_allocation[group_idx];
     av1_set_target_rate(cpi, cpi->common.width, cpi->common.height);
     int top_index = 0;
     int bottom_index = 0;
     const int q = av1_rc_pick_q_and_bounds(
-        cpi, &cpi->rc, cpi->oxcf.frm_dim_cfg.width,
-        cpi->oxcf.frm_dim_cfg.height, group_idx, &bottom_index, &top_index);
-    const int ac_q = av1_ac_quant_QTX(q, 0, cpi->common.seq_params.bit_depth);
+        cpi, cpi->oxcf.frm_dim_cfg.width, cpi->oxcf.frm_dim_cfg.height,
+        group_idx, &bottom_index, &top_index);
+    const int ac_q = av1_ac_quant_QTX(q, 0, cpi->common.seq_params->bit_depth);
     const float threshold = 0.7f * ac_q * ac_q;
 
     if (!is_second_arf) {

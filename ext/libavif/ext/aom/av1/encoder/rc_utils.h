@@ -19,26 +19,52 @@
 extern "C" {
 #endif
 
-static AOM_INLINE void set_rc_buffer_sizes(RATE_CONTROL *rc,
-                                           const RateControlCfg *rc_cfg) {
+static AOM_INLINE void check_reset_rc_flag(AV1_COMP *cpi) {
+  RATE_CONTROL *rc = &cpi->rc;
+  PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
+  if (cpi->common.current_frame.frame_number >
+      (unsigned int)cpi->svc.number_spatial_layers) {
+    if (cpi->ppi->use_svc) {
+      av1_svc_check_reset_layer_rc_flag(cpi);
+    } else {
+      if (rc->avg_frame_bandwidth > (3 * rc->prev_avg_frame_bandwidth >> 1) ||
+          rc->avg_frame_bandwidth < (rc->prev_avg_frame_bandwidth >> 1)) {
+        rc->rc_1_frame = 0;
+        rc->rc_2_frame = 0;
+        p_rc->bits_off_target = p_rc->optimal_buffer_level;
+        p_rc->buffer_level = p_rc->optimal_buffer_level;
+      }
+    }
+  }
+}
+
+static AOM_INLINE void set_primary_rc_buffer_sizes(const AV1EncoderConfig *oxcf,
+                                                   AV1_PRIMARY *ppi) {
+  PRIMARY_RATE_CONTROL *p_rc = &ppi->p_rc;
+  const RateControlCfg *const rc_cfg = &oxcf->rc_cfg;
+
   const int64_t bandwidth = rc_cfg->target_bandwidth;
   const int64_t starting = rc_cfg->starting_buffer_level_ms;
   const int64_t optimal = rc_cfg->optimal_buffer_level_ms;
   const int64_t maximum = rc_cfg->maximum_buffer_size_ms;
 
-  rc->starting_buffer_level = starting * bandwidth / 1000;
-  rc->optimal_buffer_level =
+  p_rc->starting_buffer_level = starting * bandwidth / 1000;
+  p_rc->optimal_buffer_level =
       (optimal == 0) ? bandwidth / 8 : optimal * bandwidth / 1000;
-  rc->maximum_buffer_size =
+  p_rc->maximum_buffer_size =
       (maximum == 0) ? bandwidth / 8 : maximum * bandwidth / 1000;
+
+  // Under a configuration change, where maximum_buffer_size may change,
+  // keep buffer level clipped to the maximum allowed buffer size.
+  p_rc->bits_off_target =
+      AOMMIN(p_rc->bits_off_target, p_rc->maximum_buffer_size);
+  p_rc->buffer_level = AOMMIN(p_rc->buffer_level, p_rc->maximum_buffer_size);
 }
 
 static AOM_INLINE void config_target_level(AV1_COMP *const cpi,
                                            AV1_LEVEL target_level, int tier) {
-  aom_clear_system_state();
-
   AV1EncoderConfig *const oxcf = &cpi->oxcf;
-  SequenceHeader *const seq_params = &cpi->common.seq_params;
+  SequenceHeader *const seq_params = cpi->common.seq_params;
   TileConfig *const tile_cfg = &oxcf->tile_cfg;
   RateControlCfg *const rc_cfg = &oxcf->rc_cfg;
 
@@ -48,11 +74,11 @@ static AOM_INLINE void config_target_level(AV1_COMP *const cpi,
       av1_get_max_bitrate_for_level(target_level, tier, profile);
   const int64_t max_bitrate = (int64_t)(level_bitrate_limit * 0.70);
   rc_cfg->target_bandwidth = AOMMIN(rc_cfg->target_bandwidth, max_bitrate);
-  // Also need to update cpi->twopass.bits_left.
-  TWO_PASS *const twopass = &cpi->twopass;
+  // Also need to update cpi->ppi->twopass.bits_left.
+  TWO_PASS *const twopass = &cpi->ppi->twopass;
   FIRSTPASS_STATS *stats = twopass->stats_buf_ctx->total_stats;
   if (stats != NULL)
-    cpi->twopass.bits_left =
+    cpi->ppi->twopass.bits_left =
         (int64_t)(stats->duration * rc_cfg->target_bandwidth / 10000000.0);
 
   // Adjust max over-shoot percentage.
@@ -154,13 +180,21 @@ static AOM_INLINE double av1_get_kf_boost_projection_factor(int frame_count) {
   return factor;
 }
 
-static AOM_INLINE int get_regulated_q_overshoot(AV1_COMP *const cpi, int q_low,
-                                                int q_high, int top_index,
+static AOM_INLINE int get_regulated_q_overshoot(AV1_COMP *const cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                                int is_encode_stage,
+#endif
+                                                int q_low, int q_high,
+                                                int top_index,
                                                 int bottom_index) {
   const AV1_COMMON *const cm = &cpi->common;
   const RATE_CONTROL *const rc = &cpi->rc;
 
-  av1_rc_update_rate_correction_factors(cpi, cm->width, cm->height);
+  av1_rc_update_rate_correction_factors(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                        is_encode_stage,
+#endif
+                                        cm->width, cm->height);
 
   int q_regulated =
       av1_rc_regulate_q(cpi, rc->this_frame_target, bottom_index,
@@ -168,7 +202,11 @@ static AOM_INLINE int get_regulated_q_overshoot(AV1_COMP *const cpi, int q_low,
 
   int retries = 0;
   while (q_regulated < q_low && retries < 10) {
-    av1_rc_update_rate_correction_factors(cpi, cm->width, cm->height);
+    av1_rc_update_rate_correction_factors(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                          is_encode_stage,
+#endif
+                                          cm->width, cm->height);
     q_regulated =
         av1_rc_regulate_q(cpi, rc->this_frame_target, bottom_index,
                           AOMMAX(q_high, top_index), cm->width, cm->height);
@@ -178,18 +216,29 @@ static AOM_INLINE int get_regulated_q_overshoot(AV1_COMP *const cpi, int q_low,
 }
 
 static AOM_INLINE int get_regulated_q_undershoot(AV1_COMP *const cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                                 int is_encode_stage,
+#endif
                                                  int q_high, int top_index,
                                                  int bottom_index) {
   const AV1_COMMON *const cm = &cpi->common;
   const RATE_CONTROL *const rc = &cpi->rc;
 
-  av1_rc_update_rate_correction_factors(cpi, cm->width, cm->height);
+  av1_rc_update_rate_correction_factors(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                        is_encode_stage,
+#endif
+                                        cm->width, cm->height);
   int q_regulated = av1_rc_regulate_q(cpi, rc->this_frame_target, bottom_index,
                                       top_index, cm->width, cm->height);
 
   int retries = 0;
   while (q_regulated > q_high && retries < 10) {
-    av1_rc_update_rate_correction_factors(cpi, cm->width, cm->height);
+    av1_rc_update_rate_correction_factors(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                          is_encode_stage,
+#endif
+                                          cm->width, cm->height);
     q_regulated = av1_rc_regulate_q(cpi, rc->this_frame_target, bottom_index,
                                     top_index, cm->width, cm->height);
     retries++;
@@ -226,6 +275,7 @@ static AOM_INLINE void recode_loop_update_q(
     int *const low_cr_seen, const int loop_count) {
   AV1_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
+  PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
   const RateControlCfg *const rc_cfg = &cpi->oxcf.rc_cfg;
   *loop = 0;
 
@@ -236,7 +286,6 @@ static AOM_INLINE void recode_loop_update_q(
 
   const int min_cr = rc_cfg->min_cr;
   if (min_cr > 0) {
-    aom_clear_system_state();
     const double compression_ratio =
         av1_get_compression_ratio(cm, rc->projected_frame_size >> 3);
     const double target_cr = min_cr / 100.0;
@@ -263,14 +312,15 @@ static AOM_INLINE void recode_loop_update_q(
                                    &frame_over_shoot_limit);
   if (frame_over_shoot_limit == 0) frame_over_shoot_limit = 1;
 
-  if (cm->current_frame.frame_type == KEY_FRAME && rc->this_key_frame_forced &&
+  if (cm->current_frame.frame_type == KEY_FRAME &&
+      p_rc->this_key_frame_forced &&
       rc->projected_frame_size < rc->max_frame_bandwidth) {
     int64_t kf_err;
     const int64_t high_err_target = cpi->ambient_err;
     const int64_t low_err_target = cpi->ambient_err >> 1;
 
 #if CONFIG_AV1_HIGHBITDEPTH
-    if (cm->seq_params.use_highbitdepth) {
+    if (cm->seq_params->use_highbitdepth) {
       kf_err = aom_highbd_get_y_sse(cpi->source, &cm->cur_frame->buf);
     } else {
       kf_err = aom_get_y_sse(cpi->source, &cm->cur_frame->buf);
@@ -323,11 +373,11 @@ static AOM_INLINE void recode_loop_update_q(
       if (*q == *q_high &&
           rc->projected_frame_size >= rc->max_frame_bandwidth) {
         const double q_val_high_current =
-            av1_convert_qindex_to_q(*q_high, cm->seq_params.bit_depth);
+            av1_convert_qindex_to_q(*q_high, cm->seq_params->bit_depth);
         const double q_val_high_new =
             q_val_high_current *
             ((double)rc->projected_frame_size / rc->max_frame_bandwidth);
-        *q_high = av1_find_qindex(q_val_high_new, cm->seq_params.bit_depth,
+        *q_high = av1_find_qindex(q_val_high_new, cm->seq_params->bit_depth,
                                   rc->best_quality, rc->worst_quality);
       }
 
@@ -336,19 +386,31 @@ static AOM_INLINE void recode_loop_update_q(
 
       if (*undershoot_seen || loop_count > 2 ||
           (loop_count == 2 && !frame_is_intra_only(cm))) {
-        av1_rc_update_rate_correction_factors(cpi, cm->width, cm->height);
+        av1_rc_update_rate_correction_factors(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                              1,
+#endif
+                                              cm->width, cm->height);
 
         *q = (*q_high + *q_low + 1) / 2;
       } else if (loop_count == 2 && frame_is_intra_only(cm)) {
         const int q_mid = (*q_high + *q_low + 1) / 2;
-        const int q_regulated = get_regulated_q_overshoot(
-            cpi, *q_low, *q_high, top_index, bottom_index);
+        const int q_regulated =
+            get_regulated_q_overshoot(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                      1,
+#endif
+                                      *q_low, *q_high, top_index, bottom_index);
         // Get 'q' in-between 'q_mid' and 'q_regulated' for a smooth
         // transition between loop_count < 2 and loop_count > 2.
         *q = (q_mid + q_regulated + 1) / 2;
       } else {
-        *q = get_regulated_q_overshoot(cpi, *q_low, *q_high, top_index,
-                                       bottom_index);
+        *q =
+            get_regulated_q_overshoot(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                      1,
+#endif
+                                      *q_low, *q_high, top_index, bottom_index);
       }
 
       *overshoot_seen = 1;
@@ -358,12 +420,20 @@ static AOM_INLINE void recode_loop_update_q(
 
       if (*overshoot_seen || loop_count > 2 ||
           (loop_count == 2 && !frame_is_intra_only(cm))) {
-        av1_rc_update_rate_correction_factors(cpi, cm->width, cm->height);
+        av1_rc_update_rate_correction_factors(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                              1,
+#endif
+                                              cm->width, cm->height);
         *q = (*q_high + *q_low) / 2;
       } else if (loop_count == 2 && frame_is_intra_only(cm)) {
         const int q_mid = (*q_high + *q_low) / 2;
         const int q_regulated =
-            get_regulated_q_undershoot(cpi, *q_high, top_index, bottom_index);
+            get_regulated_q_undershoot(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                       1,
+#endif
+                                       *q_high, top_index, bottom_index);
         // Get 'q' in-between 'q_mid' and 'q_regulated' for a smooth
         // transition between loop_count < 2 and loop_count > 2.
         *q = (q_mid + q_regulated) / 2;
@@ -376,7 +446,11 @@ static AOM_INLINE void recode_loop_update_q(
           *q_low = *q;
         }
       } else {
-        *q = get_regulated_q_undershoot(cpi, *q_high, top_index, bottom_index);
+        *q = get_regulated_q_undershoot(cpi,
+#if CONFIG_FRAME_PARALLEL_ENCODE
+                                        1,
+#endif
+                                        *q_high, top_index, bottom_index);
 
         // Special case reset for qlow for constrained quality.
         // This should only trigger where there is very substantial

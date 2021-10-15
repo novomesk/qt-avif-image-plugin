@@ -19,6 +19,7 @@
 #include "av1/encoder/block.h"
 #include "av1/encoder/context_tree.h"
 #include "av1/encoder/cost.h"
+#include "av1/encoder/ratectrl.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -121,7 +122,12 @@ static INLINE void av1_invalid_rd_stats(RD_STATS *rd_stats) {
 
 static INLINE void av1_merge_rd_stats(RD_STATS *rd_stats_dst,
                                       const RD_STATS *rd_stats_src) {
-  assert(rd_stats_dst->rate != INT_MAX && rd_stats_src->rate != INT_MAX);
+  if (rd_stats_dst->rate == INT_MAX || rd_stats_src->rate == INT_MAX) {
+    // If rd_stats_dst or rd_stats_src has invalid rate, we will make
+    // rd_stats_dst invalid.
+    av1_invalid_rd_stats(rd_stats_dst);
+    return;
+  }
   rd_stats_dst->rate = (int)AOMMIN(
       ((int64_t)rd_stats_dst->rate + (int64_t)rd_stats_src->rate), INT_MAX);
   if (!rd_stats_dst->zero_rate)
@@ -186,7 +192,17 @@ struct TileDataEnc;
 struct AV1_COMP;
 struct macroblock;
 
-int av1_compute_rd_mult_based_on_qindex(const struct AV1_COMP *cpi, int qindex);
+/*!\brief Compute rdmult based on q index and frame update type
+ *
+ * \param[in]       bit_depth       bit depth
+ * \param[in]       update_type     frame update type
+ * \param[in]       qindex          q index
+ *
+ * \return rdmult
+ */
+int av1_compute_rd_mult_based_on_qindex(aom_bit_depth_t bit_depth,
+                                        FRAME_UPDATE_TYPE update_type,
+                                        int qindex);
 
 int av1_compute_rd_mult(const struct AV1_COMP *cpi, int qindex);
 
@@ -223,7 +239,11 @@ void av1_set_rd_speed_thresholds(struct AV1_COMP *cpi);
 
 void av1_update_rd_thresh_fact(const AV1_COMMON *const cm,
                                int (*fact)[MAX_MODES], int rd_thresh,
-                               BLOCK_SIZE bsize, THR_MODES best_mode_index);
+                               BLOCK_SIZE bsize, THR_MODES best_mode_index,
+                               THR_MODES inter_mode_start,
+                               THR_MODES inter_mode_end,
+                               THR_MODES intra_mode_start,
+                               THR_MODES intra_mode_end);
 
 static INLINE void reset_thresh_freq_fact(MACROBLOCK *const x) {
   for (int i = 0; i < BLOCK_SIZES_ALL; ++i) {
@@ -341,7 +361,18 @@ void av1_fill_dv_costs(const nmv_context *ndvc, IntraBCMVCosts *dv_costs);
 
 int av1_get_adaptive_rdmult(const struct AV1_COMP *cpi, double beta);
 
-int av1_get_deltaq_offset(const struct AV1_COMP *cpi, int qindex, double beta);
+int av1_get_deltaq_offset(aom_bit_depth_t bit_depth, int qindex, double beta);
+
+/*!\brief Adjust current superblock's q_index based on delta q resolution
+ *
+ * \param[in]       delta_q_res       delta q resolution
+ * \param[in]       prev_qindex       previous superblock's q index
+ * \param[in]       curr_qindex       current superblock's q index
+ *
+ * \return the current superblock's adjusted q_index
+ */
+int av1_adjust_q_from_delta_q_res(int delta_q_res, int prev_qindex,
+                                  int curr_qindex);
 
 #ifdef __cplusplus
 }  // extern "C"

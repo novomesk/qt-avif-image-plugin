@@ -26,15 +26,17 @@
 void av1_alloc_txb_buf(AV1_COMP *cpi) {
   AV1_COMMON *cm = &cpi->common;
   CoeffBufferPool *coeff_buf_pool = &cpi->coeff_buffer_pool;
-  int size = ((cm->mi_params.mi_rows >> cm->seq_params.mib_size_log2) + 1) *
-             ((cm->mi_params.mi_cols >> cm->seq_params.mib_size_log2) + 1);
+  int size = ((cm->mi_params.mi_rows >> cm->seq_params->mib_size_log2) + 1) *
+             ((cm->mi_params.mi_cols >> cm->seq_params->mib_size_log2) + 1);
   const int num_planes = av1_num_planes(cm);
-  const int subsampling_x = cm->seq_params.subsampling_x;
-  const int subsampling_y = cm->seq_params.subsampling_y;
+  const int subsampling_x = cm->seq_params->subsampling_x;
+  const int subsampling_y = cm->seq_params->subsampling_y;
+  const int luma_max_sb_square =
+      1 << num_pels_log2_lookup[cm->seq_params->sb_size];
   const int chroma_max_sb_square =
-      MAX_SB_SQUARE >> (subsampling_x + subsampling_y);
+      luma_max_sb_square >> (subsampling_x + subsampling_y);
   const int num_tcoeffs =
-      size * (MAX_SB_SQUARE + (num_planes - 1) * chroma_max_sb_square);
+      size * (luma_max_sb_square + (num_planes - 1) * chroma_max_sb_square);
   const int txb_unit_size = TX_SIZE_W_MIN * TX_SIZE_H_MIN;
 
   av1_free_txb_buf(cpi);
@@ -54,7 +56,7 @@ void av1_alloc_txb_buf(AV1_COMP *cpi) {
   for (int i = 0; i < size; i++) {
     for (int plane = 0; plane < num_planes; plane++) {
       const int max_sb_square =
-          (plane == AOM_PLANE_Y) ? MAX_SB_SQUARE : chroma_max_sb_square;
+          (plane == AOM_PLANE_Y) ? luma_max_sb_square : chroma_max_sb_square;
       cpi->coeff_buffer_base[i].tcoeff[plane] = tcoeff_ptr;
       cpi->coeff_buffer_base[i].eobs[plane] = eob_ptr;
       cpi->coeff_buffer_base[i].entropy_ctx[plane] = entropy_ctx_ptr;
@@ -487,10 +489,13 @@ static void update_tx_type_count(const AV1_COMP *cpi, const AV1_COMMON *cm,
           PLANE_TYPE_Y, xd, tx_size, cpi->use_screen_content_tools);
       (void)default_type;
       // TODO(kyslov): We don't always respect use_intra_default_tx_only flag in
-      // NonRD case. Specifically we ignore it in hybrid inta mode search and
-      // when picking up intra mode in nonRD inter mode search. We need to fix
-      // it in these two places. Meanwhile relieving the assert.
-      assert(tx_type == default_type || cpi->sf.rt_sf.use_nonrd_pick_mode);
+      // NonRD and REALTIME case. Specifically we ignore it in hybrid inta mode
+      // search, when picking up intra mode in nonRD inter mode search and in RD
+      // REALTIME mode when we limit TX type usage.
+      // We need to fix txfm cfg for these cases. Meanwhile relieving the
+      // assert.
+      assert(tx_type == default_type || cpi->sf.rt_sf.use_nonrd_pick_mode ||
+             cpi->oxcf.mode == REALTIME);
     }
   }
 
@@ -624,6 +629,7 @@ void av1_update_and_record_txb_context(int plane, int block, int blk_row,
       const int coeff_ctx = coeff_contexts[pos];
       const tran_low_t v = qcoeff[pos];
       const tran_low_t level = abs(v);
+      td->abs_sum_level += level;
 
       if (allow_update_cdf) {
         if (c == eob - 1) {
@@ -719,7 +725,7 @@ void av1_update_intra_mb_txb_context(const AV1_COMP *cpi, ThreadData *td,
 CB_COEFF_BUFFER *av1_get_cb_coeff_buffer(const struct AV1_COMP *cpi, int mi_row,
                                          int mi_col) {
   const AV1_COMMON *const cm = &cpi->common;
-  const int mib_size_log2 = cm->seq_params.mib_size_log2;
+  const int mib_size_log2 = cm->seq_params->mib_size_log2;
   const int stride = (cm->mi_params.mi_cols >> mib_size_log2) + 1;
   const int offset =
       (mi_row >> mib_size_log2) * stride + (mi_col >> mib_size_log2);

@@ -26,6 +26,7 @@ extern "C" {
 typedef struct {
   /*!\cond */
   RATE_CONTROL rc;
+  PRIMARY_RATE_CONTROL p_rc;
   int framerate_factor;
   int64_t layer_target_bitrate;
   int scaling_factor_num;
@@ -98,6 +99,7 @@ typedef struct SVC {
   int non_reference_frame;
   int use_flexible_mode;
   int ksvc_fixed_mode;
+  int ref_frame_comp[3];
   /*!\endcond */
 
   /*!
@@ -275,6 +277,8 @@ void av1_get_layer_resolution(const int width_org, const int height_org,
                               int *height_out);
 
 void av1_set_svc_fixed_mode(struct AV1_COMP *const cpi);
+
+void av1_svc_check_reset_layer_rc_flag(struct AV1_COMP *const cpi);
 
 #ifdef __cplusplus
 }  // extern "C"

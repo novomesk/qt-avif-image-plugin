@@ -258,7 +258,7 @@ static AOM_INLINE void scan_blk_mbmi(
 
 static int has_top_right(const AV1_COMMON *cm, const MACROBLOCKD *xd,
                          int mi_row, int mi_col, int bs) {
-  const int sb_mi_size = mi_size_wide[cm->seq_params.sb_size];
+  const int sb_mi_size = mi_size_wide[cm->seq_params->sb_size];
   const int mask_row = mi_row & (sb_mi_size - 1);
   const int mask_col = mi_col & (sb_mi_size - 1);
 
@@ -347,7 +347,7 @@ static int add_tpl_ref_mv(const AV1_COMMON *cm, const MACROBLOCKD *xd,
   const int cur_frame_index = cm->cur_frame->order_hint;
   const RefCntBuffer *const buf_0 = get_ref_frame_buf(cm, rf[0]);
   const int frame0_index = buf_0->order_hint;
-  const int cur_offset_0 = get_relative_dist(&cm->seq_params.order_hint_info,
+  const int cur_offset_0 = get_relative_dist(&cm->seq_params->order_hint_info,
                                              cur_frame_index, frame0_index);
   int idx;
   const int allow_high_precision_mv = cm->features.allow_high_precision_mv;
@@ -380,7 +380,7 @@ static int add_tpl_ref_mv(const AV1_COMMON *cm, const MACROBLOCKD *xd,
     // Process compound inter mode
     const RefCntBuffer *const buf_1 = get_ref_frame_buf(cm, rf[1]);
     const int frame1_index = buf_1->order_hint;
-    const int cur_offset_1 = get_relative_dist(&cm->seq_params.order_hint_info,
+    const int cur_offset_1 = get_relative_dist(&cm->seq_params->order_hint_info,
                                                cur_frame_index, frame1_index);
     int_mv comp_refmv;
     get_mv_projection(&comp_refmv.as_mv, prev_frame_mvs->mfmv0.as_mv,
@@ -838,7 +838,9 @@ void av1_find_best_ref_mvs(int allow_hp, int_mv *mvlist, int_mv *nearest_mv,
 void av1_setup_frame_buf_refs(AV1_COMMON *cm) {
   cm->cur_frame->order_hint = cm->current_frame.order_hint;
   cm->cur_frame->display_order_hint = cm->current_frame.display_order_hint;
-
+#if CONFIG_FRAME_PARALLEL_ENCODE
+  cm->cur_frame->pyramid_level = cm->current_frame.pyramid_level;
+#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   MV_REFERENCE_FRAME ref_frame;
   for (ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
     const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
@@ -854,10 +856,10 @@ void av1_setup_frame_sign_bias(AV1_COMMON *cm) {
   MV_REFERENCE_FRAME ref_frame;
   for (ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
     const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
-    if (cm->seq_params.order_hint_info.enable_order_hint && buf != NULL) {
+    if (cm->seq_params->order_hint_info.enable_order_hint && buf != NULL) {
       const int ref_order_hint = buf->order_hint;
       cm->ref_frame_sign_bias[ref_frame] =
-          (get_relative_dist(&cm->seq_params.order_hint_info, ref_order_hint,
+          (get_relative_dist(&cm->seq_params->order_hint_info, ref_order_hint,
                              (int)cm->current_frame.order_hint) <= 0)
               ? 0
               : 1;
@@ -930,10 +932,10 @@ static int motion_field_projection(AV1_COMMON *cm,
       &start_frame_buf->ref_order_hints[0];
   const int cur_order_hint = cm->cur_frame->order_hint;
   int start_to_current_frame_offset = get_relative_dist(
-      &cm->seq_params.order_hint_info, start_frame_order_hint, cur_order_hint);
+      &cm->seq_params->order_hint_info, start_frame_order_hint, cur_order_hint);
 
   for (MV_REFERENCE_FRAME rf = LAST_FRAME; rf <= INTER_REFS_PER_FRAME; ++rf) {
-    ref_offset[rf] = get_relative_dist(&cm->seq_params.order_hint_info,
+    ref_offset[rf] = get_relative_dist(&cm->seq_params->order_hint_info,
                                        start_frame_order_hint,
                                        ref_order_hints[rf - LAST_FRAME]);
   }
@@ -980,10 +982,32 @@ static int motion_field_projection(AV1_COMMON *cm,
   return 1;
 }
 
-void av1_setup_motion_field(AV1_COMMON *cm) {
-  const OrderHintInfo *const order_hint_info = &cm->seq_params.order_hint_info;
+// cm->ref_frame_side is calculated here, and will be used in
+// av1_copy_frame_mvs() to affect how mvs are copied.
+void av1_calculate_ref_frame_side(AV1_COMMON *cm) {
+  const OrderHintInfo *const order_hint_info = &cm->seq_params->order_hint_info;
 
   memset(cm->ref_frame_side, 0, sizeof(cm->ref_frame_side));
+  if (!order_hint_info->enable_order_hint) return;
+
+  const int cur_order_hint = cm->cur_frame->order_hint;
+
+  for (int ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ref_frame++) {
+    const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
+    int order_hint = 0;
+
+    if (buf != NULL) order_hint = buf->order_hint;
+
+    if (get_relative_dist(order_hint_info, order_hint, cur_order_hint) > 0)
+      cm->ref_frame_side[ref_frame] = 1;
+    else if (order_hint == cur_order_hint)
+      cm->ref_frame_side[ref_frame] = -1;
+  }
+}
+
+void av1_setup_motion_field(AV1_COMMON *cm) {
+  const OrderHintInfo *const order_hint_info = &cm->seq_params->order_hint_info;
+
   if (!order_hint_info->enable_order_hint) return;
 
   TPL_MV_REF *tpl_mvs_base = cm->tpl_mvs;
@@ -995,7 +1019,6 @@ void av1_setup_motion_field(AV1_COMMON *cm) {
   }
 
   const int cur_order_hint = cm->cur_frame->order_hint;
-
   const RefCntBuffer *ref_buf[INTER_REFS_PER_FRAME];
   int ref_order_hint[INTER_REFS_PER_FRAME];
 
@@ -1008,11 +1031,6 @@ void av1_setup_motion_field(AV1_COMMON *cm) {
 
     ref_buf[ref_idx] = buf;
     ref_order_hint[ref_idx] = order_hint;
-
-    if (get_relative_dist(order_hint_info, order_hint, cur_order_hint) > 0)
-      cm->ref_frame_side[ref_frame] = 1;
-    else if (order_hint == cur_order_hint)
-      cm->ref_frame_side[ref_frame] = -1;
   }
 
   int ref_stamp = MFMV_STACK_SIZE - 1;
@@ -1219,7 +1237,7 @@ uint8_t av1_findSamples(const AV1_COMMON *cm, MACROBLOCKD *xd, int *pts,
 }
 
 void av1_setup_skip_mode_allowed(AV1_COMMON *cm) {
-  const OrderHintInfo *const order_hint_info = &cm->seq_params.order_hint_info;
+  const OrderHintInfo *const order_hint_info = &cm->seq_params->order_hint_info;
   SkipModeInfo *const skip_mode_info = &cm->current_frame.skip_mode_info;
 
   skip_mode_info->skip_mode_allowed = 0;
@@ -1323,11 +1341,11 @@ void av1_set_frame_refs(AV1_COMMON *const cm, int *remapped_ref_idx,
   int lst_frame_sort_idx = -1;
   int gld_frame_sort_idx = -1;
 
-  assert(cm->seq_params.order_hint_info.enable_order_hint);
-  assert(cm->seq_params.order_hint_info.order_hint_bits_minus_1 >= 0);
+  assert(cm->seq_params->order_hint_info.enable_order_hint);
+  assert(cm->seq_params->order_hint_info.order_hint_bits_minus_1 >= 0);
   const int cur_order_hint = (int)cm->current_frame.order_hint;
   const int cur_frame_sort_idx =
-      1 << cm->seq_params.order_hint_info.order_hint_bits_minus_1;
+      1 << cm->seq_params->order_hint_info.order_hint_bits_minus_1;
 
   REF_FRAME_INFO ref_frame_info[REF_FRAMES];
   int ref_flag_list[INTER_REFS_PER_FRAME] = { 0, 0, 0, 0, 0, 0, 0 };
@@ -1349,7 +1367,7 @@ void av1_set_frame_refs(AV1_COMMON *const cm, int *remapped_ref_idx,
     ref_frame_info[i].sort_idx =
         (offset == -1) ? -1
                        : cur_frame_sort_idx +
-                             get_relative_dist(&cm->seq_params.order_hint_info,
+                             get_relative_dist(&cm->seq_params->order_hint_info,
                                                offset, cur_order_hint);
     assert(ref_frame_info[i].sort_idx >= -1);
 
@@ -1360,11 +1378,11 @@ void av1_set_frame_refs(AV1_COMMON *const cm, int *remapped_ref_idx,
   // Confirm both LAST_FRAME and GOLDEN_FRAME are valid forward reference
   // frames.
   if (lst_frame_sort_idx == -1 || lst_frame_sort_idx >= cur_frame_sort_idx) {
-    aom_internal_error(&cm->error, AOM_CODEC_CORRUPT_FRAME,
+    aom_internal_error(cm->error, AOM_CODEC_CORRUPT_FRAME,
                        "Inter frame requests a look-ahead frame as LAST");
   }
   if (gld_frame_sort_idx == -1 || gld_frame_sort_idx >= cur_frame_sort_idx) {
-    aom_internal_error(&cm->error, AOM_CODEC_CORRUPT_FRAME,
+    aom_internal_error(cm->error, AOM_CODEC_CORRUPT_FRAME,
                        "Inter frame requests a look-ahead frame as GOLDEN");
   }
 

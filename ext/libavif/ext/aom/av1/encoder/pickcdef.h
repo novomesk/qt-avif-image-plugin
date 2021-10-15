@@ -58,20 +58,6 @@ typedef uint64_t (*compute_cdef_dist_t)(void *dst, int dstride, uint16_t *src,
                                         BLOCK_SIZE bsize, int coeff_shift,
                                         int row, int col);
 
-// Data related to CDEF search multi-thread synchronization.
-typedef struct AV1CdefSyncData {
-#if CONFIG_MULTITHREAD
-  // Mutex lock used while dispatching jobs.
-  pthread_mutex_t *mutex_;
-#endif  // CONFIG_MULTITHREAD
-  // Flag to indicate all blocks are processed and end of frame is reached
-  int end_of_frame;
-  // Row index in units of 64x64 block
-  int fbr;
-  // Column index in units of 64x64 block
-  int fbc;
-} AV1CdefSync;
-
 /*! \brief CDEF search context.
  */
 typedef struct {
@@ -224,6 +210,8 @@ void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
  * \param[in]      xd           Pointer to common current coding block structure
  * \param[in]      pick_method  The method used to select params
  * \param[in]      rdmult       rd multiplier to use in making param choices
+ * \param[in]      skip_cdef_feature Speed feature to skip cdef
+ * \param[in]      frames_since_key Number of frames since key frame
  *
  * \return Nothing is returned. Instead, optimal CDEF parameters are stored
  * in the \c cdef_info structure of type \ref CdefInfo inside \c cm:
@@ -239,7 +227,8 @@ void av1_cdef_mse_calc_block(CdefSearchCtx *cdef_search_ctx, int fbr, int fbc,
 void av1_cdef_search(struct MultiThreadInfo *mt_info,
                      const YV12_BUFFER_CONFIG *frame,
                      const YV12_BUFFER_CONFIG *ref, AV1_COMMON *cm,
-                     MACROBLOCKD *xd, CDEF_PICK_METHOD pick_method, int rdmult);
+                     MACROBLOCKD *xd, CDEF_PICK_METHOD pick_method, int rdmult,
+                     int skip_cdef_feature, int frames_since_key);
 
 #ifdef __cplusplus
 }  // extern "C"

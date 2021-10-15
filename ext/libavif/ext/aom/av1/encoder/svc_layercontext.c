@@ -37,26 +37,27 @@ void av1_init_layer_context(AV1_COMP *const cpi) {
       int layer = LAYER_IDS_TO_IDX(sl, tl, svc->number_temporal_layers);
       LAYER_CONTEXT *const lc = &svc->layer_context[layer];
       RATE_CONTROL *const lrc = &lc->rc;
+      PRIMARY_RATE_CONTROL *const lp_rc = &lc->p_rc;
       lrc->ni_av_qi = oxcf->rc_cfg.worst_allowed_q;
-      lrc->total_actual_bits = 0;
+      lp_rc->total_actual_bits = 0;
       lrc->ni_tot_qi = 0;
-      lrc->tot_q = 0.0;
-      lrc->avg_q = 0.0;
-      lrc->ni_frames = 0;
+      lp_rc->tot_q = 0.0;
+      lp_rc->avg_q = 0.0;
+      lp_rc->ni_frames = 0;
       lrc->decimation_count = 0;
       lrc->decimation_factor = 0;
       lrc->worst_quality = av1_quantizer_to_qindex(lc->max_q);
       lrc->best_quality = av1_quantizer_to_qindex(lc->min_q);
       for (int i = 0; i < RATE_FACTOR_LEVELS; ++i) {
-        lrc->rate_correction_factors[i] = 1.0;
+        lp_rc->rate_correction_factors[i] = 1.0;
       }
       lc->target_bandwidth = lc->layer_target_bitrate;
-      lrc->last_q[INTER_FRAME] = lrc->worst_quality;
-      lrc->avg_frame_qindex[INTER_FRAME] = lrc->worst_quality;
-      lrc->avg_frame_qindex[KEY_FRAME] = lrc->worst_quality;
-      lrc->buffer_level =
+      lp_rc->last_q[INTER_FRAME] = lrc->worst_quality;
+      lp_rc->avg_frame_qindex[INTER_FRAME] = lrc->worst_quality;
+      lp_rc->avg_frame_qindex[KEY_FRAME] = lrc->worst_quality;
+      lp_rc->buffer_level =
           oxcf->rc_cfg.starting_buffer_level_ms * lc->target_bandwidth / 1000;
-      lrc->bits_off_target = lrc->buffer_level;
+      lp_rc->bits_off_target = lp_rc->buffer_level;
       // Initialize the cyclic refresh parameters. If spatial layers are used
       // (i.e., ss_number_layers > 1), these need to be updated per spatial
       // layer. Cyclic refresh is only applied on base temporal layer.
@@ -85,12 +86,16 @@ void av1_init_layer_context(AV1_COMP *const cpi) {
   if (svc->number_spatial_layers == 3) {
     svc->downsample_filter_type[0] = EIGHTTAP_SMOOTH;
   }
+  svc->ref_frame_comp[0] = 0;
+  svc->ref_frame_comp[1] = 0;
+  svc->ref_frame_comp[2] = 0;
 }
 
 // Update the layer context from a change_config() call.
 void av1_update_layer_context_change_config(AV1_COMP *const cpi,
                                             const int64_t target_bandwidth) {
   const RATE_CONTROL *const rc = &cpi->rc;
+  const PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
   SVC *const svc = &cpi->svc;
   int layer = 0;
   int64_t spatial_layer_target = 0;
@@ -107,17 +112,19 @@ void av1_update_layer_context_change_config(AV1_COMP *const cpi,
       LAYER_CONTEXT *const lc =
           &svc->layer_context[sl * svc->number_temporal_layers + tl];
       RATE_CONTROL *const lrc = &lc->rc;
+      PRIMARY_RATE_CONTROL *const lp_rc = &lc->p_rc;
       lc->spatial_layer_target_bandwidth = spatial_layer_target;
       bitrate_alloc = (float)lc->target_bandwidth / target_bandwidth;
-      lrc->starting_buffer_level =
-          (int64_t)(rc->starting_buffer_level * bitrate_alloc);
-      lrc->optimal_buffer_level =
-          (int64_t)(rc->optimal_buffer_level * bitrate_alloc);
-      lrc->maximum_buffer_size =
-          (int64_t)(rc->maximum_buffer_size * bitrate_alloc);
-      lrc->bits_off_target =
-          AOMMIN(lrc->bits_off_target, lrc->maximum_buffer_size);
-      lrc->buffer_level = AOMMIN(lrc->buffer_level, lrc->maximum_buffer_size);
+      lp_rc->starting_buffer_level =
+          (int64_t)(p_rc->starting_buffer_level * bitrate_alloc);
+      lp_rc->optimal_buffer_level =
+          (int64_t)(p_rc->optimal_buffer_level * bitrate_alloc);
+      lp_rc->maximum_buffer_size =
+          (int64_t)(p_rc->maximum_buffer_size * bitrate_alloc);
+      lp_rc->bits_off_target =
+          AOMMIN(lp_rc->bits_off_target, lp_rc->maximum_buffer_size);
+      lp_rc->buffer_level =
+          AOMMIN(lp_rc->buffer_level, lp_rc->maximum_buffer_size);
       lc->framerate = cpi->framerate / lc->framerate_factor;
       lrc->avg_frame_bandwidth = (int)(lc->target_bandwidth / lc->framerate);
       lrc->max_frame_bandwidth = rc->max_frame_bandwidth;
@@ -172,6 +179,7 @@ void av1_restore_layer_context(AV1_COMP *const cpi) {
   const int old_frame_to_key = cpi->rc.frames_to_key;
   // Restore layer rate control.
   cpi->rc = lc->rc;
+  cpi->ppi->p_rc = lc->p_rc;
   cpi->oxcf.rc_cfg.target_bandwidth = lc->target_bandwidth;
   cpi->gf_frame_index = 0;
   cpi->mv_search_params.max_mv_magnitude = lc->max_mv_magnitude;
@@ -215,6 +223,7 @@ void av1_save_layer_context(AV1_COMP *const cpi) {
   const AV1_COMMON *const cm = &cpi->common;
   LAYER_CONTEXT *lc = get_layer_context(cpi);
   lc->rc = cpi->rc;
+  lc->p_rc = cpi->ppi->p_rc;
   lc->target_bandwidth = (int)cpi->oxcf.rc_cfg.target_bandwidth;
   lc->group_index = cpi->gf_frame_index;
   lc->max_mv_magnitude = cpi->mv_search_params.max_mv_magnitude;
@@ -363,18 +372,17 @@ void av1_set_svc_fixed_mode(AV1_COMP *const cpi) {
          svc->number_temporal_layers >= 1 && svc->number_temporal_layers <= 3);
   svc->set_ref_frame_config = 1;
   int superframe_cnt = svc->current_superframe;
-  // Set the referende map buffer idx for the 7 references:
+  // Set the reference map buffer idx for the 7 references:
   // LAST_FRAME (0), LAST2_FRAME(1), LAST3_FRAME(2), GOLDEN_FRAME(3),
   // BWDREF_FRAME(4), ALTREF2_FRAME(5), ALTREF_FRAME(6).
   for (i = 0; i < INTER_REFS_PER_FRAME; i++) svc->ref_idx[i] = i;
   for (i = 0; i < INTER_REFS_PER_FRAME; i++) svc->reference[i] = 0;
   for (i = 0; i < REF_FRAMES; i++) svc->refresh[i] = 0;
-  // Always reference LAST, and reference GOLDEN on SL > 0 for non-ksvc.
+  // Always reference LAST, and reference GOLDEN on SL > 0.
+  // For KSVC: GOLDEN reference will be removed on INTER_FRAMES later
+  // when frame_type is set.
   svc->reference[SVC_LAST_FRAME] = 1;
-  if (svc->spatial_layer_id > 0 &&
-      (!svc->ksvc_fixed_mode ||
-       cpi->common.current_frame.frame_type == KEY_FRAME))
-    svc->reference[SVC_GOLDEN_FRAME] = 1;
+  if (svc->spatial_layer_id > 0) svc->reference[SVC_GOLDEN_FRAME] = 1;
   if (svc->temporal_layer_id == 0) {
     // Base temporal layer.
     if (svc->spatial_layer_id == 0) {
@@ -482,6 +490,32 @@ void av1_set_svc_fixed_mode(AV1_COMP *const cpi) {
       for (i = 0; i < INTER_REFS_PER_FRAME; i++) svc->ref_idx[i] = 0;
       svc->ref_idx[SVC_LAST_FRAME] = 7;
       svc->ref_idx[SVC_GOLDEN_FRAME] = 4;
+    }
+  }
+}
+
+void av1_svc_check_reset_layer_rc_flag(AV1_COMP *const cpi) {
+  SVC *const svc = &cpi->svc;
+  for (int sl = 0; sl < svc->number_spatial_layers; ++sl) {
+    // Check for reset based on avg_frame_bandwidth for spatial layer sl.
+    int layer = LAYER_IDS_TO_IDX(sl, svc->number_temporal_layers - 1,
+                                 svc->number_temporal_layers);
+    LAYER_CONTEXT *lc = &svc->layer_context[layer];
+    RATE_CONTROL *lrc = &lc->rc;
+    if (lrc->avg_frame_bandwidth > (3 * lrc->prev_avg_frame_bandwidth >> 1) ||
+        lrc->avg_frame_bandwidth < (lrc->prev_avg_frame_bandwidth >> 1)) {
+      // Reset for all temporal layers with spatial layer sl.
+      for (int tl = 0; tl < svc->number_temporal_layers; ++tl) {
+        int layer2 = LAYER_IDS_TO_IDX(sl, tl, svc->number_temporal_layers);
+        LAYER_CONTEXT *lc2 = &svc->layer_context[layer2];
+        RATE_CONTROL *lrc2 = &lc2->rc;
+        PRIMARY_RATE_CONTROL *lp_rc2 = &lc2->p_rc;
+        PRIMARY_RATE_CONTROL *const lp_rc = &lc2->p_rc;
+        lrc2->rc_1_frame = 0;
+        lrc2->rc_2_frame = 0;
+        lp_rc2->bits_off_target = lp_rc->optimal_buffer_level;
+        lp_rc2->buffer_level = lp_rc->optimal_buffer_level;
+      }
     }
   }
 }
