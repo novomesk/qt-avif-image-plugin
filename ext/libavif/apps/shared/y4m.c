@@ -215,9 +215,10 @@ avifBool y4mRead(const char * inputFilename, avifImage * avif, avifAppSourceTimi
     struct y4mFrameIterator frame;
     frame.width = -1;
     frame.height = -1;
-    frame.depth = -1;
+    // Default to the color space "C420" to match the defaults of aomenc and ffmpeg.
+    frame.depth = 8;
     frame.hasAlpha = AVIF_FALSE;
-    frame.format = AVIF_PIXEL_FORMAT_NONE;
+    frame.format = AVIF_PIXEL_FORMAT_YUV420;
     frame.range = AVIF_RANGE_LIMITED;
     frame.chromaSamplePosition = AVIF_CHROMA_SAMPLE_POSITION_UNKNOWN;
     memset(&frame.sourceTiming, 0, sizeof(avifAppSourceTiming));
@@ -338,8 +339,7 @@ avifBool y4mRead(const char * inputFilename, avifImage * avif, avifAppSourceTimi
         goto cleanup;
     }
 
-    if ((frame.width < 1) || (frame.height < 1) || ((frame.depth != 8) && (frame.depth != 10) && (frame.depth != 12)) ||
-        (frame.format == AVIF_PIXEL_FORMAT_NONE)) {
+    if ((frame.width < 1) || (frame.height < 1) || ((frame.depth != 8) && (frame.depth != 10) && (frame.depth != 12))) {
         fprintf(stderr, "Failed to parse y4m header (not enough information): %s\n", frame.displayFilename);
         goto cleanup;
     }
@@ -356,6 +356,9 @@ avifBool y4mRead(const char * inputFilename, avifImage * avif, avifAppSourceTimi
     avif->yuvRange = frame.range;
     avif->yuvChromaSamplePosition = frame.chromaSamplePosition;
     avifImageAllocatePlanes(avif, AVIF_PLANES_YUV);
+    if (frame.hasAlpha) {
+        avifImageAllocatePlanes(avif, AVIF_PLANES_A);
+    }
 
     avifPixelFormatInfo info;
     avifGetPixelFormatInfo(avif->yuvFormat, &info);
@@ -378,7 +381,6 @@ avifBool y4mRead(const char * inputFilename, avifImage * avif, avifAppSourceTimi
         }
     }
     if (frame.hasAlpha) {
-        avifImageAllocatePlanes(avif, AVIF_PLANES_A);
         if (fread(avif->alphaPlane, 1, planeBytes[3], frame.inputFile) != planeBytes[3]) {
             fprintf(stderr, "Failed to read y4m plane (not enough data): %s\n", frame.displayFilename);
             goto cleanup;
