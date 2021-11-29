@@ -349,27 +349,27 @@ bool QAVIFHandler::decode_one_frame()
     if (m_decoder->image->transformFlags & AVIF_TRANSFORM_CLAP) {
         if ((m_decoder->image->clap.widthD > 0) && (m_decoder->image->clap.heightD > 0) && (m_decoder->image->clap.horizOffD > 0)
             && (m_decoder->image->clap.vertOffD > 0)) {
-            int new_width, new_height, offx, offy;
-
-            new_width = (int)((double)(m_decoder->image->clap.widthN) / (m_decoder->image->clap.widthD) + 0.5);
+            int new_width = (int)((double)(m_decoder->image->clap.widthN) / (m_decoder->image->clap.widthD) + 0.5);
             if (new_width > result.width()) {
                 new_width = result.width();
             }
 
-            new_height = (int)((double)(m_decoder->image->clap.heightN) / (m_decoder->image->clap.heightD) + 0.5);
+            int new_height = (int)((double)(m_decoder->image->clap.heightN) / (m_decoder->image->clap.heightD) + 0.5);
             if (new_height > result.height()) {
                 new_height = result.height();
             }
 
             if (new_width > 0 && new_height > 0) {
-                offx = ((double)((int32_t)m_decoder->image->clap.horizOffN)) / (m_decoder->image->clap.horizOffD) + (result.width() - new_width) / 2.0 + 0.5;
+                int offx =
+                    ((double)((int32_t)m_decoder->image->clap.horizOffN)) / (m_decoder->image->clap.horizOffD) + (result.width() - new_width) / 2.0 + 0.5;
                 if (offx < 0) {
                     offx = 0;
                 } else if (offx > (result.width() - new_width)) {
                     offx = result.width() - new_width;
                 }
 
-                offy = ((double)((int32_t)m_decoder->image->clap.vertOffN)) / (m_decoder->image->clap.vertOffD) + (result.height() - new_height) / 2.0 + 0.5;
+                int offy =
+                    ((double)((int32_t)m_decoder->image->clap.vertOffN)) / (m_decoder->image->clap.vertOffD) + (result.height() - new_height) / 2.0 + 0.5;
                 if (offy < 0) {
                     offy = 0;
                 } else if (offy > (result.height() - new_height)) {
