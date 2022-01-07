@@ -74,6 +74,13 @@ build_script:
 
     nmake.exe
 
+    cd ..\qtbuild_6.2.2
+
+    C:\Qt\6.2.2\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
+
+    nmake.exe
+
 artifacts:
 - path: plugins\imageformats\qavif.dll
 - path: qtbuild_5.15.2\plugins\imageformats\qavif.dll
+- path: qtbuild_6.2.2\plugins\imageformats\qavif.dll
