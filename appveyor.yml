@@ -61,6 +61,18 @@ install:
 
     copy avif.lib libavif.a
 
+    cd ..
+
+    mkdir build-ro
+
+    cd build-ro
+
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON -DAVIF_LOCAL_LIBYUV=ON ..
+
+    ninja
+
+    copy avif.lib libavif.a
+
     cd ..\..\..
 build_script:
 - cmd: >-
@@ -74,13 +86,27 @@ build_script:
 
     nmake.exe
 
+    cd ..\qtbuild_5.15.2-ro
+
+    C:\Qt\5.15.2\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
+
+    nmake.exe
+
     cd ..\qtbuild_6.2.2
 
     C:\Qt\6.2.2\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
 
     nmake.exe
 
+    cd ..\qtbuild_6.2.2-ro
+
+    C:\Qt\6.2.2\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
+
+    nmake.exe
+
 artifacts:
 - path: plugins\imageformats\qavif.dll
 - path: qtbuild_5.15.2\plugins\imageformats\qavif.dll
+- path: qtbuild_5.15.2-ro\plugins\imageformats\qavif.dll
 - path: qtbuild_6.2.2\plugins\imageformats\qavif.dll
+- path: qtbuild_6.2.2-ro\plugins\imageformats\qavif.dll
