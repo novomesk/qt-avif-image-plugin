@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2021, Alliance for Open Media. All rights reserved
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -10,7 +10,6 @@
  */
 
 #include <memory>
-#include <ostream>
 #include <string>
 #include <unordered_map>
 
@@ -27,31 +26,25 @@ namespace {
 const unsigned int kFrames = 10;
 const int kBitrate = 500;
 
-// List of psnr thresholds for speed settings 6-8
-// keys: video, speed, aq mode.
+// List of psnr thresholds for LF settings 0-3
+// keys: video, LF control, aq mode.
 std::unordered_map<std::string,
                    std::unordered_map<int, std::unordered_map<int, double>>>
     kPsnrThreshold = { { "park_joy_90p_8_420.y4m",
-                         { { 5, { { 0, 35.4 }, { 3, 36.3 } } },
-                           { 6, { { 0, 35.3 }, { 3, 36.2 } } },
-                           { 7, { { 0, 34.9 }, { 3, 35.8 } } },
-                           { 8, { { 0, 35.0 }, { 3, 35.8 } } },
-                           { 9, { { 0, 34.9 }, { 3, 35.5 } } },
-                           { 10, { { 0, 34.7 }, { 3, 35.3 } } } } },
+                         { { 0, { { 0, 35.0 }, { 3, 36.0 } } },
+                           { 1, { { 0, 35.1 }, { 3, 36.1 } } },
+                           { 2, { { 0, 35.1 }, { 3, 36.1 } } },
+                           { 3, { { 0, 35.1 }, { 3, 36.1 } } } } },
                        { "paris_352_288_30.y4m",
-                         { { 5, { { 0, 36.2 }, { 3, 36.7 } } },
-                           { 6, { { 0, 36.1 }, { 3, 36.5 } } },
-                           { 7, { { 0, 35.5 }, { 3, 36.0 } } },
-                           { 8, { { 0, 36.0 }, { 3, 36.5 } } },
-                           { 9, { { 0, 35.5 }, { 3, 36.0 } } },
-                           { 10, { { 0, 35.3 }, { 3, 35.9 } } } } },
+                         { { 0, { { 0, 35.40 }, { 3, 36.0 } } },
+                           { 1, { { 0, 35.50 }, { 3, 36.0 } } },
+                           { 2, { { 0, 35.50 }, { 3, 36.0 } } },
+                           { 3, { { 0, 35.50 }, { 3, 36.0 } } } } },
                        { "niklas_1280_720_30.y4m",
-                         { { 5, { { 0, 34.4 }, { 3, 34.30 } } },
-                           { 6, { { 0, 34.2 }, { 3, 34.2 } } },
-                           { 7, { { 0, 33.6 }, { 3, 33.6 } } },
-                           { 8, { { 0, 33.48 }, { 3, 33.48 } } },
-                           { 9, { { 0, 33.4 }, { 3, 33.4 } } },
-                           { 10, { { 0, 33.2 }, { 3, 33.2 } } } } } };
+                         { { 0, { { 0, 33.20 }, { 3, 32.90 } } },
+                           { 1, { { 0, 33.57 }, { 3, 33.22 } } },
+                           { 2, { { 0, 33.57 }, { 3, 33.22 } } },
+                           { 3, { { 0, 33.45 }, { 3, 33.10 } } } } } };
 
 typedef struct {
   const char *filename;
@@ -74,19 +67,19 @@ const TestVideoParam kTestVectors[] = {
   { "niklas_1280_720_30.y4m", 8, AOM_IMG_FMT_I420, AOM_BITS_8, 0 },
 };
 
-// Params: test video, speed, aq mode, threads, tile columns.
-class RTEndToEndTest
+// Params: test video, lf_control, aq mode, threads, tile columns.
+class LFControlEndToEndTest
     : public ::libaom_test::CodecTestWith5Params<TestVideoParam, int,
                                                  unsigned int, int, int>,
       public ::libaom_test::EncoderTest {
  protected:
-  RTEndToEndTest()
+  LFControlEndToEndTest()
       : EncoderTest(GET_PARAM(0)), test_video_param_(GET_PARAM(1)),
-        cpu_used_(GET_PARAM(2)), psnr_(0.0), nframes_(0),
+        lf_control_(GET_PARAM(2)), psnr_(0.0), nframes_(0),
         aq_mode_(GET_PARAM(3)), threads_(GET_PARAM(4)),
         tile_columns_(GET_PARAM(5)) {}
 
-  virtual ~RTEndToEndTest() {}
+  virtual ~LFControlEndToEndTest() {}
 
   virtual void SetUp() {
     InitializeConfig(::libaom_test::kRealTime);
@@ -120,7 +113,7 @@ class RTEndToEndTest
       encoder->Control(AV1E_SET_ENABLE_TPL_MODEL, 0);
       encoder->Control(AV1E_SET_FRAME_PARALLEL_DECODING, 1);
       encoder->Control(AV1E_SET_TILE_COLUMNS, tile_columns_);
-      encoder->Control(AOME_SET_CPUUSED, cpu_used_);
+      encoder->Control(AOME_SET_CPUUSED, 10);
       encoder->Control(AV1E_SET_TUNE_CONTENT, AOM_CONTENT_DEFAULT);
       encoder->Control(AV1E_SET_AQ_MODE, aq_mode_);
       encoder->Control(AV1E_SET_ROW_MT, 1);
@@ -129,6 +122,7 @@ class RTEndToEndTest
       encoder->Control(AV1E_SET_MODE_COST_UPD_FREQ, 2);
       encoder->Control(AV1E_SET_MV_COST_UPD_FREQ, 2);
       encoder->Control(AV1E_SET_DV_COST_UPD_FREQ, 2);
+      encoder->Control(AV1E_SET_LOOPFILTER_CONTROL, lf_control_);
     }
   }
 
@@ -138,7 +132,7 @@ class RTEndToEndTest
   }
 
   double GetPsnrThreshold() {
-    return kPsnrThreshold[test_video_param_.filename][cpu_used_][aq_mode_];
+    return kPsnrThreshold[test_video_param_.filename][lf_control_][aq_mode_];
   }
 
   void DoTest() {
@@ -158,11 +152,11 @@ class RTEndToEndTest
     ASSERT_NO_FATAL_FAILURE(RunLoop(video.get()));
     const double psnr = GetAveragePsnr();
     EXPECT_GT(psnr, GetPsnrThreshold())
-        << "cpu used = " << cpu_used_ << " aq mode = " << aq_mode_;
+        << "loopfilter control = " << lf_control_ << " aq mode = " << aq_mode_;
   }
 
   TestVideoParam test_video_param_;
-  int cpu_used_;
+  int lf_control_;
 
  private:
   double psnr_;
@@ -172,20 +166,33 @@ class RTEndToEndTest
   int tile_columns_;
 };
 
-class RTEndToEndTestThreaded : public RTEndToEndTest {};
+class LFControlEndToEndTestThreaded : public LFControlEndToEndTest {};
 
-TEST_P(RTEndToEndTest, EndtoEndPSNRTest) { DoTest(); }
+TEST_P(LFControlEndToEndTest, EndtoEndPSNRTest) { DoTest(); }
 
-TEST_P(RTEndToEndTestThreaded, EndtoEndPSNRTest) { DoTest(); }
+TEST_P(LFControlEndToEndTestThreaded, EndtoEndPSNRTest) { DoTest(); }
 
-AV1_INSTANTIATE_TEST_SUITE(RTEndToEndTest, ::testing::ValuesIn(kTestVectors),
-                           ::testing::Range(5, 11),
+TEST(LFControlGetterTest, NullptrInput) {
+  int *lf_level = nullptr;
+  aom_codec_ctx_t encoder;
+  aom_codec_enc_cfg_t cfg;
+  aom_codec_enc_config_default(aom_codec_av1_cx(), &cfg, 1);
+  EXPECT_EQ(aom_codec_enc_init(&encoder, aom_codec_av1_cx(), &cfg, 0),
+            AOM_CODEC_OK);
+  EXPECT_EQ(aom_codec_control(&encoder, AOME_GET_LOOPFILTER_LEVEL, lf_level),
+            AOM_CODEC_INVALID_PARAM);
+  EXPECT_EQ(aom_codec_destroy(&encoder), AOM_CODEC_OK);
+}
+
+AV1_INSTANTIATE_TEST_SUITE(LFControlEndToEndTest,
+                           ::testing::ValuesIn(kTestVectors),
+                           ::testing::Range(0, 4),
                            ::testing::Values<unsigned int>(0, 3),
                            ::testing::Values(1), ::testing::Values(1));
 
-AV1_INSTANTIATE_TEST_SUITE(RTEndToEndTestThreaded,
+AV1_INSTANTIATE_TEST_SUITE(LFControlEndToEndTestThreaded,
                            ::testing::ValuesIn(kTestVectors),
-                           ::testing::Range(5, 11),
+                           ::testing::Range(0, 4),
                            ::testing::Values<unsigned int>(0, 3),
                            ::testing::Range(2, 5), ::testing::Range(2, 5));
 }  // namespace

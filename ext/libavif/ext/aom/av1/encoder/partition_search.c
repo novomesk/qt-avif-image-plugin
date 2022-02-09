@@ -59,7 +59,7 @@ void av1_reset_part_sf(PARTITION_SPEED_FEATURES *part_sf) {
     part_sf->ml_partition_search_breakout_thresh[i] =
         -1;  // -1 means not enabled.
   }
-  part_sf->simple_motion_search_prune_agg = 0;
+  part_sf->simple_motion_search_prune_agg = SIMPLE_AGG_LVL0;
   part_sf->simple_motion_search_split = 0;
   part_sf->simple_motion_search_prune_rect = 0;
   part_sf->simple_motion_search_early_term_none = 0;
@@ -418,7 +418,7 @@ static void encode_superblock(const AV1_COMP *const cpi, TileDataEnc *tile_data,
                                    PALETTE_MAP, tile_data->allow_update_cdf,
                                    td->counts);
           } else if (dry_run == DRY_RUN_COSTCOEFFS) {
-            rate +=
+            *rate +=
                 av1_cost_color_map(x, plane, bsize, mbmi->tx_size, PALETTE_MAP);
           }
         }
@@ -713,9 +713,9 @@ static AOM_INLINE void hybrid_intra_mode_search(AV1_COMP *cpi,
     av1_nonrd_pick_intra_mode(cpi, x, rd_cost, bsize, ctx);
 }
 
-// For real time row-mt enabled multi-threaded encoding with cost update
-// frequency set to COST_UPD_TILE/COST_UPD_OFF, tile ctxt is not updated at
-// superblock level. Thus, it is not required for the encoding of top-right
+// For real time/allintra row-mt enabled multi-threaded encoding with cost
+// update frequency set to COST_UPD_TILE/COST_UPD_OFF, tile ctxt is not updated
+// at superblock level. Thus, it is not required for the encoding of top-right
 // superblock be complete for updating tile ctxt. However, when encoding a block
 // whose right edge is also the superblock edge, intra and inter mode evaluation
 // (ref mv list population) require the encoding of the top-right superblock to
@@ -812,8 +812,8 @@ static void pick_sb_modes(AV1_COMP *const cpi, TileDataEnc *tile_data,
 
   int i;
 
-  // This is only needed for real time row-mt enabled multi-threaded encoding
-  // with cost update frequency set to COST_UPD_TILE/COST_UPD_OFF.
+  // This is only needed for real time/allintra row-mt enabled multi-threaded
+  // encoding with cost update frequency set to COST_UPD_TILE/COST_UPD_OFF.
   wait_for_top_right_sb(&cpi->mt_info.enc_row_mt, &tile_data->row_mt_sync,
                         &tile_data->tile_info, cm->seq_params->sb_size,
                         cm->seq_params->mib_size_log2, bsize, mi_row, mi_col);
@@ -1660,11 +1660,11 @@ static AOM_INLINE int is_adjust_var_based_part_enabled(
       part_sf->adjust_var_based_rd_partitioning > 3)
     return 0;
 
-  const int is_larger_qindex = cm->quant_params.base_qindex > 190;
   if (part_sf->adjust_var_based_rd_partitioning == 1) {
-    return !frame_is_intra_only(cm) && is_larger_qindex && bsize <= BLOCK_32X32;
+    return bsize <= BLOCK_32X32;
   } else {
     if (bsize <= BLOCK_32X32) return 1;
+    const int is_larger_qindex = cm->quant_params.base_qindex > 190;
     if (part_sf->adjust_var_based_rd_partitioning == 2) {
       const int is_360p_or_larger = AOMMIN(cm->width, cm->height) >= 360;
       return is_360p_or_larger && is_larger_qindex && bsize == BLOCK_64X64;
@@ -2081,9 +2081,15 @@ static void encode_b_nonrd(const AV1_COMP *const cpi, TileDataEnc *tile_data,
         }
       }
     }
+    if (cpi->oxcf.algo_cfg.loopfilter_control == LOOPFILTER_SELECTIVELY &&
+        (mbmi->mode == NEWMV || mbmi->mode < INTRA_MODE_END)) {
+      int32_t blocks = mi_size_high[bsize] * mi_size_wide[bsize];
+      rdc->newmv_or_intra_blocks += blocks;
+    }
     if (tile_data->allow_update_cdf) update_stats(&cpi->common, td);
   }
-  if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ && mbmi->skip_txfm)
+  if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ && mbmi->skip_txfm &&
+      !cpi->cyclic_refresh->skip_over4x4 && !cpi->rc.rtc_external_ratectrl)
     av1_cyclic_reset_segment_skip(cpi, x, mi_row, mi_col, bsize);
   // TODO(Ravi/Remya): Move this copy function to a better logical place
   // This function will copy the best mode information from block
@@ -2142,8 +2148,8 @@ static void pick_sb_modes_nonrd(AV1_COMP *const cpi, TileDataEnc *tile_data,
   TxfmSearchInfo *txfm_info = &x->txfm_search_info;
   int i;
 
-  // This is only needed for real time row-mt enabled multi-threaded encoding
-  // with cost update frequency set to COST_UPD_TILE/COST_UPD_OFF.
+  // This is only needed for real time/allintra row-mt enabled multi-threaded
+  // encoding with cost update frequency set to COST_UPD_TILE/COST_UPD_OFF.
   wait_for_top_right_sb(&cpi->mt_info.enc_row_mt, &tile_data->row_mt_sync,
                         &tile_data->tile_info, cm->seq_params->sb_size,
                         cm->seq_params->mib_size_log2, bsize, mi_row, mi_col);
@@ -3586,7 +3592,9 @@ static void none_partition_search(
   const BLOCK_SIZE bsize = blk_params.bsize;
   assert(bsize < BLOCK_SIZES_ALL);
 
-  if (!part_search_state->partition_none_allowed) return;
+  if (part_search_state->terminate_partition_search ||
+      !part_search_state->partition_none_allowed)
+    return;
 
   int pt_cost = 0;
   RD_STATS best_remain_rdcost;
@@ -3939,6 +3947,7 @@ static int read_partition_tree(AV1_COMP *const cpi, PC_TREE *const pc_tree,
   fscanf(pfile, "%d,%d,%d", &read_bsize, &num_nodes, &num_configs);
   assert(read_bsize == cpi->common.seq_params->sb_size);
   BLOCK_SIZE bsize = (BLOCK_SIZE)read_bsize;
+  assert(bsize == pc_tree->block_size);
 
   PC_TREE *tree_node_queue[NUM_NODES] = { NULL };
   int last_idx = 1;
@@ -3950,7 +3959,10 @@ static int read_partition_tree(AV1_COMP *const cpi, PC_TREE *const pc_tree,
     assert(partitioning >= PARTITION_NONE &&
            partitioning < EXT_PARTITION_TYPES);
     PC_TREE *node = tree_node_queue[q_idx];
-    if (node != NULL) node->partitioning = partitioning;
+    if (node != NULL) {
+      node->partitioning = partitioning;
+      bsize = node->block_size;
+    }
     if (partitioning == PARTITION_SPLIT) {
       const BLOCK_SIZE subsize = get_partition_subsize(bsize, PARTITION_SPLIT);
       for (int i = 0; i < 4; ++i) {
@@ -3961,7 +3973,6 @@ static int read_partition_tree(AV1_COMP *const cpi, PC_TREE *const pc_tree,
           ++last_idx;
         }
       }
-      bsize = subsize;
     }
     --num_nodes;
     ++q_idx;
@@ -4102,10 +4113,10 @@ static RD_STATS rd_search_for_fixed_partition(
 }
 
 static void prepare_sb_features_before_search(
-    AV1_COMP *const cpi, ThreadData *td, int mi_row, int mi_col,
-    const BLOCK_SIZE bsize, aom_partition_features_t *features) {
-  av1_collect_motion_search_features_sb(cpi, td, mi_row, mi_col, bsize,
-                                        features);
+    AV1_COMP *const cpi, ThreadData *td, TileDataEnc *tile_data, int mi_row,
+    int mi_col, const BLOCK_SIZE bsize, aom_partition_features_t *features) {
+  av1_collect_motion_search_features_sb(cpi, td, tile_data, mi_row, mi_col,
+                                        bsize, features);
   collect_tpl_stats_sb(cpi, bsize, mi_row, mi_col, features);
 }
 
@@ -4130,7 +4141,10 @@ static void build_pc_tree_from_part_decision(
     assert(partitioning >= PARTITION_NONE &&
            partitioning < EXT_PARTITION_TYPES);
     PC_TREE *node = tree_node_queue[q_idx];
-    if (node != NULL) node->partitioning = partitioning;
+    if (node != NULL) {
+      node->partitioning = partitioning;
+      bsize = node->block_size;
+    }
     if (partitioning == PARTITION_SPLIT) {
       const BLOCK_SIZE subsize = get_partition_subsize(bsize, PARTITION_SPLIT);
       for (int i = 0; i < 4; ++i) {
@@ -4141,7 +4155,6 @@ static void build_pc_tree_from_part_decision(
           ++last_idx;
         }
       }
-      bsize = subsize;
     }
     --num_nodes;
     ++q_idx;
@@ -4159,7 +4172,8 @@ static bool ml_partition_search_whole_tree(AV1_COMP *const cpi, ThreadData *td,
   MACROBLOCK *const x = &td->mb;
   ExtPartController *const ext_part_controller = &cpi->ext_part_controller;
   aom_partition_features_t features;
-  prepare_sb_features_before_search(cpi, td, mi_row, mi_col, bsize, &features);
+  prepare_sb_features_before_search(cpi, td, tile_data, mi_row, mi_col, bsize,
+                                    &features);
   features.mi_row = mi_row;
   features.mi_col = mi_col;
   features.frame_width = cpi->frame_info.frame_width;
@@ -4201,6 +4215,111 @@ static bool ml_partition_search_whole_tree(AV1_COMP *const cpi, ThreadData *td,
   return true;
 }
 
+// Use a bitmask to represent the valid partition types for the current
+// block. "1" represents the corresponding partition type is vaild.
+// The least significant bit represents "PARTITION_NONE", the
+// largest significant bit represents "PARTITION_VERT_4", follow
+// the enum order for PARTITION_TYPE in "enums.h"
+static int get_valid_partition_types(
+    const AV1_COMP *const cpi,
+    const PartitionSearchState *const part_search_state,
+    const BLOCK_SIZE bsize) {
+  const PartitionCfg *const part_cfg = &cpi->oxcf.part_cfg;
+  const PartitionBlkParams blk_params = part_search_state->part_blk_params;
+  int valid_types = 0;
+  // PARTITION_NONE
+  valid_types |= (part_search_state->partition_none_allowed << 0);
+  // PARTITION_HORZ
+  valid_types |= (part_search_state->partition_rect_allowed[HORZ] << 1);
+  // PARTITION_VERT
+  valid_types |= (part_search_state->partition_rect_allowed[VERT] << 2);
+  // PARTITION_SPLIT
+  valid_types |= (part_search_state->do_square_split << 3);
+  // PARTITION_HORZ_A
+  const int ext_partition_allowed = part_search_state->do_rectangular_split &&
+                                    av1_blk_has_rows_and_cols(&blk_params);
+  const int horzab_partition_allowed =
+      ext_partition_allowed && part_cfg->enable_ab_partitions &&
+      part_search_state->partition_rect_allowed[HORZ];
+  valid_types |= (horzab_partition_allowed << 4);
+  // PARTITION_HORZ_B
+  valid_types |= (horzab_partition_allowed << 5);
+  // PARTITION_VERT_A
+  const int vertab_partition_allowed =
+      ext_partition_allowed && part_cfg->enable_ab_partitions &&
+      part_search_state->partition_rect_allowed[VERT];
+  valid_types |= (vertab_partition_allowed << 6);
+  // PARTITION_VERT_B
+  valid_types |= (vertab_partition_allowed << 7);
+  // PARTITION_HORZ_4
+  const int partition4_allowed = part_cfg->enable_1to4_partitions &&
+                                 ext_partition_allowed &&
+                                 bsize != BLOCK_128X128;
+  const int horz4_allowed =
+      partition4_allowed && part_search_state->partition_rect_allowed[HORZ] &&
+      get_plane_block_size(get_partition_subsize(bsize, PARTITION_HORZ_4),
+                           part_search_state->ss_x,
+                           part_search_state->ss_y) != BLOCK_INVALID;
+  valid_types |= (horz4_allowed << 8);
+  // PARTITION_VERT_4
+  const int vert4_allowed =
+      partition4_allowed && part_search_state->partition_rect_allowed[HORZ] &&
+      get_plane_block_size(get_partition_subsize(bsize, PARTITION_VERT_4),
+                           part_search_state->ss_x,
+                           part_search_state->ss_y) != BLOCK_INVALID;
+  valid_types |= (vert4_allowed << 9);
+
+  return valid_types;
+}
+
+static void prepare_tpl_stats_block(const AV1_COMP *const cpi,
+                                    const BLOCK_SIZE bsize, const int mi_row,
+                                    const int mi_col, int64_t *intra_cost,
+                                    int64_t *inter_cost, int64_t *mc_dep_cost) {
+  const AV1_COMMON *const cm = &cpi->common;
+  GF_GROUP *gf_group = &cpi->ppi->gf_group;
+  if (gf_group->update_type[cpi->gf_frame_index] == INTNL_OVERLAY_UPDATE ||
+      gf_group->update_type[cpi->gf_frame_index] == OVERLAY_UPDATE) {
+    return;
+  }
+
+  TplParams *const tpl_data = &cpi->ppi->tpl_data;
+  TplDepFrame *tpl_frame = &tpl_data->tpl_frame[cpi->gf_frame_index];
+  TplDepStats *tpl_stats = tpl_frame->tpl_stats_ptr;
+  // If tpl stats is not established, early return
+  if (!tpl_data->ready || gf_group->max_layer_depth_allowed == 0) {
+    return;
+  }
+
+  const int tpl_stride = tpl_frame->stride;
+  const int step = 1 << tpl_data->tpl_stats_block_mis_log2;
+  const int mi_width =
+      AOMMIN(mi_size_wide[bsize], cm->mi_params.mi_cols - mi_col);
+  const int mi_height =
+      AOMMIN(mi_size_high[bsize], cm->mi_params.mi_rows - mi_row);
+
+  int64_t sum_intra_cost = 0;
+  int64_t sum_inter_cost = 0;
+  int64_t sum_mc_dep_cost = 0;
+  for (int row = 0; row < mi_height; row += step) {
+    for (int col = 0; col < mi_width; col += step) {
+      TplDepStats *this_stats =
+          &tpl_stats[av1_tpl_ptr_pos(mi_row + row, mi_col + col, tpl_stride,
+                                     tpl_data->tpl_stats_block_mis_log2)];
+      sum_intra_cost += this_stats->intra_cost;
+      sum_inter_cost += this_stats->inter_cost;
+      const int64_t mc_dep_delta =
+          RDCOST(tpl_frame->base_rdmult, this_stats->mc_dep_rate,
+                 this_stats->mc_dep_dist);
+      sum_mc_dep_cost += mc_dep_delta;
+    }
+  }
+
+  *intra_cost = sum_intra_cost;
+  *inter_cost = sum_inter_cost;
+  *mc_dep_cost = sum_mc_dep_cost;
+}
+
 static bool recursive_partition(AV1_COMP *const cpi, ThreadData *td,
                                 TileDataEnc *tile_data, TokenExtra **tp,
                                 SIMPLE_MOTION_DATA_TREE *sms_root,
@@ -4209,24 +4328,13 @@ static bool recursive_partition(AV1_COMP *const cpi, ThreadData *td,
   const AV1_COMMON *const cm = &cpi->common;
   ExtPartController *const ext_part_controller = &cpi->ext_part_controller;
   MACROBLOCK *const x = &td->mb;
+  MACROBLOCKD *const xd = &x->e_mbd;
   if (mi_row >= cm->mi_params.mi_rows || mi_col >= cm->mi_params.mi_cols) {
     return false;
   }
   aom_partition_decision_t partition_decision;
   do {
-    aom_partition_features_t features;
-    features.mi_row = mi_row;
-    features.mi_col = mi_col;
-    features.frame_width = cpi->frame_info.frame_width;
-    features.frame_height = cpi->frame_info.frame_height;
-    features.block_size = bsize;
-    av1_ext_part_send_features(ext_part_controller, &features);
-    const bool valid_decision = av1_ext_part_get_partition_decision(
-        ext_part_controller, &partition_decision);
-    if (!valid_decision) return false;
-    pc_tree->partitioning = partition_decision.current_decision;
     PartitionSearchState part_search_state;
-
     // Initialization of state variables used in partition search.
     // TODO(chengchen): check if there is hidden conditions that don't allow
     // all possible partition types.
@@ -4237,6 +4345,92 @@ static bool recursive_partition(AV1_COMP *const cpi, ThreadData *td,
     PartitionBlkParams blk_params = part_search_state.part_blk_params;
     if (!av1_blk_has_rows_and_cols(&blk_params))
       set_partition_cost_for_edge_blk(cm, &part_search_state);
+    const int orig_rdmult = x->rdmult;
+    setup_block_rdmult(cpi, x, mi_row, mi_col, bsize, NO_AQ, NULL);
+    const int valid_partition_types =
+        get_valid_partition_types(cpi, &part_search_state, bsize);
+    const FRAME_UPDATE_TYPE update_type =
+        get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
+    const int qindex = av1_get_qindex(&cm->seg, xd->mi[0]->segment_id,
+                                      cm->quant_params.base_qindex);
+    // RD multiplier
+    const int rdmult = x->rdmult;
+    // pyramid level
+    const int pyramid_level =
+        cpi->ppi->gf_group.layer_depth[cpi->gf_frame_index];
+    x->rdmult = orig_rdmult;
+    // Neighbor information
+    const int has_above = !!xd->above_mbmi;
+    const int has_left = !!xd->left_mbmi;
+    const BLOCK_SIZE above_bsize =
+        has_above ? xd->above_mbmi->bsize : BLOCK_INVALID;
+    const BLOCK_SIZE left_bsize =
+        has_left ? xd->left_mbmi->bsize : BLOCK_INVALID;
+    const int above_block_width =
+        above_bsize == BLOCK_INVALID ? -1 : block_size_wide[above_bsize];
+    const int above_block_height =
+        above_bsize == BLOCK_INVALID ? -1 : block_size_high[above_bsize];
+    const int left_block_width =
+        left_bsize == BLOCK_INVALID ? -1 : block_size_wide[left_bsize];
+    const int left_block_height =
+        left_bsize == BLOCK_INVALID ? -1 : block_size_high[left_bsize];
+    // Prepare simple motion search stats as features
+    unsigned int block_sse = -1;
+    unsigned int block_var = -1;
+    unsigned int sub_block_sse[4] = { -1, -1, -1, -1 };
+    unsigned int sub_block_var[4] = { -1, -1, -1, -1 };
+    unsigned int horz_block_sse[2] = { -1, -1 };
+    unsigned int horz_block_var[2] = { -1, -1 };
+    unsigned int vert_block_sse[2] = { -1, -1 };
+    unsigned int vert_block_var[2] = { -1, -1 };
+    av1_prepare_motion_search_features_block(
+        cpi, td, tile_data, mi_row, mi_col, bsize, valid_partition_types,
+        &block_sse, &block_var, sub_block_sse, sub_block_var, horz_block_sse,
+        horz_block_var, vert_block_sse, vert_block_var);
+    // Prepare tpl stats for the current block as features
+    int64_t tpl_intra_cost = -1;
+    int64_t tpl_inter_cost = -1;
+    int64_t tpl_mc_dep_cost = -1;
+    prepare_tpl_stats_block(cpi, bsize, mi_row, mi_col, &tpl_intra_cost,
+                            &tpl_inter_cost, &tpl_mc_dep_cost);
+
+    aom_partition_features_t features;
+    features.mi_row = mi_row;
+    features.mi_col = mi_col;
+    features.frame_width = cpi->frame_info.frame_width;
+    features.frame_height = cpi->frame_info.frame_height;
+    features.block_size = bsize;
+    features.valid_partition_types = valid_partition_types;
+    features.update_type = update_type;
+    features.qindex = qindex;
+    features.rdmult = rdmult;
+    features.pyramid_level = pyramid_level;
+    features.has_above_block = has_above;
+    features.above_block_width = above_block_width;
+    features.above_block_height = above_block_height;
+    features.has_left_block = has_left;
+    features.left_block_width = left_block_width;
+    features.left_block_height = left_block_height;
+    features.block_sse = block_sse;
+    features.block_var = block_var;
+    for (int i = 0; i < 4; ++i) {
+      features.sub_block_sse[i] = sub_block_sse[i];
+      features.sub_block_var[i] = sub_block_var[i];
+    }
+    for (int i = 0; i < 2; ++i) {
+      features.horz_block_sse[i] = horz_block_sse[i];
+      features.horz_block_var[i] = horz_block_var[i];
+      features.vert_block_sse[i] = vert_block_sse[i];
+      features.vert_block_var[i] = vert_block_var[i];
+    }
+    features.tpl_intra_cost = tpl_intra_cost;
+    features.tpl_inter_cost = tpl_inter_cost;
+    features.tpl_mc_dep_cost = tpl_mc_dep_cost;
+    av1_ext_part_send_features(ext_part_controller, &features);
+    const bool valid_decision = av1_ext_part_get_partition_decision(
+        ext_part_controller, &partition_decision);
+    if (!valid_decision) return false;
+    pc_tree->partitioning = partition_decision.current_decision;
 
     av1_init_rd_stats(this_rdcost);
     if (partition_decision.current_decision == PARTITION_SPLIT) {
@@ -4249,9 +4443,8 @@ static bool recursive_partition(AV1_COMP *const cpi, ThreadData *td,
           pc_tree->split[i] = av1_alloc_pc_tree_node(subsize);
         pc_tree->split[i]->index = i;
       }
-      const int orig_rdmult = x->rdmult;
+      const int orig_rdmult_tmp = x->rdmult;
       setup_block_rdmult(cpi, x, mi_row, mi_col, bsize, NO_AQ, NULL);
-      (void)orig_rdmult;
       // TODO(chengchen): check boundary conditions
       // top-left
       recursive_partition(cpi, td, tile_data, tp, sms_root, pc_tree->split[0],
@@ -4276,7 +4469,7 @@ static bool recursive_partition(AV1_COMP *const cpi, ThreadData *td,
         this_rdcost->dist += split_rdc[i].dist;
         av1_rd_cost_update(x->rdmult, this_rdcost);
       }
-      x->rdmult = orig_rdmult;
+      x->rdmult = orig_rdmult_tmp;
     } else {
       *this_rdcost = rd_search_for_fixed_partition(
           cpi, td, tile_data, tp, sms_root, mi_row, mi_col, bsize, pc_tree);
@@ -4311,7 +4504,8 @@ static bool ml_partition_search_partial(AV1_COMP *const cpi, ThreadData *td,
   MACROBLOCK *const x = &td->mb;
   ExtPartController *const ext_part_controller = &cpi->ext_part_controller;
   aom_partition_features_t features;
-  prepare_sb_features_before_search(cpi, td, mi_row, mi_col, bsize, &features);
+  prepare_sb_features_before_search(cpi, td, tile_data, mi_row, mi_col, bsize,
+                                    &features);
   features.mi_row = mi_row;
   features.mi_col = mi_col;
   features.frame_width = cpi->frame_info.frame_width;
@@ -4437,7 +4631,7 @@ static void log_sub_block_var(const AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bs,
   const int bh = MI_SIZE * mi_size_high[bs] - bottom_overflow;
 
   // Initialize min to a large value and max to 0 at
-  *var_min = 10.0;
+  *var_min = 99.0;
   *var_max = 0.0;
 
   for (i = 0; i < bh; i += 4) {
@@ -4448,13 +4642,13 @@ static void log_sub_block_var(const AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bs,
                           x->plane[0].src.buf + i * x->plane[0].src.stride + j,
                           x->plane[0].src.stride,
                           CONVERT_TO_BYTEPTR(highbd_all_zeros), 0, &sse) /
-                          16);
+                          16.0);
       } else {
         var =
             log(1.0 + cpi->ppi->fn_ptr[BLOCK_4X4].vf(
                           x->plane[0].src.buf + i * x->plane[0].src.stride + j,
                           x->plane[0].src.stride, all_zeros, 0, &sse) /
-                          16);
+                          16.0);
       }
       *var_min = AOMMIN(*var_min, var);
       *var_max = AOMMAX(*var_max, var);
@@ -4579,8 +4773,8 @@ bool av1_rd_pick_partition(AV1_COMP *const cpi, ThreadData *td,
   // av1_get_max_min_partition_features().
   if (COLLECT_MOTION_SEARCH_FEATURE_SB && !frame_is_intra_only(cm) &&
       bsize == cm->seq_params->sb_size) {
-    av1_collect_motion_search_features_sb(cpi, td, mi_row, mi_col, bsize,
-                                          /*features=*/NULL);
+    av1_collect_motion_search_features_sb(cpi, td, tile_data, mi_row, mi_col,
+                                          bsize, /*features=*/NULL);
     collect_tpl_stats_sb(cpi, bsize, mi_row, mi_col, /*features=*/NULL);
   }
 
@@ -4648,7 +4842,7 @@ BEGIN_PARTITION_SEARCH:
     double var_min, var_max;
     log_sub_block_var(cpi, x, bsize, &var_min, &var_max);
 
-    if ((var_min < 0.5) && ((var_max - var_min) > 3.0)) {
+    if ((var_min < 0.272) && ((var_max - var_min) > 3.0)) {
       part_search_state.partition_none_allowed = 0;
       part_search_state.terminate_partition_search = 0;
       part_search_state.do_square_split = 1;
@@ -4687,7 +4881,7 @@ BEGIN_PARTITION_SEARCH:
   // newmv mode and is skippable.
   if ((cpi->sf.part_sf.skip_non_sq_part_based_on_none >= 2) &&
       (pc_tree->none != NULL)) {
-    if (is_inter_mode(pc_tree->none->mic.mode) &&
+    if (x->qindex <= 200 && is_inter_mode(pc_tree->none->mic.mode) &&
         !have_newmv_in_inter_mode(pc_tree->none->mic.mode) &&
         pc_tree->none->skippable && !x->must_find_valid_partition &&
         bsize >= BLOCK_16X16)

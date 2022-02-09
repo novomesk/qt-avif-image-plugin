@@ -207,9 +207,13 @@ enum aome_enc_control_id {
    * encoding process, values greater than 0 will increase encoder speed at
    * the expense of quality.
    *
-   * Valid range: 0..9. 0 runs the slowest, and 9 runs the fastest;
+   * Valid range: 0..10. 0 runs the slowest, and 10 runs the fastest;
    * quality improves as speed decreases (since more compression
    * possibilities are explored).
+   *
+   * NOTE: 10 is only allowed in AOM_USAGE_REALTIME. In AOM_USAGE_GOOD_QUALITY
+   * and AOM_USAGE_ALL_INTRA, 9 is the highest allowed value. However,
+   * AOM_USAGE_GOOD_QUALITY treats 7..9 the same as 6.
    */
   AOME_SET_CPUUSED = 13,
 
@@ -654,7 +658,8 @@ enum aome_enc_control_id {
    * in-loop filter aiming to remove coding artifacts
    *
    * - 0 = disable
-   * - 1 = enable (default)
+   * - 1 = enable for all frames (default)
+   * - 2 = disable for non-reference frames
    */
   AV1E_SET_ENABLE_CDEF = 58,
 
@@ -1377,6 +1382,25 @@ enum aome_enc_control_id {
    */
   AV1E_SET_SVC_REF_FRAME_COMP_PRED = 147,
 
+  /*!\brief Set --deltaq-mode strength.
+   *
+   * Valid range: [0, 1000]
+   */
+  AV1E_SET_DELTAQ_STRENGTH = 148,
+
+  /*!\brief Codec control to control loop filter
+   *
+   * - 0 = Loop filter is disabled for all frames
+   * - 1 = Loop filter is enabled for all frames
+   * - 2 = Loop filter is disabled for non-reference frames
+   * - 3 = Loop filter is disabled for the frames with low motion
+   */
+  AV1E_SET_LOOPFILTER_CONTROL = 149,
+
+  /*!\brief Codec control function to get the loopfilter chosen by the encoder,
+   * int* parameter
+   */
+  AOME_GET_LOOPFILTER_LEVEL = 150,
   // Any new encoder control IDs should be added above.
   // Maximum allowed encoder control ID is 229.
   // No encoder control ID should be added below.
@@ -1773,6 +1797,9 @@ AOM_CTRL_USE_TYPE(AV1E_SET_AQ_MODE, unsigned int)
 AOM_CTRL_USE_TYPE(AV1E_SET_DELTAQ_MODE, unsigned int)
 #define AOM_CTRL_AV1E_SET_DELTAQ_MODE
 
+AOM_CTRL_USE_TYPE(AV1E_SET_DELTAQ_STRENGTH, unsigned int)
+#define AOM_CTRL_AV1E_SET_DELTAQ_STRENGTH
+
 AOM_CTRL_USE_TYPE(AV1E_SET_DELTALF_MODE, unsigned int)
 #define AOM_CTRL_AV1E_SET_DELTALF_MODE
 
@@ -1935,6 +1962,12 @@ AOM_CTRL_USE_TYPE(AV1E_SET_ENABLE_TX_SIZE_SEARCH, int)
 AOM_CTRL_USE_TYPE(AV1E_SET_SVC_REF_FRAME_COMP_PRED,
                   aom_svc_ref_frame_comp_pred_t *)
 #define AOME_CTRL_AV1E_SET_SVC_REF_FRAME_COMP_PRED
+
+AOM_CTRL_USE_TYPE(AV1E_SET_LOOPFILTER_CONTROL, int)
+#define AOM_CTRL_AV1E_SET_LOOPFILTER_CONTROL
+
+AOM_CTRL_USE_TYPE(AOME_GET_LOOPFILTER_LEVEL, int *)
+#define AOM_CTRL_AOME_GET_LOOPFILTER_LEVEL
 
 /*!\endcond */
 /*! @} - end defgroup aom_encoder */

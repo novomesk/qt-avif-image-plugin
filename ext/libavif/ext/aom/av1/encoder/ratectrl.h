@@ -46,6 +46,9 @@ extern "C" {
 #define FIXED_GF_INTERVAL 16
 #define MAX_GF_LENGTH_LAP 16
 
+#define FIXED_GF_INTERVAL_RT 80
+#define MAX_GF_INTERVAL_RT 160
+
 #define MAX_NUM_GF_INTERVALS 15
 
 #define MAX_ARF_LAYERS 6
@@ -224,6 +227,9 @@ typedef struct {
   int resize_avg_qp;
   int resize_buffer_underflow;
   int resize_count;
+
+  // Flag to disable content related qp adjustment.
+  int rtc_external_ratectrl;
 #if CONFIG_FRAME_PARALLEL_ENCODE
   int frame_level_fast_extra_bits;
   double frame_level_rate_correction_factors[RATE_FACTOR_LEVELS];
@@ -331,6 +337,109 @@ typedef struct {
    */
   int avg_frame_qindex[FRAME_TYPES];
 
+#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * active_best_quality.
+   */
+  int temp_active_best_quality[MAX_ARF_LAYERS + 1];
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * last_boosted_qindex.
+   */
+  int temp_last_boosted_qindex;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * avg_q.
+   */
+  double temp_avg_q;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * last_q.
+   */
+  int temp_last_q[FRAME_TYPES];
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * projected_frame_size.
+   */
+  int temp_projected_frame_size;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * total_actual_bits.
+   */
+  int64_t temp_total_actual_bits;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * buffer_level.
+   */
+  int64_t temp_buffer_level;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * vbr_bits_off_target.
+   */
+  int64_t temp_vbr_bits_off_target;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * vbr_bits_off_target_fast.
+   */
+  int64_t temp_vbr_bits_off_target_fast;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * rate_correction_factors.
+   */
+  double temp_rate_correction_factors[RATE_FACTOR_LEVELS];
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * rate_error_estimate.
+   */
+  int temp_rate_error_estimate;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * rolling_arf_group_target_bits.
+   */
+  int temp_rolling_arf_group_target_bits;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * rolling_arf_group_actual_bits;.
+   */
+  int temp_rolling_arf_group_actual_bits;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * bits_left;.
+   */
+  int64_t temp_bits_left;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * extend_minq.
+   */
+  int temp_extend_minq;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * extend_maxq.
+   */
+  int temp_extend_maxq;
+
+  /*!
+   * Temporary variable used in simulating the delayed update of
+   * extend_minq_fast.
+   */
+  int temp_extend_minq_fast;
+#endif
   /*!
    * Proposed minimum allowed Q different layers in a coding pyramid
    */
@@ -564,6 +673,8 @@ int av1_resize_one_pass_cbr(struct AV1_COMP *cpi);
 void av1_rc_set_frame_target(struct AV1_COMP *cpi, int target, int width,
                              int height);
 
+void av1_adjust_gf_refresh_qp_one_pass_rt(struct AV1_COMP *cpi);
+
 void av1_set_reference_structure_one_pass_rt(struct AV1_COMP *cpi,
                                              int gf_update);
 
@@ -661,8 +772,7 @@ int av1_encodedframe_overshoot_cbr(struct AV1_COMP *cpi, int *q);
  *
  * \param[in]       gf_frame_index    Index of the current frame
  * \param[in]       base_q_index      Base q index
- * \param[in]       arf_qstep_ratio   The quantize step ratio between arf q
- *                                    index and base q index
+ * \param[in]       qstep_ratio_list  Stores the qstep_ratio for each frame
  * \param[in]       bit_depth         Bit depth
  * \param[in]       gf_group          Pointer to the GOP
  * \param[out]      q_index_list      An array to store output gop q indices.
@@ -670,7 +780,7 @@ int av1_encodedframe_overshoot_cbr(struct AV1_COMP *cpi, int *q);
  *                                    greater than gf_group.size()
  */
 void av1_q_mode_compute_gop_q_indices(int gf_frame_index, int base_q_index,
-                                      double arf_qstep_ratio,
+                                      const double *qstep_ratio_list,
                                       aom_bit_depth_t bit_depth,
                                       const struct GF_GROUP *gf_group,
                                       int *q_index_list);

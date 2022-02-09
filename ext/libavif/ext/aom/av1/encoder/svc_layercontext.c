@@ -11,6 +11,7 @@
 #include <math.h>
 
 #include "av1/encoder/encoder.h"
+#include "av1/encoder/encoder_alloc.h"
 
 static void swap_ptr(void *a, void *b) {
   void **a_p = (void **)a;
@@ -62,7 +63,6 @@ void av1_init_layer_context(AV1_COMP *const cpi) {
       // (i.e., ss_number_layers > 1), these need to be updated per spatial
       // layer. Cyclic refresh is only applied on base temporal layer.
       if (svc->number_spatial_layers > 1 && tl == 0) {
-        size_t last_coded_q_map_size;
         lc->sb_index = 0;
         lc->actual_num_seg1_blocks = 0;
         lc->actual_num_seg2_blocks = 0;
@@ -71,13 +71,6 @@ void av1_init_layer_context(AV1_COMP *const cpi) {
         CHECK_MEM_ERROR(cm, lc->map,
                         aom_malloc(mi_rows * mi_cols * sizeof(*lc->map)));
         memset(lc->map, 0, mi_rows * mi_cols);
-        last_coded_q_map_size =
-            mi_rows * mi_cols * sizeof(*lc->last_coded_q_map);
-        if (lc->last_coded_q_map) aom_free(lc->last_coded_q_map);
-        CHECK_MEM_ERROR(cm, lc->last_coded_q_map,
-                        aom_malloc(last_coded_q_map_size));
-        assert(MAXQ <= 255);
-        memset(lc->last_coded_q_map, MAXQ, last_coded_q_map_size);
       }
     }
     svc->downsample_filter_type[sl] = BILINEAR;
@@ -100,7 +93,7 @@ void av1_update_layer_context_change_config(AV1_COMP *const cpi,
   int layer = 0;
   int64_t spatial_layer_target = 0;
   float bitrate_alloc = 1.0;
-
+  assert(target_bandwidth > 0);
   for (int sl = 0; sl < svc->number_spatial_layers; ++sl) {
     for (int tl = 0; tl < svc->number_temporal_layers; ++tl) {
       layer = LAYER_IDS_TO_IDX(sl, tl, svc->number_temporal_layers);
@@ -195,7 +188,6 @@ void av1_restore_layer_context(AV1_COMP *const cpi) {
       svc->number_spatial_layers > 1 && svc->temporal_layer_id == 0) {
     CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
     swap_ptr(&cr->map, &lc->map);
-    swap_ptr(&cr->last_coded_q_map, &lc->last_coded_q_map);
     cr->sb_index = lc->sb_index;
     cr->actual_num_seg1_blocks = lc->actual_num_seg1_blocks;
     cr->actual_num_seg2_blocks = lc->actual_num_seg2_blocks;
@@ -234,11 +226,8 @@ void av1_save_layer_context(AV1_COMP *const cpi) {
       cpi->svc.number_spatial_layers > 1 && svc->temporal_layer_id == 0) {
     CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
     signed char *temp = lc->map;
-    uint8_t *temp2 = lc->last_coded_q_map;
     lc->map = cr->map;
     cr->map = temp;
-    lc->last_coded_q_map = cr->last_coded_q_map;
-    cr->last_coded_q_map = temp2;
     lc->sb_index = cr->sb_index;
     lc->actual_num_seg1_blocks = cr->actual_num_seg1_blocks;
     lc->actual_num_seg2_blocks = cr->actual_num_seg2_blocks;
@@ -301,7 +290,6 @@ void av1_free_svc_cyclic_refresh(AV1_COMP *const cpi) {
       int layer = LAYER_IDS_TO_IDX(sl, tl, svc->number_temporal_layers);
       LAYER_CONTEXT *const lc = &svc->layer_context[layer];
       if (lc->map) aom_free(lc->map);
-      if (lc->last_coded_q_map) aom_free(lc->last_coded_q_map);
     }
   }
 }
@@ -348,7 +336,9 @@ void av1_one_pass_cbr_svc_start_layer(AV1_COMP *const cpi) {
 
   cpi->common.width = width;
   cpi->common.height = height;
+  alloc_mb_mode_info_buffers(cpi);
   av1_update_frame_size(cpi);
+  if (svc->spatial_layer_id == 0) svc->high_source_sad_superframe = 0;
 }
 
 enum {

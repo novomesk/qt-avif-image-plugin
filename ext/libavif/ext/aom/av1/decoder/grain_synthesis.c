@@ -18,8 +18,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
-#include "aom_dsp/grain_synthesis.h"
+#include "aom_dsp/aom_dsp_common.h"
 #include "aom_mem/aom_mem.h"
+#include "av1/decoder/grain_synthesis.h"
 
 // Samples with Gaussian distribution in the range of [-2048, 2047] (12 bits)
 // with zero mean and standard deviation of about 512.

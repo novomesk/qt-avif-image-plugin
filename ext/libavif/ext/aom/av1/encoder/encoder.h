@@ -87,6 +87,14 @@ extern "C" {
 // Lookahead index threshold to enable temporal filtering for second arf.
 #define TF_LOOKAHEAD_IDX_THR 7
 
+#define HDR_QP_LEVELS 10
+#define CHROMA_CB_QP_SCALE 1.04
+#define CHROMA_CR_QP_SCALE 1.04
+#define CHROMA_QP_SCALE -0.46
+#define CHROMA_QP_OFFSET 9.26
+#define QP_SCALE_FACTOR 2.0
+#define DISABLE_HDR_LUMA_DELTAQ 1
+
 // Rational number with an int64 numerator
 // This structure holds a fractional value
 typedef struct aom_rational64 {
@@ -127,6 +135,13 @@ enum {
 } UENUM1BYTE(FRAMETYPE_FLAGS);
 
 #if CONFIG_FRAME_PARALLEL_ENCODE
+#if CONFIG_FPMT_TEST
+enum {
+  PARALLEL_ENCODE = 0,
+  PARALLEL_SIMULATION_ENCODE,
+  NUM_FPMT_TEST_ENCODES
+} UENUM1BYTE(FPMT_TEST_ENC_CFG);
+#endif
 // 0 level frames are sometimes used for rate control purposes, but for
 // reference mapping purposes, the minimum level should be 1.
 #define MIN_PYR_LEVEL 1
@@ -159,6 +174,7 @@ enum {
   DELTA_Q_PERCEPTUAL = 2,     // Modulation to improve video perceptual quality
   DELTA_Q_PERCEPTUAL_AI = 3,  // Perceptual quality opt for all intra mode
   DELTA_Q_USER_RATING_BASED = 4,  // User rating based delta q mode
+  DELTA_Q_HDR = 5,    // QP adjustment based on HDR block pixel average
   DELTA_Q_MODE_COUNT  // This should always be the last member of the enum
 } UENUM1BYTE(DELTAQ_MODE);
 
@@ -213,6 +229,17 @@ typedef enum {
   COST_UPD_TILE,  /*!< Update every tile. */
   COST_UPD_OFF,   /*!< Turn off cost updates. */
 } COST_UPDATE_TYPE;
+
+/*!\enum LOOPFILTER_CONTROL
+ * \brief This enum controls to which frames loopfilter is applied.
+ */
+typedef enum {
+  LOOPFILTER_NONE = 0,      /*!< Disable loopfilter on all frames. */
+  LOOPFILTER_ALL = 1,       /*!< Enable loopfilter for all frames. */
+  LOOPFILTER_REFERENCE = 2, /*!< Disable loopfilter on non reference frames. */
+  LOOPFILTER_SELECTIVELY =
+      3, /*!< Disable loopfilter on frames with low motion. */
+} LOOPFILTER_CONTROL;
 
 /*!
  * \brief Encoder config related to resize.
@@ -750,8 +777,12 @@ typedef struct {
   AQ_MODE aq_mode;
   // Indicates the delta q mode to be used.
   DELTAQ_MODE deltaq_mode;
+  // Indicates the delta q mode strength.
+  DELTAQ_MODE deltaq_strength;
   // Indicates if delta quantization should be enabled in chroma planes.
   bool enable_chroma_deltaq;
+  // Indicates if delta quantization should be enabled for hdr video
+  bool enable_hdr_deltaq;
   // Indicates if encoding with quantization matrices should be enabled.
   bool using_qm;
 } QuantizationCfg;
@@ -806,6 +837,15 @@ typedef struct {
    * enabled.
    */
   bool enable_overlay;
+
+  /*!
+   * Controls loop filtering
+   * 0: Loop filter is disabled for all frames
+   * 1: Loop filter is enabled for all frames
+   * 2: Loop filter is disabled for non-reference frames
+   * 3: Loop filter is disables for the frames with low motion
+   */
+  LOOPFILTER_CONTROL loopfilter_control;
 } AlgoCfg;
 /*!\cond */
 
@@ -816,8 +856,8 @@ typedef struct {
   aom_superblock_size_t superblock_size;
   // Indicates if loopfilter modulation should be enabled.
   bool enable_deltalf_mode;
-  // Indicates if CDEF should be enabled.
-  bool enable_cdef;
+  // Indicates how CDEF should be applied.
+  CDEF_CONTROL cdef_control;
   // Indicates if loop restoration filter should be enabled.
   bool enable_restoration;
   // When enabled, video mode should be used even for single frame input.
@@ -984,6 +1024,9 @@ typedef struct AV1EncoderConfig {
 
   // the name of the second pass output file when passes > 2
   const char *two_pass_output;
+
+  // the name of the second pass log file when passes > 2
+  const char *second_pass_log;
 
   // Indicates if the encoding is GOOD or REALTIME.
   MODE mode;
@@ -1338,12 +1381,12 @@ typedef struct TileDataEnc {
 } TileDataEnc;
 
 typedef struct RD_COUNTS {
-  int64_t comp_pred_diff[REFERENCE_MODES];
   int compound_ref_used_flag;
   int skip_mode_used_flag;
   int tx_type_used[TX_SIZES_ALL][TX_TYPES];
   int obmc_used[BLOCK_SIZES_ALL][2];
   int warped_used[2];
+  int newmv_or_intra_blocks;
 } RD_COUNTS;
 
 typedef struct ThreadData {
@@ -1933,7 +1976,7 @@ typedef struct {
   bool golden_frame;  /*!< Refresh flag for golden frame */
   bool bwd_ref_frame; /*!< Refresh flag for bwd-ref frame */
   bool alt_ref_frame; /*!< Refresh flag for alt-ref frame */
-} RefreshFrameFlagsInfo;
+} RefreshFrameInfo;
 
 /*!
  * \brief Desired dimensions for an externally triggered resize.
@@ -2139,7 +2182,6 @@ typedef struct WeberStats {
   int16_t rec_pix_max;
   int64_t distortion;
   int64_t satd;
-  double alpha;
   double max_scale;
 } WeberStats;
 
@@ -2320,6 +2362,33 @@ typedef struct AV1_PRIMARY {
    */
   int filter_level_v;
 
+#if CONFIG_FPMT_TEST
+  /*!
+   * Flag which enables/disables simulation path for fpmt unit test.
+   * 0 - FPMT integration
+   * 1 - FPMT simulation
+   */
+  FPMT_TEST_ENC_CFG fpmt_unit_test_cfg;
+
+  /*!
+   * Temporary variable simulating the delayed frame_probability update.
+   */
+  FrameProbInfo temp_frame_probs;
+
+  /*!
+   * Temporary variable holding the updated frame probability across
+   * frames. Copy its value to temp_frame_probs for frame_parallel_level 0
+   * frames or last frame in parallel encode set.
+   */
+  FrameProbInfo temp_frame_probs_simulation;
+
+  /*!
+   * Temporary variable simulating the delayed update of valid global motion
+   * model across frames.
+   */
+  int temp_valid_gm_model_found[FRAME_UPDATE_TYPES];
+#endif
+
   /*!
    * Start time stamp of the last encoded show frame
    */
@@ -2419,11 +2488,9 @@ typedef struct AV1_PRIMARY {
   PRIMARY_RATE_CONTROL p_rc;
 
   /*!
-   * Frame buffer holding the temporally filtered source frame. It can be KEY
-   * frame or ARF frame.
+   * Info and resources used by temporal filtering.
    */
-  YV12_BUFFER_CONFIG alt_ref_buffer;
-
+  TEMPORAL_FILTER_INFO tf_info;
   /*!
    * Elements part of the sequence header, that are applicable for all the
    * frames in the video.
@@ -2549,6 +2616,14 @@ typedef struct AV1_PRIMARY {
    * Probabilities for pruning of various AV1 tools.
    */
   FrameProbInfo frame_probs;
+
+  /*!
+   * Indicates if a valid global motion model has been found in the different
+   * frame update types of a GF group.
+   * valid_gm_model_found[i] indicates if valid global motion model has been
+   * found in the frame update type with enum value equal to i
+   */
+  int valid_gm_model_found[FRAME_UPDATE_TYPES];
 } AV1_PRIMARY;
 
 /*!
@@ -2682,7 +2757,7 @@ typedef struct AV1_COMP {
   /*!
    * Refresh frame flags for golden, bwd-ref and alt-ref frames.
    */
-  RefreshFrameFlagsInfo refresh_frame;
+  RefreshFrameInfo refresh_frame;
 
   /*!
    * Flags signalled by the external interface at frame level.
@@ -2904,6 +2979,19 @@ typedef struct AV1_COMP {
    * Retain condition for fast_extra_bits calculation.
    */
   int do_update_vbr_bits_off_target_fast;
+#if CONFIG_FPMT_TEST
+  /*!
+   * Temporary variable for simulation.
+   * Previous frame's framerate.
+   */
+  double temp_framerate;
+#endif
+  /*!
+   * Updated framerate for the current parallel frame.
+   * cpi->framerate is updated with new_framerate during
+   * post encode updates for parallel frames.
+   */
+  double new_framerate;
 #endif
   /*!
    * Multi-threading parameters.
@@ -3130,6 +3218,15 @@ typedef struct AV1_COMP {
    * encode set of lower layer frames.
    */
   int ref_idx_to_skip;
+#if CONFIG_FPMT_TEST
+  /*!
+   * Stores the wanted frame buffer index for choosing primary ref frame by a
+   * frame_parallel_level 2 frame in a parallel encode set of lower layer
+   * frames.
+   */
+
+  int wanted_fb;
+#endif
 #endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
 #endif  // CONFIG_FRAME_PARALLEL_ENCODE
 #if CONFIG_RD_COMMAND
@@ -3180,6 +3277,11 @@ typedef struct AV1_COMP {
    * Context needed for third pass encoding.
    */
   THIRD_PASS_DEC_CTX *third_pass_ctx;
+
+  /*!
+   * File pointer to second pass log
+   */
+  FILE *second_pass_log_stream;
 } AV1_COMP;
 
 /*!
@@ -3238,7 +3340,7 @@ typedef struct EncodeFrameParams {
    *  Flags which determine which reference buffers are refreshed by this
    *  frame.
    */
-  RefreshFrameFlagsInfo refresh_frame;
+  RefreshFrameInfo refresh_frame;
 
   /*!
    *  Speed level to use for this frame: Bigger number means faster.
@@ -3439,7 +3541,7 @@ static INLINE void init_ref_map_pair(
       // Once the keyframe is coded, the slots in ref_frame_map will all
       // point to the same frame. In that case, all subsequent pointers
       // matching the current are considered "free" slots. This will find
-      // the next occurance of the current pointer if ref_count indicates
+      // the next occurrence of the current pointer if ref_count indicates
       // there are multiple instances of it and mark it as free.
       for (int idx2 = map_idx + 1; idx2 < REF_FRAMES; ++idx2) {
         const RefCntBuffer *const buf2 = cpi->common.ref_frame_map[idx2];
@@ -3454,6 +3556,7 @@ static INLINE void init_ref_map_pair(
   }
 }
 
+#if CONFIG_FPMT_TEST
 static AOM_INLINE void calc_frame_data_update_flag(
     GF_GROUP *const gf_group, int gf_frame_index,
     bool *const do_frame_data_update) {
@@ -3477,6 +3580,7 @@ static AOM_INLINE void calc_frame_data_update_flag(
     }
   }
 }
+#endif
 #endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
 // TODO(jingning): Move these functions as primitive members for the new cpi
@@ -3840,6 +3944,20 @@ static AOM_INLINE int is_psnr_calc_enabled(const AV1_COMP *cpi) {
 
   return cpi->ppi->b_calculate_psnr && !is_stat_generation_stage(cpi) &&
          cm->show_frame;
+}
+
+static INLINE int is_frame_resize_pending(AV1_COMP *const cpi) {
+  ResizePendingParams *const resize_pending_params =
+      &cpi->resize_pending_params;
+  return (resize_pending_params->width && resize_pending_params->height &&
+          (cpi->common.width != resize_pending_params->width ||
+           cpi->common.height != resize_pending_params->height));
+}
+
+// Check if loop restoration filter is used.
+static INLINE int is_restoration_used(const AV1_COMMON *const cm) {
+  return cm->seq_params->enable_restoration && !cm->features.all_lossless &&
+         !cm->tiles.large_scale;
 }
 
 #if CONFIG_AV1_TEMPORAL_DENOISING

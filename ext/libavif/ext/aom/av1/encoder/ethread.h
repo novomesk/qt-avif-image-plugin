@@ -100,8 +100,6 @@ int av1_get_num_mod_workers_for_alloc(PrimaryMultiThreadInfo *const p_mt_info,
 
 void av1_init_tile_thread_data(AV1_PRIMARY *ppi, int is_first_pass);
 
-int av1_compute_num_fp_contexts(AV1_PRIMARY *ppi, AV1EncoderConfig *oxcf);
-
 void av1_cdef_mse_calc_frame_mt(AV1_COMMON *cm, MultiThreadInfo *mt_info,
                                 CdefSearchCtx *cdef_search_ctx);
 
@@ -117,6 +115,10 @@ void av1_write_tile_obu_mt(
 int av1_compute_num_enc_workers(AV1_COMP *cpi, int max_workers);
 
 #if CONFIG_FRAME_PARALLEL_ENCODE
+int av1_compute_num_fp_contexts(AV1_PRIMARY *ppi, AV1EncoderConfig *oxcf);
+
+int av1_check_fpmt_config(AV1_PRIMARY *const ppi, AV1EncoderConfig *const oxcf);
+
 int av1_compress_parallel_frames(AV1_PRIMARY *const ppi,
                                  AV1_COMP_DATA *const first_cpi_data);
 #endif

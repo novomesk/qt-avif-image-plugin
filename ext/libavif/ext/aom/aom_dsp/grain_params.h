@@ -10,20 +10,20 @@
  */
 
 /*!\file
- * \brief Describes film grain parameters and film grain synthesis
+ * \brief Describes film grain parameters
  *
  */
-#ifndef AOM_AOM_DSP_GRAIN_SYNTHESIS_H_
-#define AOM_AOM_DSP_GRAIN_SYNTHESIS_H_
+#ifndef AOM_AOM_DSP_GRAIN_PARAMS_H_
+#define AOM_AOM_DSP_GRAIN_PARAMS_H_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <stdint.h>
 #include <string.h>
 
-#include "aom_dsp/aom_dsp_common.h"
-#include "aom/aom_image.h"
+#include "config/aom_config.h"
 
 /*!\brief Structure containing film grain synthesis parameters for a frame
  *
@@ -151,42 +151,8 @@ static INLINE int aom_check_grain_params_equiv(
   return 1;
 }
 
-/*!\brief Add film grain
- *
- * Add film grain to an image
- *
- * Returns 0 for success, -1 for failure
- *
- * \param[in]    grain_params     Grain parameters
- * \param[in]    luma             luma plane
- * \param[in]    cb               cb plane
- * \param[in]    cr               cr plane
- * \param[in]    height           luma plane height
- * \param[in]    width            luma plane width
- * \param[in]    luma_stride      luma plane stride
- * \param[in]    chroma_stride    chroma plane stride
- */
-int av1_add_film_grain_run(const aom_film_grain_t *grain_params, uint8_t *luma,
-                           uint8_t *cb, uint8_t *cr, int height, int width,
-                           int luma_stride, int chroma_stride,
-                           int use_high_bit_depth, int chroma_subsamp_y,
-                           int chroma_subsamp_x, int mc_identity);
-
-/*!\brief Add film grain
- *
- * Add film grain to an image
- *
- * Returns 0 for success, -1 for failure
- *
- * \param[in]    grain_params     Grain parameters
- * \param[in]    src              Source image
- * \param[out]   dst              Resulting image with grain
- */
-int av1_add_film_grain(const aom_film_grain_t *grain_params,
-                       const aom_image_t *src, aom_image_t *dst);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // AOM_AOM_DSP_GRAIN_SYNTHESIS_H_
+#endif  // AOM_AOM_DSP_GRAIN_PARAMS_H_

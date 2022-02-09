@@ -155,7 +155,8 @@ static int get_window_wiener_var(AV1_COMP *const cpi, BLOCK_SIZE bsize,
     }
   }
 
-  sb_wiener_var = (int)((base_num + base_reg) / (base_den + base_reg));
+  sb_wiener_var =
+      (int)(((base_num + base_reg) / (base_den + base_reg)) / mb_count);
   sb_wiener_var = AOMMAX(1, sb_wiener_var);
 
   return (int)sb_wiener_var;
@@ -191,6 +192,144 @@ static int get_var_perceptual_ai(AV1_COMP *const cpi, BLOCK_SIZE bsize,
   }
 
   return sb_wiener_var;
+}
+
+static double calc_src_mean_var(const uint8_t *const src_buffer,
+                                const int buf_stride, const int block_size,
+                                const int use_hbd, double *mean) {
+  double src_mean = 0.0;
+  double src_variance = 0.0;
+  for (int pix_row = 0; pix_row < block_size; ++pix_row) {
+    for (int pix_col = 0; pix_col < block_size; ++pix_col) {
+      int src_pix;
+      if (use_hbd) {
+        const uint16_t *src = CONVERT_TO_SHORTPTR(src_buffer);
+        src_pix = src[pix_row * buf_stride + pix_col];
+      } else {
+        src_pix = src_buffer[pix_row * buf_stride + pix_col];
+      }
+      src_mean += src_pix;
+      src_variance += src_pix * src_pix;
+    }
+  }
+  const int pix_num = block_size * block_size;
+  src_variance -= (src_mean * src_mean) / pix_num;
+  src_variance /= pix_num;
+  *mean = src_mean / pix_num;
+  return src_variance;
+}
+
+static BLOCK_SIZE pick_block_size(AV1_COMP *cpi,
+                                  const BLOCK_SIZE orig_block_size) {
+  const BLOCK_SIZE sub_block_size =
+      get_partition_subsize(orig_block_size, PARTITION_SPLIT);
+  const int mb_step = mi_size_wide[orig_block_size];
+  const int sub_step = mb_step >> 1;
+  const TX_SIZE tx_size = max_txsize_lookup[orig_block_size];
+  const int block_size = tx_size_wide[tx_size];
+  const int split_block_size = block_size >> 1;
+  assert(split_block_size >= 8);
+  const uint8_t *const buffer = cpi->source->y_buffer;
+  const int buf_stride = cpi->source->y_stride;
+  const int use_hbd = cpi->source->flags & YV12_FLAG_HIGHBITDEPTH;
+
+  double vote = 0.0;
+  int sb_count = 0;
+  for (int mi_row = 0; mi_row < cpi->frame_info.mi_rows; mi_row += mb_step) {
+    for (int mi_col = 0; mi_col < cpi->frame_info.mi_cols; mi_col += mb_step) {
+      const uint8_t *mb_buffer =
+          buffer + mi_row * MI_SIZE * buf_stride + mi_col * MI_SIZE;
+      // (1). Calculate mean and var using the original block size
+      double mean = 0.0;
+      const double orig_var =
+          calc_src_mean_var(mb_buffer, buf_stride, block_size, use_hbd, &mean);
+      // (2). Calculate mean and var using the split block size
+      double split_var[4] = { 0 };
+      double split_mean[4] = { 0 };
+      int sub_idx = 0;
+      for (int row = mi_row; row < mi_row + mb_step; row += sub_step) {
+        for (int col = mi_col; col < mi_col + mb_step; col += sub_step) {
+          mb_buffer = buffer + row * MI_SIZE * buf_stride + col * MI_SIZE;
+          split_var[sub_idx] =
+              calc_src_mean_var(mb_buffer, buf_stride, split_block_size,
+                                use_hbd, &split_mean[sub_idx]);
+          ++sub_idx;
+        }
+      }
+      // (3). Determine whether to use the original or the split block size.
+      // If use original, vote += 1.0.
+      // If use split, vote -= 1.0.
+      double max_split_mean = 0.0;
+      double max_split_var = 0.0;
+      double geo_split_var = 0.0;
+      for (int i = 0; i < 4; ++i) {
+        max_split_mean = AOMMAX(max_split_mean, split_mean[i]);
+        max_split_var = AOMMAX(max_split_var, split_var[i]);
+        geo_split_var += log(split_var[i]);
+      }
+      geo_split_var = exp(geo_split_var / 4);
+      const double param_1 = 1.5;
+      const double param_2 = 1.0;
+      // If the variance of the large block size is considerably larger than the
+      // geometric mean of vars of small blocks;
+      // Or if the variance of the large block size is larger than the local
+      // variance;
+      // Or if the variance of the large block size is considerably larger
+      // than the mean.
+      // It indicates that the source block is not a flat area, therefore we
+      // might want to split into smaller block sizes to capture the
+      // local characteristics.
+      if (orig_var > param_1 * geo_split_var || orig_var > max_split_var ||
+          sqrt(orig_var) > param_2 * mean) {
+        vote -= 1.0;
+      } else {
+        vote += 1.0;
+      }
+      ++sb_count;
+    }
+  }
+
+  return vote > 0.0 ? orig_block_size : sub_block_size;
+}
+
+static int64_t pick_norm_factor_and_block_size(AV1_COMP *const cpi,
+                                               BLOCK_SIZE *best_block_size) {
+  const AV1_COMMON *const cm = &cpi->common;
+  const BLOCK_SIZE sb_size = cm->seq_params->sb_size;
+  BLOCK_SIZE last_block_size;
+  BLOCK_SIZE this_block_size = sb_size;
+  *best_block_size = sb_size;
+  // Pick from block size 64x64, 32x32 and 16x16.
+  do {
+    last_block_size = this_block_size;
+    assert(this_block_size >= BLOCK_16X16 && this_block_size <= BLOCK_128X128);
+    const int block_size = block_size_wide[this_block_size];
+    if (block_size < 32) break;
+    this_block_size = pick_block_size(cpi, last_block_size);
+  } while (this_block_size != last_block_size);
+  *best_block_size = this_block_size;
+
+  int64_t norm_factor = 1;
+  const BLOCK_SIZE norm_block_size = this_block_size;
+  assert(norm_block_size >= BLOCK_16X16 && norm_block_size <= BLOCK_64X64);
+  const int norm_step = mi_size_wide[norm_block_size];
+  double sb_wiener_log = 0;
+  double sb_count = 0;
+  for (int mi_row = 0; mi_row < cm->mi_params.mi_rows; mi_row += norm_step) {
+    for (int mi_col = 0; mi_col < cm->mi_params.mi_cols; mi_col += norm_step) {
+      const int sb_wiener_var =
+          get_var_perceptual_ai(cpi, norm_block_size, mi_row, mi_col);
+      const int64_t satd = get_satd(cpi, norm_block_size, mi_row, mi_col);
+      const int64_t sse = get_sse(cpi, norm_block_size, mi_row, mi_col);
+      const double scaled_satd = (double)satd / sqrt((double)sse);
+      sb_wiener_log += scaled_satd * log(sb_wiener_var);
+      sb_count += scaled_satd;
+    }
+  }
+  if (sb_count > 0) norm_factor = (int64_t)(exp(sb_wiener_log / sb_count));
+  norm_factor = AOMMAX(1, norm_factor);
+
+  return norm_factor;
 }
 
 void av1_set_mb_wiener_variance(AV1_COMP *cpi) {
@@ -357,20 +496,6 @@ void av1_set_mb_wiener_variance(AV1_COMP *cpi) {
       weber_stats->distortion -= (dist_mean * dist_mean) / pix_num;
       weber_stats->satd = best_intra_cost;
 
-      double reg = sqrt((double)weber_stats->distortion) *
-                   sqrt((double)weber_stats->src_pix_max) * 0.1;
-      double alpha_den = fabs(weber_stats->rec_pix_max *
-                                  sqrt((double)weber_stats->src_variance) -
-                              weber_stats->src_pix_max *
-                                  sqrt((double)weber_stats->rec_variance)) +
-                         reg;
-      double alpha_num = ((double)weber_stats->distortion) *
-                             sqrt((double)weber_stats->src_variance) *
-                             weber_stats->rec_pix_max +
-                         reg;
-
-      weber_stats->alpha = AOMMAX(alpha_num, 1.0) / AOMMAX(alpha_den, 1.0);
-
       qcoeff[0] = 0;
       for (idx = 1; idx < coeff_count; ++idx) qcoeff[idx] = abs(qcoeff[idx]);
       qsort(qcoeff, coeff_count, sizeof(*coeff), qsort_comp);
@@ -379,45 +504,32 @@ void av1_set_mb_wiener_variance(AV1_COMP *cpi) {
     }
   }
 
-  int sb_step = mi_size_wide[cm->seq_params->sb_size];
+  BLOCK_SIZE norm_block_size = BLOCK_16X16;
+  cpi->norm_wiener_variance =
+      pick_norm_factor_and_block_size(cpi, &norm_block_size);
+  const int norm_step = mi_size_wide[norm_block_size];
+
   double sb_wiener_log = 0;
   double sb_count = 0;
-
-  for (mi_row = 0; mi_row < cm->mi_params.mi_rows; mi_row += sb_step) {
-    for (mi_col = 0; mi_col < cm->mi_params.mi_cols; mi_col += sb_step) {
-      int sb_wiener_var =
-          get_var_perceptual_ai(cpi, cm->seq_params->sb_size, mi_row, mi_col);
-      int64_t satd = get_satd(cpi, cm->seq_params->sb_size, mi_row, mi_col);
-      int64_t sse = get_sse(cpi, cm->seq_params->sb_size, mi_row, mi_col);
-      double scaled_satd = (double)satd / sqrt((double)sse);
-      sb_wiener_log += scaled_satd * log(sb_wiener_var);
-      sb_count += scaled_satd;
-    }
-  }
-
-  if (sb_count > 0)
-    cpi->norm_wiener_variance = (int64_t)(exp(sb_wiener_log / sb_count));
-  cpi->norm_wiener_variance = AOMMAX(1, cpi->norm_wiener_variance);
-
   for (int its_cnt = 0; its_cnt < 2; ++its_cnt) {
     sb_wiener_log = 0;
     sb_count = 0;
-    for (mi_row = 0; mi_row < cm->mi_params.mi_rows; mi_row += sb_step) {
-      for (mi_col = 0; mi_col < cm->mi_params.mi_cols; mi_col += sb_step) {
+    for (mi_row = 0; mi_row < cm->mi_params.mi_rows; mi_row += norm_step) {
+      for (mi_col = 0; mi_col < cm->mi_params.mi_cols; mi_col += norm_step) {
         int sb_wiener_var =
-            get_var_perceptual_ai(cpi, cm->seq_params->sb_size, mi_row, mi_col);
+            get_var_perceptual_ai(cpi, norm_block_size, mi_row, mi_col);
 
         double beta = (double)cpi->norm_wiener_variance / sb_wiener_var;
-        double min_max_scale =
-            AOMMAX(1.0, get_max_scale(cpi, bsize, mi_row, mi_col));
+        double min_max_scale = AOMMAX(
+            1.0, get_max_scale(cpi, cm->seq_params->sb_size, mi_row, mi_col));
         beta = 1.0 / AOMMIN(1.0 / beta, min_max_scale);
         beta = AOMMIN(beta, 4);
         beta = AOMMAX(beta, 0.25);
 
         sb_wiener_var = (int)(cpi->norm_wiener_variance / beta);
 
-        int64_t satd = get_satd(cpi, cm->seq_params->sb_size, mi_row, mi_col);
-        int64_t sse = get_sse(cpi, cm->seq_params->sb_size, mi_row, mi_col);
+        int64_t satd = get_satd(cpi, norm_block_size, mi_row, mi_col);
+        int64_t sse = get_sse(cpi, norm_block_size, mi_row, mi_col);
         double scaled_satd = (double)satd / sqrt((double)sse);
         sb_wiener_log += scaled_satd * log(sb_wiener_var);
         sb_count += scaled_satd;
@@ -468,7 +580,8 @@ void av1_init_mb_ur_var_buffer(AV1_COMP *cpi) {
 }
 
 void av1_set_mb_ur_variance(AV1_COMP *cpi) {
-  const CommonModeInfoParams *const mi_params = &cpi->common.mi_params;
+  const AV1_COMMON *cm = &cpi->common;
+  const CommonModeInfoParams *const mi_params = &cm->mi_params;
   ThreadData *td = &cpi->td;
   MACROBLOCK *x = &td->mb;
   MACROBLOCKD *xd = &x->e_mbd;
@@ -482,8 +595,21 @@ void av1_set_mb_ur_variance(AV1_COMP *cpi) {
   const int num_rows = (mi_params->mi_rows + num_mi_h - 1) / num_mi_h;
   const int use_hbd = cpi->source->flags & YV12_FLAG_HIGHBITDEPTH;
 
-  double a = -23.06 * 4.0, b = 0.004065, c = 30.516 * 4.0;
-  int delta_q_avg = 0;
+  int *mb_delta_q[2];
+  CHECK_MEM_ERROR(cm, mb_delta_q[0],
+                  aom_calloc(num_rows * num_cols, sizeof(*mb_delta_q[0])));
+  CHECK_MEM_ERROR(cm, mb_delta_q[1],
+                  aom_calloc(num_rows * num_cols, sizeof(*mb_delta_q[1])));
+
+  // Approximates the model change between current version (Spet 2021) and the
+  // baseline (July 2021).
+  const double model_change[] = { 3.0, 3.0 };
+  // The following parameters are fitted from user labeled data.
+  const double a[] = { -24.50 * 4.0, -17.20 * 4.0 };
+  const double b[] = { 0.004898, 0.003093 };
+  const double c[] = { (29.932 + model_change[0]) * 4.0,
+                       (42.100 + model_change[1]) * 4.0 };
+  int delta_q_avg[2] = { 0, 0 };
   // Loop through each SB block.
   for (int row = 0; row < num_rows; ++row) {
     for (int col = 0; col < num_cols; ++col) {
@@ -504,7 +630,7 @@ void av1_set_mb_ur_variance(AV1_COMP *cpi) {
           buf.buf = y_buffer + row_offset_y * y_stride + col_offset_y;
           buf.stride = y_stride;
 
-          double block_variance;
+          unsigned int block_variance;
           if (use_hbd) {
             block_variance = av1_high_get_sby_perpixel_variance(
                 cpi, &buf, BLOCK_8X8, xd->bd);
@@ -513,25 +639,58 @@ void av1_set_mb_ur_variance(AV1_COMP *cpi) {
                 av1_get_sby_perpixel_variance(cpi, &buf, BLOCK_8X8);
           }
 
-          block_variance = block_variance < 1.0 ? 1.0 : block_variance;
-          var += log(block_variance);
+          block_variance = AOMMAX(block_variance, 1);
+          var += log((double)block_variance);
           num_of_var += 1.0;
         }
       }
       var = exp(var / num_of_var);
-      cpi->mb_delta_q[index] = (int)(a * exp(-b * var) + c + 0.5);
-      delta_q_avg += cpi->mb_delta_q[index];
+      mb_delta_q[0][index] = RINT(a[0] * exp(-b[0] * var) + c[0]);
+      mb_delta_q[1][index] = RINT(a[1] * exp(-b[1] * var) + c[1]);
+      delta_q_avg[0] += mb_delta_q[0][index];
+      delta_q_avg[1] += mb_delta_q[1][index];
     }
   }
 
-  delta_q_avg = (int)((double)delta_q_avg / (num_rows * num_cols) + 0.5);
+  delta_q_avg[0] = RINT((double)delta_q_avg[0] / (num_rows * num_cols));
+  delta_q_avg[1] = RINT((double)delta_q_avg[1] / (num_rows * num_cols));
 
+  int model_idx;
+  double scaling_factor;
+  const int cq_level = cpi->oxcf.rc_cfg.cq_level;
+  if (cq_level < delta_q_avg[0]) {
+    model_idx = 0;
+    scaling_factor = (double)cq_level / delta_q_avg[0];
+  } else if (cq_level < delta_q_avg[1]) {
+    model_idx = 2;
+    scaling_factor =
+        (double)(cq_level - delta_q_avg[0]) / (delta_q_avg[1] - delta_q_avg[0]);
+  } else {
+    model_idx = 1;
+    scaling_factor = (double)(MAXQ - cq_level) / (MAXQ - delta_q_avg[1]);
+  }
+
+  const double new_delta_q_avg =
+      delta_q_avg[0] + scaling_factor * (delta_q_avg[1] - delta_q_avg[0]);
   for (int row = 0; row < num_rows; ++row) {
     for (int col = 0; col < num_cols; ++col) {
       const int index = row * num_cols + col;
-      cpi->mb_delta_q[index] -= delta_q_avg;
+      if (model_idx == 2) {
+        const double delta_q =
+            mb_delta_q[0][index] +
+            scaling_factor * (mb_delta_q[1][index] - mb_delta_q[0][index]);
+        cpi->mb_delta_q[index] = RINT((double)cpi->oxcf.q_cfg.deltaq_strength /
+                                      100.0 * (delta_q - new_delta_q_avg));
+      } else {
+        cpi->mb_delta_q[index] = RINT(
+            (double)cpi->oxcf.q_cfg.deltaq_strength / 100.0 * scaling_factor *
+            (mb_delta_q[model_idx][index] - delta_q_avg[model_idx]));
+      }
     }
   }
+
+  aom_free(mb_delta_q[0]);
+  aom_free(mb_delta_q[1]);
 }
 
 int av1_get_sbq_user_rating_based(AV1_COMP *const cpi, int mi_row, int mi_col) {

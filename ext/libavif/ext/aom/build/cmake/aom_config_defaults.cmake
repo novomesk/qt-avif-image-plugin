@@ -73,11 +73,10 @@ set_aom_config_var(CONFIG_AV1_ENCODER 1 "Enable AV1 encoder.")
 set_aom_config_var(CONFIG_BIG_ENDIAN 0 "Internal flag.")
 set_aom_config_var(CONFIG_FRAME_PARALLEL_ENCODE 0
                    "Enable frame parallelism during encode.")
-if(CONFIG_FRAME_PARALLEL_ENCODE)
-  set_aom_config_var(
-    CONFIG_FRAME_PARALLEL_ENCODE_2 0
-    "Enable frame parallelism during encode for frames in lower layer depths.")
-endif() # CONFIG_FRAME_PARALLEL_ENCODE
+set_aom_config_var(
+  CONFIG_FRAME_PARALLEL_ENCODE_2 0
+  "Enable frame parallelism during encode for frames in lower layer depths.")
+set_aom_config_var(CONFIG_FPMT_TEST 0 "Enable FPMT testing.")
 set_aom_config_var(CONFIG_GCC 0 "Building with GCC (detect).")
 set_aom_config_var(CONFIG_GCOV 0 "Enable gcov support.")
 set_aom_config_var(CONFIG_GPROF 0 "Enable gprof support.")

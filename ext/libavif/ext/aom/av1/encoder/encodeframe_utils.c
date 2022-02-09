@@ -15,6 +15,7 @@
 #include "av1/encoder/encodeframe_utils.h"
 #include "av1/encoder/partition_strategy.h"
 #include "av1/encoder/rdopt.h"
+#include "av1/encoder/aq_variance.h"
 
 void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
                          const BLOCK_SIZE bsize, const int mi_row,
@@ -205,7 +206,6 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
   const AV1_COMMON *const cm = &cpi->common;
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
   const int num_planes = av1_num_planes(cm);
-  RD_COUNTS *const rdc = &td->rd_counts;
   MACROBLOCK *const x = &td->mb;
   MACROBLOCKD *const xd = &x->e_mbd;
   struct macroblock_plane *const p = x->plane;
@@ -260,7 +260,8 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
     }
     // Else for cyclic refresh mode update the segment map, set the segment id
     // and then update the quantizer.
-    if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ) {
+    if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ &&
+        !cpi->rc.rtc_external_ratectrl) {
       av1_cyclic_refresh_update_segment(cpi, x, mi_row, mi_col, bsize,
                                         ctx->rd_stats.rate, ctx->rd_stats.dist,
                                         txfm_info->skip_txfm, dry_run);
@@ -338,10 +339,6 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
         !is_nontrans_global_motion(xd, xd->mi[0])) {
       update_filter_type_count(td->counts, xd, mi_addr);
     }
-
-    rdc->comp_pred_diff[SINGLE_REFERENCE] += ctx->single_pred_diff;
-    rdc->comp_pred_diff[COMPOUND_REFERENCE] += ctx->comp_pred_diff;
-    rdc->comp_pred_diff[REFERENCE_MODE_SELECT] += ctx->hybrid_pred_diff;
   }
 
   const int x_mis = AOMMIN(bw, mi_params->mi_cols - mi_col);
@@ -957,6 +954,49 @@ int av1_get_q_for_deltaq_objective(AV1_COMP *const cpi, BLOCK_SIZE bsize,
 
   return qindex;
 }
+
+#if !DISABLE_HDR_LUMA_DELTAQ
+// offset table defined in Table3 of T-REC-H.Sup15 document.
+static const int hdr_thres[HDR_QP_LEVELS + 1] = { 0,   301, 367, 434, 501, 567,
+                                                  634, 701, 767, 834, 1024 };
+
+static const int hdr10_qp_offset[HDR_QP_LEVELS] = { 3,  2,  1,  0,  -1,
+                                                    -2, -3, -4, -5, -6 };
+#endif
+
+int av1_get_q_for_hdr(AV1_COMP *const cpi, MACROBLOCK *const x,
+                      BLOCK_SIZE bsize, int mi_row, int mi_col) {
+  AV1_COMMON *const cm = &cpi->common;
+  assert(cm->seq_params->bit_depth == AOM_BITS_10);
+
+#if DISABLE_HDR_LUMA_DELTAQ
+  (void)x;
+  (void)bsize;
+  (void)mi_row;
+  (void)mi_col;
+  return cm->quant_params.base_qindex;
+#else
+  // calculate pixel average
+  const int block_luma_avg = av1_log_block_avg(cpi, x, bsize, mi_row, mi_col);
+  // adjust offset based on average of the pixel block
+  int offset = 0;
+  for (int i = 0; i < HDR_QP_LEVELS; i++) {
+    if (block_luma_avg >= hdr_thres[i] && block_luma_avg < hdr_thres[i + 1]) {
+      offset = (int)(hdr10_qp_offset[i] * QP_SCALE_FACTOR);
+      break;
+    }
+  }
+
+  const DeltaQInfo *const delta_q_info = &cm->delta_q_info;
+  offset = AOMMIN(offset, delta_q_info->delta_q_res * 9 - 1);
+  offset = AOMMAX(offset, -delta_q_info->delta_q_res * 9 + 1);
+  int qindex = cm->quant_params.base_qindex + offset;
+  qindex = AOMMIN(qindex, MAXQ);
+  qindex = AOMMAX(qindex, MINQ);
+
+  return qindex;
+#endif
+}
 #endif  // !CONFIG_REALTIME_ONLY
 
 void av1_reset_simple_motion_tree_partition(SIMPLE_MOTION_DATA_TREE *sms_tree,
@@ -1296,8 +1336,8 @@ void av1_restore_sb_state(const SB_FIRST_PASS_STATS *sb_fp_stats, AV1_COMP *cpi,
 
 /*! Checks whether to skip updating the entropy cost based on tile info.
  *
- * This function contains codes common to both \ref skip_mv_cost_update and
- * \ref skip_dv_cost_update.
+ * This function contains the common code used to skip the cost update of coeff,
+ * mode, mv and dv symbols.
  */
 static int skip_cost_update(const SequenceHeader *seq_params,
                             const TileInfo *const tile_info, const int mi_row,
@@ -1380,8 +1420,8 @@ void av1_set_cost_upd_freq(AV1_COMP *cpi, ThreadData *td,
       if (mi_col != tile_info->mi_col_start) break;
       AOM_FALLTHROUGH_INTENDED;
     case COST_UPD_SB:  // SB level
-      if (cpi->sf.inter_sf.coeff_cost_upd_level == INTERNAL_COST_UPD_SBROW &&
-          mi_col != tile_info->mi_col_start)
+      if (skip_cost_update(cm->seq_params, tile_info, mi_row, mi_col,
+                           cpi->sf.inter_sf.coeff_cost_upd_level))
         break;
       av1_fill_coeff_costs(&x->coeff_costs, xd->tile_ctx, num_planes);
       break;
@@ -1396,8 +1436,8 @@ void av1_set_cost_upd_freq(AV1_COMP *cpi, ThreadData *td,
       if (mi_col != tile_info->mi_col_start) break;
       AOM_FALLTHROUGH_INTENDED;
     case COST_UPD_SB:  // SB level
-      if (cpi->sf.inter_sf.mode_cost_upd_level == INTERNAL_COST_UPD_SBROW &&
-          mi_col != tile_info->mi_col_start)
+      if (skip_cost_update(cm->seq_params, tile_info, mi_row, mi_col,
+                           cpi->sf.inter_sf.mode_cost_upd_level))
         break;
       av1_fill_mode_rates(cm, &x->mode_costs, xd->tile_ctx);
       break;

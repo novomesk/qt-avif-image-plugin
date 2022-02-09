@@ -245,6 +245,7 @@ typedef struct {
                                                 // MV entropy estimation
 
   // === Below this line are GOP related data that will be updated per GOP ===
+  int base_q_index;  // Stores the base q index.
   int q_index_list_ready;
   int q_index_list[MAX_LENGTH_TPL_FRAME_STATS];  // q indices for the current
                                                  // GOP
@@ -254,6 +255,9 @@ typedef struct {
   int actual_bitrate_byframe[MAX_LENGTH_TPL_FRAME_STATS];
   int actual_mv_bitrate_byframe[MAX_LENGTH_TPL_FRAME_STATS];
   int actual_coeff_bitrate_byframe[MAX_LENGTH_TPL_FRAME_STATS];
+
+  // Array to store qstep_ratio for each frame in a GOP
+  double qstep_ratio_list[MAX_LENGTH_TPL_FRAME_STATS];
 } VBR_RATECTRL_INFO;
 
 static INLINE void vbr_rc_reset_gop_data(VBR_RATECTRL_INFO *vbr_rc_info) {
@@ -271,10 +275,10 @@ static INLINE void vbr_rc_init(VBR_RATECTRL_INFO *vbr_rc_info,
   vbr_rc_info->total_bit_budget = total_bit_budget;
   vbr_rc_info->show_frame_count = show_frame_count;
   vbr_rc_info->keyframe_bitrate = 0;
-  const double scale_factors[FRAME_UPDATE_TYPES] = { 1.2, 1.2, 1.2, 1.2,
-                                                     1.2, 1.2, 1.2 };
-  const double mv_scale_factors[FRAME_UPDATE_TYPES] = { 5.0, 5.0, 5.0, 5.0,
-                                                        5.0, 5.0, 5.0 };
+  const double scale_factors[FRAME_UPDATE_TYPES] = { 0.94559, 0.12040, 1,
+                                                     1.10199, 1,       1,
+                                                     0.16393 };
+  const double mv_scale_factors[FRAME_UPDATE_TYPES] = { 3, 3, 3, 3, 3, 3, 3 };
   memcpy(vbr_rc_info->scale_factors, scale_factors,
          sizeof(scale_factors[0]) * FRAME_UPDATE_TYPES);
   memcpy(vbr_rc_info->mv_scale_factors, mv_scale_factors,
@@ -298,7 +302,7 @@ static INLINE void vbr_rc_set_keyframe_bitrate(VBR_RATECTRL_INFO *vbr_rc_info,
 
 static INLINE void vbr_rc_info_log(const VBR_RATECTRL_INFO *vbr_rc_info,
                                    int gf_frame_index, int gf_group_size,
-                                   int *update_type) {
+                                   FRAME_UPDATE_TYPE *update_type) {
   // Add +2 here because this is the last frame this method is called at.
   if (gf_frame_index + 2 >= gf_group_size) {
     printf(
@@ -356,13 +360,11 @@ void av1_setup_tpl_buffers(struct AV1_PRIMARY *const ppi,
  * \param[in]    cpi           Top - level encoder instance structure
  * \param[in]    gop_eval      Flag if it is in the GOP length decision stage
  * \param[in]    frame_params  Per frame encoding parameters
- * \param[in]    frame_input   Input frame buffers
  *
  * \return Indicates whether or not we should use a longer GOP length.
  */
 int av1_tpl_setup_stats(struct AV1_COMP *cpi, int gop_eval,
-                        const struct EncodeFrameParams *const frame_params,
-                        const struct EncodeFrameInput *const frame_input);
+                        const struct EncodeFrameParams *const frame_params);
 
 /*!\cond */
 
@@ -550,10 +552,10 @@ int av1_get_overlap_area(int row_a, int col_a, int row_b, int col_b, int width,
  *                                    exists
  * \param[in]       bit_budget        The specified bit budget to achieve
  * \param[in]       gf_frame_index    current frame in the GOP
- * \param[in]       arf_qstep_ratio   ARF q step ratio
  * \param[in]       bit_depth         bit depth
  * \param[in]       scale_factor      Scale factor to improve budget estimation
- * \param[out]       q_index_list     array of q_index, one per frame
+ * \param[in]       qstep_ratio_list  Stores the qstep_ratio for each frame
+ * \param[out]      q_index_list      array of q_index, one per frame
  * \param[out]      estimated_bitrate_byframe  bits usage per frame in the GOP
  *
  * \return Returns the optimal base q index to use.
@@ -561,8 +563,9 @@ int av1_get_overlap_area(int row_a, int col_a, int row_b, int col_b, int width,
 int av1_q_mode_estimate_base_q(const struct GF_GROUP *gf_group,
                                const TplTxfmStats *txfm_stats_list,
                                const int *stats_valid_list, double bit_budget,
-                               int gf_frame_index, double arf_qstep_ratio,
-                               aom_bit_depth_t bit_depth, double scale_factor,
+                               int gf_frame_index, aom_bit_depth_t bit_depth,
+                               double scale_factor,
+                               const double *qstep_ratio_list,
                                int *q_index_list,
                                double *estimated_bitrate_byframe);
 
@@ -577,6 +580,16 @@ int av1_q_mode_estimate_base_q(const struct GF_GROUP *gf_group,
  */
 int av1_tpl_get_q_index(const TplParams *tpl_data, int gf_frame_index,
                         int leaf_qindex, aom_bit_depth_t bit_depth);
+
+/*!\brief Compute the frame importance from TPL stats
+ *
+ * \param[in]       tpl_data          TPL struct
+ * \param[in]       gf_frame_index    current frame index in the GOP
+ *
+ * \return frame_importance
+ */
+double av1_tpl_get_frame_importance(const TplParams *tpl_data,
+                                    int gf_frame_index);
 
 /*!\brief Compute the ratio between arf q step and the leaf q step based on TPL
  * stats

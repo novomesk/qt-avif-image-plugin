@@ -28,7 +28,9 @@
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/encode_strategy.h"
 #include "av1/encoder/encodeframe.h"
+#include "av1/encoder/encoder_alloc.h"
 #include "av1/encoder/firstpass.h"
+#include "av1/encoder/gop_structure.h"
 #include "av1/encoder/pass2_strategy.h"
 #include "av1/encoder/temporal_filter.h"
 #include "av1/encoder/tpl_model.h"
@@ -40,17 +42,18 @@
 #define TEMPORAL_FILTER_KEY_FRAME (CONFIG_REALTIME_ONLY ? 0 : 1)
 
 static INLINE void set_refresh_frame_flags(
-    RefreshFrameFlagsInfo *const refresh_frame_flags, bool refresh_gf,
-    bool refresh_bwdref, bool refresh_arf) {
-  refresh_frame_flags->golden_frame = refresh_gf;
-  refresh_frame_flags->bwd_ref_frame = refresh_bwdref;
-  refresh_frame_flags->alt_ref_frame = refresh_arf;
+    RefreshFrameInfo *const refresh_frame, bool refresh_gf, bool refresh_bwdref,
+    bool refresh_arf) {
+  refresh_frame->golden_frame = refresh_gf;
+  refresh_frame->bwd_ref_frame = refresh_bwdref;
+  refresh_frame->alt_ref_frame = refresh_arf;
 }
 
-void av1_configure_buffer_updates(
-    AV1_COMP *const cpi, RefreshFrameFlagsInfo *const refresh_frame_flags,
-    const FRAME_UPDATE_TYPE type, const REFBUF_STATE refbuf_state,
-    int force_refresh_all) {
+void av1_configure_buffer_updates(AV1_COMP *const cpi,
+                                  RefreshFrameInfo *const refresh_frame,
+                                  const FRAME_UPDATE_TYPE type,
+                                  const REFBUF_STATE refbuf_state,
+                                  int force_refresh_all) {
   // NOTE(weitinglin): Should we define another function to take care of
   // cpi->rc.is_$Source_Type to make this function as it is in the comment?
   const ExtRefreshFrameFlagsInfo *const ext_refresh_frame_flags =
@@ -59,22 +62,22 @@ void av1_configure_buffer_updates(
 
   switch (type) {
     case KF_UPDATE:
-      set_refresh_frame_flags(refresh_frame_flags, true, true, true);
+      set_refresh_frame_flags(refresh_frame, true, true, true);
       break;
 
     case LF_UPDATE:
-      set_refresh_frame_flags(refresh_frame_flags, false, false, false);
+      set_refresh_frame_flags(refresh_frame, false, false, false);
       break;
 
     case GF_UPDATE:
-      set_refresh_frame_flags(refresh_frame_flags, true, false, false);
+      set_refresh_frame_flags(refresh_frame, true, false, false);
       break;
 
     case OVERLAY_UPDATE:
       if (refbuf_state == REFBUF_RESET)
-        set_refresh_frame_flags(refresh_frame_flags, true, true, true);
+        set_refresh_frame_flags(refresh_frame, true, true, true);
       else
-        set_refresh_frame_flags(refresh_frame_flags, true, false, false);
+        set_refresh_frame_flags(refresh_frame, true, false, false);
 
       cpi->rc.is_src_frame_alt_ref = 1;
       break;
@@ -82,19 +85,19 @@ void av1_configure_buffer_updates(
     case ARF_UPDATE:
       // NOTE: BWDREF does not get updated along with ALTREF_FRAME.
       if (refbuf_state == REFBUF_RESET)
-        set_refresh_frame_flags(refresh_frame_flags, true, true, true);
+        set_refresh_frame_flags(refresh_frame, true, true, true);
       else
-        set_refresh_frame_flags(refresh_frame_flags, false, false, true);
+        set_refresh_frame_flags(refresh_frame, false, false, true);
 
       break;
 
     case INTNL_OVERLAY_UPDATE:
-      set_refresh_frame_flags(refresh_frame_flags, false, false, false);
+      set_refresh_frame_flags(refresh_frame, false, false, false);
       cpi->rc.is_src_frame_alt_ref = 1;
       break;
 
     case INTNL_ARF_UPDATE:
-      set_refresh_frame_flags(refresh_frame_flags, false, true, false);
+      set_refresh_frame_flags(refresh_frame, false, true, false);
       break;
 
     default: assert(0); break;
@@ -102,7 +105,7 @@ void av1_configure_buffer_updates(
 
   if (ext_refresh_frame_flags->update_pending &&
       (!is_stat_generation_stage(cpi))) {
-    set_refresh_frame_flags(refresh_frame_flags,
+    set_refresh_frame_flags(refresh_frame,
                             ext_refresh_frame_flags->golden_frame,
                             ext_refresh_frame_flags->bwd_ref_frame,
                             ext_refresh_frame_flags->alt_ref_frame);
@@ -116,7 +119,7 @@ void av1_configure_buffer_updates(
   }
 
   if (force_refresh_all)
-    set_refresh_frame_flags(refresh_frame_flags, true, true, true);
+    set_refresh_frame_flags(refresh_frame, true, true, true);
 }
 
 static void set_additional_frame_flags(const AV1_COMMON *const cm,
@@ -160,7 +163,7 @@ static void set_ext_overrides(AV1_COMMON *const cm,
 }
 
 static int choose_primary_ref_frame(
-    const AV1_COMP *const cpi, const EncodeFrameParams *const frame_params) {
+    AV1_COMP *const cpi, const EncodeFrameParams *const frame_params) {
   const AV1_COMMON *const cm = &cpi->common;
 
   const int intra_only = frame_params->frame_type == KEY_FRAME ||
@@ -182,7 +185,27 @@ static int choose_primary_ref_frame(
   // current frame
   const int current_ref_type = get_current_frame_ref_type(cpi);
   int wanted_fb = cpi->ppi->fb_of_context_type[current_ref_type];
-
+#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FRAME_PARALLEL_ENCODE_2 && \
+    CONFIG_FPMT_TEST
+  if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
+    GF_GROUP *const gf_group = &cpi->ppi->gf_group;
+    if (gf_group->update_type[cpi->gf_frame_index] == INTNL_ARF_UPDATE) {
+      int frame_level = gf_group->frame_parallel_level[cpi->gf_frame_index];
+      // Book keep wanted_fb of frame_parallel_level 1 frame in an FP2 set.
+      if (frame_level == 1) {
+        cpi->wanted_fb = wanted_fb;
+      }
+      // Use the wanted_fb of level 1 frame in an FP2 for a level 2 frame in the
+      // set.
+      if (frame_level == 2 &&
+          gf_group->update_type[cpi->gf_frame_index - 1] == INTNL_ARF_UPDATE) {
+        assert(gf_group->frame_parallel_level[cpi->gf_frame_index - 1] == 1);
+        wanted_fb = cpi->wanted_fb;
+      }
+    }
+  }
+#endif  // CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FRAME_PARALLEL_ENCODE_2 &&
+        // CONFIG_FPMT_TEST
   int primary_ref_frame = PRIMARY_REF_NONE;
   for (int ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ref_frame++) {
     if (get_ref_frame_map_idx(cm, ref_frame) == wanted_fb) {
@@ -222,8 +245,12 @@ static void adjust_frame_rate(AV1_COMP *cpi, int64_t ts_start, int64_t ts_end) {
 
   if (this_duration) {
     if (step) {
+#if CONFIG_FRAME_PARALLEL_ENCODE
+      cpi->new_framerate = 10000000.0 / this_duration;
+#endif
       av1_new_framerate(cpi, 10000000.0 / this_duration);
     } else {
+      double framerate;
       // Average this frame's rate into the last second's average
       // frame rate. If we haven't seen 1 second yet, then average
       // over the whole interval seen.
@@ -232,10 +259,21 @@ static void adjust_frame_rate(AV1_COMP *cpi, int64_t ts_start, int64_t ts_end) {
       double avg_duration = 10000000.0 / cpi->framerate;
       avg_duration *= (interval - avg_duration + this_duration);
       avg_duration /= interval;
-
-      av1_new_framerate(cpi, 10000000.0 / avg_duration);
+#if CONFIG_FRAME_PARALLEL_ENCODE
+      cpi->new_framerate = (10000000.0 / avg_duration);
+      // For parallel frames update cpi->framerate with new_framerate
+      // during av1_post_encode_updates()
+      framerate =
+          (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0)
+              ? cpi->framerate
+              : cpi->new_framerate;
+#else
+      framerate = (10000000.0 / avg_duration);
+#endif
+      av1_new_framerate(cpi, framerate);
     }
   }
+
   time_stamps->prev_ts_start = ts_start;
   time_stamps->prev_ts_end = ts_end;
 }
@@ -312,12 +350,17 @@ static struct lookahead_entry *choose_frame_source(
   frame_params->show_frame = *pop_lookahead;
 
 #if CONFIG_FRAME_PARALLEL_ENCODE
-  // Future frame in parallel encode set
-  if (gf_group->src_offset[cpi->gf_frame_index] != 0 &&
-      !is_stat_generation_stage(cpi)) {
-    src_index = gf_group->src_offset[cpi->gf_frame_index];
+#if CONFIG_FPMT_TEST
+  if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_ENCODE) {
+#else
+  {
+#endif  // CONFIG_FPMT_TEST
+    // Future frame in parallel encode set
+    if (gf_group->src_offset[cpi->gf_frame_index] != 0 &&
+        !is_stat_generation_stage(cpi))
+      src_index = gf_group->src_offset[cpi->gf_frame_index];
   }
-#endif
+#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   if (frame_params->show_frame) {
     // show frame, pop from buffer
     // Get last frame source.
@@ -362,10 +405,9 @@ static int allow_show_existing(const AV1_COMP *const cpi,
 
 // Update frame_flags to tell the encoder's caller what sort of frame was
 // encoded.
-static void update_frame_flags(
-    const AV1_COMMON *const cm,
-    const RefreshFrameFlagsInfo *const refresh_frame_flags,
-    unsigned int *frame_flags) {
+static void update_frame_flags(const AV1_COMMON *const cm,
+                               const RefreshFrameInfo *const refresh_frame,
+                               unsigned int *frame_flags) {
   if (encode_show_existing_frame(cm)) {
     *frame_flags &= ~FRAMEFLAGS_GOLDEN;
     *frame_flags &= ~FRAMEFLAGS_BWDREF;
@@ -374,19 +416,19 @@ static void update_frame_flags(
     return;
   }
 
-  if (refresh_frame_flags->golden_frame) {
+  if (refresh_frame->golden_frame) {
     *frame_flags |= FRAMEFLAGS_GOLDEN;
   } else {
     *frame_flags &= ~FRAMEFLAGS_GOLDEN;
   }
 
-  if (refresh_frame_flags->alt_ref_frame) {
+  if (refresh_frame->alt_ref_frame) {
     *frame_flags |= FRAMEFLAGS_ALTREF;
   } else {
     *frame_flags &= ~FRAMEFLAGS_ALTREF;
   }
 
-  if (refresh_frame_flags->bwd_ref_frame) {
+  if (refresh_frame->bwd_ref_frame) {
     *frame_flags |= FRAMEFLAGS_BWDREF;
   } else {
     *frame_flags &= ~FRAMEFLAGS_BWDREF;
@@ -923,36 +965,38 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
   GF_GROUP *const gf_group = &cpi->ppi->gf_group;
   FRAME_UPDATE_TYPE update_type =
       get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
+  const int is_second_arf =
+      av1_gop_is_second_arf(gf_group, cpi->gf_frame_index);
 
   // Decide whether to apply temporal filtering to the source frame.
-  int apply_filtering = 0;
-  if (frame_params->frame_type == KEY_FRAME) {
-    // Decide whether it is allowed to perform key frame filtering
-    int allow_kf_filtering =
-        oxcf->kf_cfg.enable_keyframe_filtering &&
-        !is_stat_generation_stage(cpi) && !frame_params->show_existing_frame &&
-        cpi->rc.frames_to_key > cpi->oxcf.algo_cfg.arnr_max_frames &&
-        !is_lossless_requested(&oxcf->rc_cfg) &&
-        oxcf->algo_cfg.arnr_max_frames > 0 && oxcf->gf_cfg.lag_in_frames > 1;
-    if (allow_kf_filtering) {
-      const double y_noise_level = av1_estimate_noise_from_single_plane(
-          frame_input->source, 0, cm->seq_params->bit_depth);
-      apply_filtering = y_noise_level > 0;
-    } else {
-      apply_filtering = 0;
-    }
-    // If we are doing kf filtering, set up a few things.
-    if (apply_filtering) {
-      av1_setup_past_independence(cm);
-    }
-  } else if (update_type == ARF_UPDATE || update_type == INTNL_ARF_UPDATE) {
-    // ARF
-    apply_filtering = oxcf->algo_cfg.arnr_max_frames > 0;
-  }
-  if (is_stat_generation_stage(cpi)) {
+  int apply_filtering =
+      av1_is_temporal_filter_on(oxcf) && !is_stat_generation_stage(cpi);
+  if (update_type != KF_UPDATE && update_type != ARF_UPDATE && !is_second_arf) {
     apply_filtering = 0;
   }
-
+  if (apply_filtering) {
+    if (frame_params->frame_type == KEY_FRAME) {
+      // TODO(angiebird): Move the noise level check to av1_tf_info_filtering.
+      // Decide whether it is allowed to perform key frame filtering
+      int allow_kf_filtering = oxcf->kf_cfg.enable_keyframe_filtering &&
+                               !frame_params->show_existing_frame &&
+                               !is_lossless_requested(&oxcf->rc_cfg);
+      if (allow_kf_filtering) {
+        const double y_noise_level = av1_estimate_noise_from_single_plane(
+            frame_input->source, 0, cm->seq_params->bit_depth,
+            NOISE_ESTIMATION_EDGE_THRESHOLD);
+        apply_filtering = y_noise_level > 0;
+      } else {
+        apply_filtering = 0;
+      }
+      // If we are doing kf filtering, set up a few things.
+      if (apply_filtering) {
+        av1_setup_past_independence(cm);
+      }
+    } else if (is_second_arf) {
+      apply_filtering = cpi->sf.hl_sf.second_alt_ref_filtering;
+    }
+  }
 #if CONFIG_COLLECT_COMPONENT_TIMING
   if (cpi->oxcf.pass == 2) start_timing(cpi, apply_filtering_time);
 #endif
@@ -961,59 +1005,61 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
   // apply filtering to frame
   if (apply_filtering) {
     int show_existing_alt_ref = 0;
+    FRAME_DIFF frame_diff;
+    int top_index = 0;
+    int bottom_index = 0;
+    const int q_index = av1_rc_pick_q_and_bounds(
+        cpi, cpi->oxcf.frm_dim_cfg.width, cpi->oxcf.frm_dim_cfg.height,
+        cpi->gf_frame_index, &bottom_index, &top_index);
+
     // TODO(bohanli): figure out why we need frame_type in cm here.
     cm->current_frame.frame_type = frame_params->frame_type;
-    int arf_src_index = gf_group->arf_src_offset[cpi->gf_frame_index];
-    int is_forward_keyframe = 0;
-    if (gf_group->frame_type[cpi->gf_frame_index] == KEY_FRAME &&
-        gf_group->refbuf_state[cpi->gf_frame_index] == REFBUF_UPDATE)
-      is_forward_keyframe = 1;
-
-    const int code_arf =
-        av1_temporal_filter(cpi, arf_src_index, update_type,
-                            is_forward_keyframe, &show_existing_alt_ref);
-    if (code_arf) {
-      aom_extend_frame_borders(&cpi->ppi->alt_ref_buffer, av1_num_planes(cm));
-      frame_input->source = &cpi->ppi->alt_ref_buffer;
-      aom_copy_metadata_to_frame_buffer(frame_input->source,
-                                        source_buffer->metadata);
+    if (update_type == KF_UPDATE || update_type == ARF_UPDATE) {
+      YV12_BUFFER_CONFIG *tf_buf = av1_tf_info_get_filtered_buf(
+          &cpi->ppi->tf_info, cpi->gf_frame_index, &frame_diff);
+      if (tf_buf != NULL) {
+        frame_input->source = tf_buf;
+        show_existing_alt_ref = av1_check_show_filtered_frame(
+            tf_buf, &frame_diff, q_index, cm->seq_params->bit_depth);
+        if (show_existing_alt_ref) {
+          cpi->common.showable_frame |= 1;
+        }
+      }
+      if (gf_group->frame_type[cpi->gf_frame_index] != KEY_FRAME) {
+        cpi->ppi->show_existing_alt_ref = show_existing_alt_ref;
+      }
     }
-    // Currently INTNL_ARF_UPDATE only do show_existing.
-    if (update_type == ARF_UPDATE &&
-        gf_group->frame_type[cpi->gf_frame_index] != KEY_FRAME) {
-      cpi->ppi->show_existing_alt_ref = show_existing_alt_ref;
+
+    if (is_second_arf) {
+      YV12_BUFFER_CONFIG *tf_buf_second_arf =
+          &cpi->ppi->tf_info.tf_buf_second_arf;
+      // We didn't apply temporal filtering for second arf ahead in
+      // av1_tf_info_filtering().
+      const int arf_src_index = gf_group->arf_src_offset[cpi->gf_frame_index];
+      // Right now, we are still using tf_buf_second_arf due to
+      // implementation complexity.
+      // TODO(angiebird): Reuse tf_info->tf_buf here.
+      av1_temporal_filter(cpi, arf_src_index, cpi->gf_frame_index, &frame_diff,
+                          tf_buf_second_arf);
+      show_existing_alt_ref = av1_check_show_filtered_frame(
+          tf_buf_second_arf, &frame_diff, q_index, cm->seq_params->bit_depth);
+      if (show_existing_alt_ref) {
+        aom_extend_frame_borders(tf_buf_second_arf, av1_num_planes(cm));
+        frame_input->source = tf_buf_second_arf;
+        aom_copy_metadata_to_frame_buffer(frame_input->source,
+                                          source_buffer->metadata);
+      }
+      // Currently INTNL_ARF_UPDATE only do show_existing.
+      cpi->common.showable_frame |= 1;
     }
   }
 #if CONFIG_COLLECT_COMPONENT_TIMING
   if (cpi->oxcf.pass == 2) end_timing(cpi, apply_filtering_time);
 #endif
 
-  // perform tpl after filtering
-  int allow_tpl = oxcf->gf_cfg.lag_in_frames > 1 &&
-                  !is_stat_generation_stage(cpi) &&
-                  oxcf->algo_cfg.enable_tpl_model;
-
-  if (gf_group->size > MAX_LENGTH_TPL_FRAME_STATS) {
-    allow_tpl = 0;
-  }
-  if (frame_params->frame_type == KEY_FRAME) {
-    // Don't do tpl for fwd key frames or fwd key frame overlays
-    allow_tpl = allow_tpl && !cpi->sf.tpl_sf.disable_filtered_key_tpl &&
-                gf_group->update_type[cpi->gf_frame_index] != OVERLAY_UPDATE;
-  } else {
-    // Do tpl after ARF is filtered, or if no ARF, at the second frame of GF
-    // group.
-    // TODO(bohanli): if no ARF, just do it at the first frame.
-    int gf_index = cpi->gf_frame_index;
-    allow_tpl = allow_tpl && (gf_group->update_type[gf_index] == ARF_UPDATE ||
-                              gf_group->update_type[gf_index] == GF_UPDATE);
-    if (allow_tpl) {
-      // Need to set the size for TPL for ARF
-      // TODO(bohanli): Why is this? what part of it is necessary?
-      av1_set_frame_size(cpi, cm->superres_upscaled_width,
-                         cm->superres_upscaled_height);
-    }
-  }
+  // TODO(bohanli): Why is this? what part of it is necessary?
+  av1_set_frame_size(cpi, cm->superres_upscaled_width,
+                     cm->superres_upscaled_height);
 
 #if CONFIG_RD_COMMAND
   if (frame_params->frame_type == KEY_FRAME) {
@@ -1021,19 +1067,35 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
     av1_read_rd_command(filepath, &cpi->rd_command);
   }
 #endif  // CONFIG_RD_COMMAND
-  if (allow_tpl == 0) {
-    // Avoid the use of unintended TPL stats from previous GOP's results.
-    if (cpi->gf_frame_index == 0 && !is_stat_generation_stage(cpi))
-      av1_init_tpl_stats(&cpi->ppi->tpl_data);
-  } else {
-    if (!cpi->skip_tpl_setup_stats) {
-      av1_tpl_preload_rc_estimate(cpi, frame_params);
-      av1_tpl_setup_stats(cpi, 0, frame_params, frame_input);
+  if (cpi->gf_frame_index == 0 && !is_stat_generation_stage(cpi)) {
+    // perform tpl after filtering
+    int allow_tpl =
+        oxcf->gf_cfg.lag_in_frames > 1 && oxcf->algo_cfg.enable_tpl_model;
+    if (gf_group->size > MAX_LENGTH_TPL_FRAME_STATS) {
+      allow_tpl = 0;
+    }
+    if (frame_params->frame_type == KEY_FRAME) {
+      // TODO(angiebird): handle disable_filtered_key_tpl properly
+      allow_tpl = allow_tpl && !cpi->sf.tpl_sf.disable_filtered_key_tpl;
+    } else {
+      // In rare case, it's possible to have non ARF/GF update_type here.
+      // We should set allow_tpl to zero in the situation
+      allow_tpl =
+          allow_tpl && (update_type == ARF_UPDATE || update_type == GF_UPDATE);
+    }
+
+    if (allow_tpl) {
+      if (!cpi->skip_tpl_setup_stats) {
+        av1_tpl_preload_rc_estimate(cpi, frame_params);
+        av1_tpl_setup_stats(cpi, 0, frame_params);
 #if CONFIG_BITRATE_ACCURACY
-      av1_vbr_rc_update_q_index_list(&cpi->vbr_rc_info, &cpi->ppi->tpl_data,
-                                     gf_group, cpi->gf_frame_index,
-                                     cm->seq_params->bit_depth);
+        av1_vbr_rc_update_q_index_list(&cpi->vbr_rc_info, &cpi->ppi->tpl_data,
+                                       gf_group, cpi->gf_frame_index,
+                                       cm->seq_params->bit_depth);
 #endif
+      }
+    } else {
+      av1_init_tpl_stats(&cpi->ppi->tpl_data);
     }
   }
 
@@ -1044,9 +1106,10 @@ static int denoise_and_encode(AV1_COMP *const cpi, uint8_t *const dest,
 
   // Set frame_input source to true source for psnr calculation.
   if (apply_filtering && is_psnr_calc_enabled(cpi)) {
-    cpi->source =
-        av1_scale_if_required(cm, source_buffer, &cpi->scaled_source,
-                              cm->features.interp_filter, 0, false, true);
+    cpi->source = av1_realloc_and_scale_if_required(
+        cm, source_buffer, &cpi->scaled_source, cm->features.interp_filter, 0,
+        false, true, cpi->oxcf.border_in_pixels,
+        cpi->oxcf.tool_cfg.enable_global_motion);
     cpi->unscaled_source = source_buffer;
   }
 #if CONFIG_COLLECT_COMPONENT_TIMING
@@ -1229,9 +1292,11 @@ static void get_ref_frames(RefFrameMapPair ref_frame_map_pairs[REF_FRAMES],
         gf_group->frame_parallel_level[gf_index - 1] == 1 &&
         gf_group->update_type[gf_index - 1] == INTNL_ARF_UPDATE) {
       assert(gf_group->update_type[gf_index] == INTNL_ARF_UPDATE);
-      // TODO(Remya): Use original value of is_parallel_encode when FPMT is
-      // enabled.
-      is_parallel_encode = 0;
+#if CONFIG_FPMT_TEST
+      is_parallel_encode = (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_ENCODE)
+                               ? is_parallel_encode
+                               : 0;
+#endif  // CONFIG_FPMT_TEST
       // If parallel cpis are active, use ref_idx_to_skip, else, use display
       // index.
       assert(IMPLIES(is_parallel_encode, cpi->ref_idx_to_skip != INVALID_IDX));
@@ -1492,6 +1557,9 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
         AOMMIN(gf_cfg->gf_min_pyr_height, gf_cfg->gf_max_pyr_height);
   }
 
+  // Allocation of mi buffers.
+  alloc_mb_mode_info_buffers(cpi);
+
   cpi->skip_tpl_setup_stats = 0;
 #if !CONFIG_REALTIME_ONLY
   cpi->twopass_frame.this_frame = NULL;
@@ -1505,14 +1573,20 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
     // Initialise frame_level_rate_correction_factors with value previous
     // to the parallel frames.
     if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0) {
-      for (int i = 0; i < RATE_FACTOR_LEVELS; i++)
+      for (int i = 0; i < RATE_FACTOR_LEVELS; i++) {
         cpi->rc.frame_level_rate_correction_factors[i] =
-            cpi->ppi->p_rc.rate_correction_factors[i];
+#if CONFIG_FPMT_TEST
+            (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE)
+                ? cpi->ppi->p_rc.temp_rate_correction_factors[i]
+                :
+#endif  // CONFIG_FPMT_TEST
+                cpi->ppi->p_rc.rate_correction_factors[i];
+      }
     }
     // copy mv_stats from ppi to frame_level cpi.
     cpi->mv_stats = cpi->ppi->mv_stats;
 #endif
-    av1_get_second_pass_params(cpi, &frame_params, &frame_input, *frame_flags);
+    av1_get_second_pass_params(cpi, &frame_params, *frame_flags);
 #if CONFIG_COLLECT_COMPONENT_TIMING
     end_timing(cpi, av1_get_second_pass_params_time);
 #endif
@@ -1584,6 +1658,14 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
 
   av1_apply_encoding_flags(cpi, source->flags);
   *frame_flags = (source->flags & AOM_EFLAG_FORCE_KF) ? FRAMEFLAGS_KEY : 0;
+
+#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+  if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
+    if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0) {
+      cpi->framerate = cpi->temp_framerate;
+    }
+  }
+#endif  // CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
 
   // Shown frames and arf-overlay frames need frame-rate considering
   if (frame_params.show_frame)
@@ -1698,10 +1780,16 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
 #endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
 #if CONFIG_FRAME_PARALLEL_ENCODE
-    if (gf_group->frame_parallel_level[cpi->gf_frame_index] == 0) {
+    int get_ref_frames = 0;
+#if CONFIG_FPMT_TEST
+    get_ref_frames =
+        (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) ? 1 : 0;
+#endif  // CONFIG_FPMT_TEST
+    if (get_ref_frames ||
+        gf_group->frame_parallel_level[cpi->gf_frame_index] == 0) {
 #else
     {
-#endif
+#endif  // CONFIG_FRAME_PARALLEL_ENCODE
       if (!ext_flags->refresh_frame.update_pending) {
         av1_get_ref_frames(&cpi->ref_buffer_stack,
 #if CONFIG_FRAME_PARALLEL_ENCODE
@@ -1827,6 +1915,9 @@ int av1_encode_strategy(AV1_COMP *const cpi, size_t *const size,
   }
 #endif  // CONFIG_REALTIME_ONLY
 
+  // As the frame_update_type can get modified as part of
+  // av1_adjust_gf_refresh_qp_one_pass_rt
+  frame_update_type = get_frame_update_type(gf_group, cpi->gf_frame_index);
   if (!is_stat_generation_stage(cpi)) {
     // First pass doesn't modify reference buffer assignment or produce frame
     // flags

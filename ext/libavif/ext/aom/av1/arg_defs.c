@@ -289,9 +289,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .max_intra_rate_pct =
       ARG_DEF(NULL, "max-intra-rate", 1, "Max I-frame bitrate (pct)"),
 #if CONFIG_AV1_ENCODER
-  .cpu_used_av1 =
-      ARG_DEF(NULL, "cpu-used", 1,
-              "Speed setting (0..6 in good mode, 6..9 in realtime mode)"),
+  .cpu_used_av1 = ARG_DEF(NULL, "cpu-used", 1,
+                          "Speed setting (0..6 in good mode, 6..10 in realtime "
+                          "mode, 0..9 in all intra mode)"),
   .rowmtarg =
       ARG_DEF(NULL, "row-mt", 1,
               "Enable row based multi-threading (0: off, 1: on (default))"),
@@ -317,7 +317,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .enable_cdef = ARG_DEF(
       NULL, "enable-cdef", 1,
       "Enable the constrained directional enhancement filter (0: false, "
-      "1: true (default))"),
+      "1: true (default), 2: disable for non-reference frames)"),
   .enable_restoration = ARG_DEF(NULL, "enable-restoration", 1,
                                 "Enable the loop restoration filter (0: false "
                                 "(default in Realtime mode), "
@@ -520,6 +520,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "2: deltaq placeholder, 3: key frame visual quality, 4: user "
               "rating based visual quality optimization). "
               "Currently this requires enable-tpl-model as a prerequisite."),
+  .deltaq_strength = ARG_DEF(NULL, "deltaq-strength", 1,
+                             "Deltaq strength for"
+                             " --deltaq-mode=4 (%)"),
   .deltalf_mode = ARG_DEF(NULL, "delta-lf-mode", 1,
                           "Enable delta-lf-mode (0: off (default), 1: on)"),
   .frame_periodic_boost =
@@ -631,6 +634,13 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       "If false, transforms always have the largest possible size "
       "(0: false, 1: true (default))"),
 
+  .loopfilter_control = ARG_DEF(
+      NULL, "loopfilter-control", 1,
+      "Control loop filtering "
+      "(0: Loopfilter disabled for all frames, 1: Enable "
+      "loopfilter for all frames (default), 2: Disable loopfilter for "
+      "non-reference frames, 3: Disable loopfilter for frames with low motion"),
+
   .two_pass_input =
       ARG_DEF(NULL, "two-pass-input", 1,
               "The input file for the second pass for three-pass encoding."),
@@ -641,5 +651,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "two-pass-width", 1, "The width of two-pass-input."),
   .two_pass_height =
       ARG_DEF(NULL, "two-pass-height", 1, "The height of two-pass-input."),
+  .second_pass_log =
+      ARG_DEF("spf", "second-pass-log", 1, "Log file from second pass."),
 #endif  // CONFIG_AV1_ENCODER
 };
