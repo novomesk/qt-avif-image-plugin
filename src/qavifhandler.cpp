@@ -160,7 +160,7 @@ bool QAVIFHandler::ensureDecoder()
         m_container_width = m_decoder->image->width;
         m_container_height = m_decoder->image->height;
 
-        if ((m_container_width > 32768) || (m_container_height > 32768)) {
+        if ((m_container_width > 65535) || (m_container_height > 65535)) {
             qWarning("AVIF image (%dx%d) is too large!", m_container_width, m_container_height);
             m_parseState = ParseAvifError;
             return false;
@@ -168,6 +168,12 @@ bool QAVIFHandler::ensureDecoder()
 
         if ((m_container_width == 0) || (m_container_height == 0)) {
             qWarning("Empty image, nothing to decode");
+            m_parseState = ParseAvifError;
+            return false;
+        }
+
+        if (m_container_width > ((16384 * 16384) / m_container_height)) {
+            qWarning("AVIF image (%dx%d) has more than 256 megapixels!", m_container_width, m_container_height);
             m_parseState = ParseAvifError;
             return false;
         }
@@ -448,12 +454,26 @@ bool QAVIFHandler::read(QImage *image)
 bool QAVIFHandler::write(const QImage &image)
 {
     if (image.format() == QImage::Format_Invalid) {
-        qWarning("No image data to save");
+        qWarning("No image data to save!");
         return false;
     }
 
-    if ((image.width() > 32768) || (image.height() > 32768)) {
-        qWarning("Image is too large");
+    if ((image.width() > 0) && (image.height() > 0)) {
+        if ((image.width() > 65535) || (image.height() > 65535)) {
+            qWarning("Image (%dx%d) is too large to save!", image.width(), image.height());
+            return false;
+        }
+
+        if (image.width() > ((16384 * 16384) / image.height())) {
+            qWarning("Image (%dx%d) will not be saved because it has more than 256 megapixels!", image.width(), image.height());
+            return false;
+        }
+
+        if ((image.width() > 32768) || (image.height() > 32768)) {
+            qWarning("Image (%dx%d) has a dimension above 32768 pixels, saved AVIF may not work in other software!", image.width(), image.height());
+        }
+    } else {
+        qWarning("Image has zero dimension!");
         return false;
     }
 
