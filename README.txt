@@ -4,7 +4,7 @@ This is a plug-in for QT based applications to enable them to open/save images i
 
 Format support:
 AVIF (AV1 Image File Format - image/avif): read/write support
-AVIFS (AVIF image sequence - image/avif-sequence): ready only
+AVIFS (AVIF image sequence): ready only
 
 Software requirements:
 yasm – needed to build optimized libaom
@@ -13,7 +13,7 @@ qmake (or qt5-qmake) – to build the QT plugin
 QT5 development packages (for example qtbase5-dev on Ubuntu)
 qt5-image-formats-plugins (or qt5-imageformats, dev-qt/qtimageformats, …)
 The plug-in use libavif library internally ( https://github.com/AOMediaCodec/libavif ).
-Qt4 and is not supported and the plug-in doesn’t compile with Qt older than Qt 5.12
+Qt4 is not supported and the plug-in doesn’t compile with Qt older than Qt 5.12
 
 Optional requirement:
 Plug-in supports Color spaces and loading ICC profiles when built with Qt 5.14 or newer.
@@ -60,7 +60,7 @@ Things good to know:
 imagethumbnail.desktop belongs to kde-apps/kio-extras (in Gentoo Linux).
 When the kio-extras is updated, configuration in imagethumbnail.desktop is overwritten.
 If you want to see thumbnais in dolphin again, will need to add
-;image/avif;image/avif-sequence
+;image/avif;
 to the MimeType= list after kio-extras update again.
 
 Before you update the plug-in, save your work!!!
