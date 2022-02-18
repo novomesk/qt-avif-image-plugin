@@ -82,7 +82,7 @@ static void sad_neon_32(const uint8x16_t vec_src_00,
 
 void aom_sad64x64x4d_neon(const uint8_t *src, int src_stride,
                           const uint8_t *const ref[4], int ref_stride,
-                          uint32_t *res) {
+                          uint32_t res[4]) {
   int i;
   uint16x8_t vec_sum_ref0_lo = vdupq_n_u16(0);
   uint16x8_t vec_sum_ref0_hi = vdupq_n_u16(0);
@@ -128,7 +128,7 @@ void aom_sad64x64x4d_neon(const uint8_t *src, int src_stride,
 
 void aom_sad32x32x4d_neon(const uint8_t *src, int src_stride,
                           const uint8_t *const ref[4], int ref_stride,
-                          uint32_t *res) {
+                          uint32_t res[4]) {
   int i;
   uint16x8_t vec_sum_ref0_lo = vdupq_n_u16(0);
   uint16x8_t vec_sum_ref0_hi = vdupq_n_u16(0);
@@ -172,7 +172,7 @@ void aom_sad32x32x4d_neon(const uint8_t *src, int src_stride,
 
 void aom_sad16x16x4d_neon(const uint8_t *src, int src_stride,
                           const uint8_t *const ref[4], int ref_stride,
-                          uint32_t *res) {
+                          uint32_t res[4]) {
   int i;
   uint16x8_t vec_sum_ref0_lo = vdupq_n_u16(0);
   uint16x8_t vec_sum_ref0_hi = vdupq_n_u16(0);

@@ -516,7 +516,7 @@ int aom_satd_lp_sse2(const int16_t *coeff, int length) {
   return _mm_cvtsi128_si32(accum);
 }
 
-void aom_int_pro_row_sse2(int16_t *hbuf, const uint8_t *ref,
+void aom_int_pro_row_sse2(int16_t hbuf[16], const uint8_t *ref,
                           const int ref_stride, const int height) {
   int idx = 1;
   __m128i zero = _mm_setzero_si128();
