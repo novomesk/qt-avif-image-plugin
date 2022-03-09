@@ -947,7 +947,8 @@ bool QAVIFHandler::jumpToImage(int imageNumber)
         return false;
     }
 
-    if (imageNumber == m_decoder->imageCount) { // we are here already
+    if (imageNumber == m_decoder->imageIndex) { // we are here already
+        m_must_jump_to_next_image = false;
         return true;
     }
 
