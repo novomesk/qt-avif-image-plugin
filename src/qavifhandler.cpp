@@ -477,6 +477,16 @@ bool QAVIFHandler::write(const QImage &image)
         return false;
     }
 
+    const char *encoder_name = avifCodecName(AVIF_CODEC_CHOICE_AUTO, AVIF_CODEC_FLAG_CAN_ENCODE);
+    if (!encoder_name) {
+        qWarning("Cannot save AVIF images because libavif was built without AV1 encoders!");
+        return false;
+    }
+
+    if (m_quality >= 100 && !avifCodecName(AVIF_CODEC_CHOICE_AOM, AVIF_CODEC_FLAG_CAN_ENCODE)) {
+        qWarning("You are using %s encoder. It is recommended to enable libAOM encoder in libavif for better near-lossless compression.", encoder_name);
+    }
+
     int maxQuantizer = AVIF_QUANTIZER_WORST_QUALITY * (100 - qBound(0, m_quality, 100)) / 100;
     int minQuantizer = 0;
     int maxQuantizerAlpha = 0;
