@@ -398,12 +398,14 @@ sum_\lag\()_\type\()_\edge\()_start:
         st1             {v0.16b}, [x0], #16
 .endif
         ldr             x30, [sp], #16
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 .endif
 .endm
 
 .macro sum_lag1_func type, uv_layout, edge, elems=16
 function sum_\type\()_lag1_\edge\()_neon
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
         sum_lag_n_body  lag1, \type, \uv_layout, \edge, \elems, store=0
 endfunc
@@ -541,6 +543,7 @@ endfunc
 
 .macro sum_lag2_func type, uv_layout, edge, elems=16
 function sum_\type\()_lag2_\edge\()_neon
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
 .ifc \edge, left
         sub             x12, x0,  #2*GRAIN_WIDTH
@@ -752,6 +755,7 @@ endfunc
 
 .macro sum_lag3_func type, uv_layout, edge, elems=16
 function sum_\type\()_lag3_\edge\()_neon
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
 .ifc \edge, left
         sub             x11, x0,  #3*GRAIN_WIDTH
@@ -779,6 +783,7 @@ sum_lag3_func uv_420, 420, mid
 sum_lag3_func uv_420, 420, right, 9
 
 function generate_grain_rows_neon
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
 1:
         get_grain_row   v16, v17, v18, v19, v20, v21
@@ -786,10 +791,12 @@ function generate_grain_rows_neon
         store_grain_row v16, v17, v18, v19, v20, v21
         b.gt            1b
         ldr             x30, [sp], #16
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 endfunc
 
 function generate_grain_rows_44_neon
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
 1:
         get_grain_row_44 v16, v17, v18
@@ -797,20 +804,25 @@ function generate_grain_rows_44_neon
         store_grain_row_44 v16, v17, v18
         b.gt            1b
         ldr             x30, [sp], #16
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 endfunc
 
 function get_grain_row_neon
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
         get_grain_row   v16, v17, v18, v19, v20, v21
         ldr             x30, [sp], #16
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 endfunc
 
 function get_grain_row_44_neon
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
         get_grain_row_44 v16, v17, v18
         ldr             x30, [sp], #16
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 endfunc
 
@@ -854,6 +866,7 @@ endfunc
 
 .macro gen_grain_82 type
 function generate_grain_\type\()_8bpc_neon, export=1
+        AARCH64_SIGN_LINK_REGISTER
         stp             x30, x19, [sp, #-96]!
 
 .ifc \type, uv_444
@@ -904,6 +917,7 @@ function generate_grain_\type\()_8bpc_neon, export=1
         br              x16
 
 L(generate_grain_\type\()_lag0):
+        AARCH64_VALID_JUMP_TARGET
 .ifc \type, y
         mov             w1,  #GRAIN_HEIGHT
         bl              generate_grain_rows_neon
@@ -949,9 +963,11 @@ L(generate_grain_\type\()_lag0):
         b.gt            1b
 .endif
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(generate_grain_\type\()_lag1):
+        AARCH64_VALID_JUMP_TARGET
         ld1r            {v27.16b}, [x4], #1 // ar_coeffs_y[0]
         ld1r            {v28.16b}, [x4], #1 // ar_coeffs_y[1]
         ld1r            {v29.16b}, [x4]     // ar_coeffs_y[2]
@@ -988,9 +1004,11 @@ L(generate_grain_\type\()_lag1):
         b.gt            1b
 
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(generate_grain_\type\()_lag2):
+        AARCH64_VALID_JUMP_TARGET
         ld1             {v30.16b}, [x4]     // ar_coeffs_y[0-11], ar_coeffs_uv[0-12]
 
         smov            w4,  v30.b[10]
@@ -1015,9 +1033,11 @@ L(generate_grain_\type\()_lag2):
         b.gt            1b
 
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(generate_grain_\type\()_lag3):
+        AARCH64_VALID_JUMP_TARGET
         ld1             {v29.16b, v30.16b}, [x4] // ar_coeffs_y[0-23], ar_coeffs_uv[0-24]
         stp             d8,  d9,  [sp, #16]
         stp             d10, d11, [sp, #32]
@@ -1053,6 +1073,7 @@ L(generate_grain_\type\()_lag3):
         ldp             d10, d11, [sp, #32]
         ldp             d8,  d9,  [sp, #16]
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(gen_grain_\type\()_tbl):
@@ -1084,6 +1105,7 @@ gen_grain_82 uv_444
 
 .macro gen_grain_44 type
 function generate_grain_\type\()_8bpc_neon, export=1
+        AARCH64_SIGN_LINK_REGISTER
         stp             x30, x19, [sp, #-96]!
 
         mov             w13, w3
@@ -1125,6 +1147,7 @@ function generate_grain_\type\()_8bpc_neon, export=1
         br              x16
 
 L(generate_grain_\type\()_lag0):
+        AARCH64_VALID_JUMP_TARGET
         dup             v28.8h,  w7
         ld1r            {v27.16b}, [x4]     // ar_coeffs_uv[0]
         movi            v0.16b,  #0
@@ -1159,9 +1182,11 @@ L(generate_grain_\type\()_lag0):
         b.gt            1b
 
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(generate_grain_\type\()_lag1):
+        AARCH64_VALID_JUMP_TARGET
         ld1r            {v27.16b}, [x4], #1 // ar_coeffs_uv[0]
         ld1r            {v28.16b}, [x4], #1 // ar_coeffs_uv[1]
         ld1r            {v29.16b}, [x4]     // ar_coeffs_uv[2]
@@ -1185,9 +1210,11 @@ L(generate_grain_\type\()_lag1):
         b.gt            1b
 
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(generate_grain_\type\()_lag2):
+        AARCH64_VALID_JUMP_TARGET
         ld1             {v30.16b}, [x4]     // ar_coeffs_uv[0-12]
 
         smov            w4,  v30.b[10]
@@ -1207,9 +1234,11 @@ L(generate_grain_\type\()_lag2):
         b.gt            1b
 
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(generate_grain_\type\()_lag3):
+        AARCH64_VALID_JUMP_TARGET
         ldr             q29,      [x4]      // ar_coeffs_uv[0-15]
         ldr             q30,      [x4, #16] // ar_coeffs_uv[16-24]
         stp             d8,  d9,  [sp, #16]
@@ -1241,6 +1270,7 @@ L(generate_grain_\type\()_lag3):
         ldp             d10, d11, [sp, #32]
         ldp             d8,  d9,  [sp, #16]
         ldp             x30, x19, [sp], #96
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(gen_grain_\type\()_tbl):
@@ -1335,6 +1365,7 @@ endconst
 //                                const int h, const ptrdiff_t clip,
 //                                const ptrdiff_t type);
 function fgy_32x32_8bpc_neon, export=1
+        AARCH64_SIGN_LINK_REGISTER
         str             x30, [sp, #-16]!
         ldr             w11, [x6, #8]          // offsets[1][0]
         ldr             w13, [x6, #4]          // offsets[0][1]
@@ -1402,6 +1433,7 @@ endfunc
 function fgy_loop_neon
 .macro fgy ox, oy
 L(loop_\ox\oy):
+        AARCH64_VALID_JUMP_TARGET
 1:
         ld1             {v0.16b,  v1.16b},  [x1],  x2 // src
 .if \ox
@@ -1515,6 +1547,7 @@ L(loop_\ox\oy):
         b.gt            L(loop_\ox\()0)
 .endif
         ldr             x30, [sp], #16
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 .endm
 
@@ -1544,6 +1577,7 @@ endfunc
 //                                     const ptrdiff_t type);
 .macro fguv layout, sx, sy
 function fguv_32x32_\layout\()_8bpc_neon, export=1
+        AARCH64_SIGN_LINK_REGISTER
         str             x30,      [sp, #-32]!
         str             d8,       [sp, #16]
         ldp             x8,  x9,  [sp, #32]    // offsets, h
@@ -1649,6 +1683,7 @@ fguv 444, 0, 0
 function fguv_loop_sx0_neon
 .macro fguv_loop_sx0 csfl, ox, oy
 L(fguv_loop_sx0_csfl\csfl\()_\ox\oy):
+        AARCH64_VALID_JUMP_TARGET
 1:
         ld1             {v0.16b,  v1.16b},  [x6],  x7  // luma
         ld1             {v6.16b,  v7.16b},  [x1],  x2  // src
@@ -1811,6 +1846,7 @@ L(fguv_loop_sx0_csfl\csfl\()_\ox\oy):
 9:
         ldr             d8,       [sp, #16]
         ldr             x30,      [sp], #32
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(fguv_loop_sx0_tbl):
@@ -1827,6 +1863,7 @@ endfunc
 function fguv_loop_sx1_neon
 .macro fguv_loop_sx1 csfl, ox, oy
 L(fguv_loop_sx1_csfl\csfl\()_\ox\oy):
+        AARCH64_VALID_JUMP_TARGET
 1:
         ld1             {v0.16b, v1.16b},  [x6],  x7  // luma
         ld1             {v6.16b},          [x1],  x2  // src
@@ -1958,6 +1995,7 @@ L(fguv_loop_sx1_csfl\csfl\()_\ox\oy):
 9:
         ldr             d8,       [sp, #16]
         ldr             x30,      [sp], #32
+        AARCH64_VALIDATE_LINK_REGISTER
         ret
 
 L(fguv_loop_sx1_tbl):

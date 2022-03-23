@@ -1,4 +1,4 @@
-# Copyright © 2018-2021, VideoLAN and dav1d authors
+# Copyright © 2018-2022, VideoLAN and dav1d authors
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -23,14 +23,14 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 project('dav1d', ['c'],
-    version: '0.9.2',
+    version: '1.0.0',
     default_options: ['c_std=c99',
                       'warning_level=2',
                       'buildtype=release',
                       'b_ndebug=if-release'],
     meson_version: '>= 0.49.0')
 
-dav1d_soname_version       = '5.1.1'
+dav1d_soname_version       = '6.6.0'
 dav1d_api_version_array    = dav1d_soname_version.split('.')
 dav1d_api_version_major    = dav1d_api_version_array[0]
 dav1d_api_version_minor    = dav1d_api_version_array[1]
@@ -109,10 +109,6 @@ if host_machine.system() == 'windows'
         cdata.set('ftello', '_ftelli64')
     endif
 
-    if (host_machine.cpu_family() == 'x86_64' and cc.get_id() == 'gcc')
-        optional_arguments += '-mcmodel=small'
-    endif
-
     # On Windows, we use a compatibility layer to emulate pthread
     thread_dependency = []
     thread_compat_dep = declare_dependency(sources : files('src/win32/thread.c'))
@@ -128,7 +124,7 @@ if host_machine.system() == 'windows'
     rc_data.set('API_VERSION_MAJOR', dav1d_api_version_major)
     rc_data.set('API_VERSION_MINOR', dav1d_api_version_minor)
     rc_data.set('API_VERSION_REVISION', dav1d_api_version_revision)
-    rc_data.set('COPYRIGHT_YEARS', '2021')
+    rc_data.set('COPYRIGHT_YEARS', '2022')
 else
     thread_dependency = dependency('threads')
     thread_compat_dep = []
@@ -203,6 +199,11 @@ if cc.check_header('io.h')
     cdata.set('HAVE_IO_H', 1)
 endif
 
+if cc.check_header('pthread_np.h')
+    cdata.set('HAVE_PTHREAD_NP_H', 1)
+    test_args += '-DHAVE_PTHREAD_NP_H'
+endif
+
 
 # Function checks
 
@@ -232,6 +233,16 @@ if (host_machine.cpu_family() == 'aarch64' or
     if cc.has_function('elf_aux_info', prefix : '#include <sys/auxv.h>', args : test_args)
         cdata.set('HAVE_ELF_AUX_INFO', 1)
     endif
+endif
+
+pthread_np_prefix = '''
+#include <pthread.h>
+#ifdef HAVE_PTHREAD_NP_H
+#include <pthread_np.h>
+#endif
+'''
+if cc.has_function('pthread_getaffinity_np', prefix : pthread_np_prefix, args : test_args, dependencies : thread_dependency)
+    cdata.set('HAVE_PTHREAD_GETAFFINITY_NP', 1)
 endif
 
 # Compiler flag tests
@@ -382,7 +393,11 @@ endif
 
 cdata.set10('ARCH_PPC64LE', host_machine.cpu() == 'ppc64le')
 
-if cc.symbols_have_underscore_prefix()
+# meson's cc.symbols_have_underscore_prefix() is unfortunately unrelieably
+# when additional flags like '-fprofile-instr-generate' are passed via CFLAGS
+# see following meson issue https://github.com/mesonbuild/meson/issues/5482
+if (host_machine.system() == 'darwin' or
+   (host_machine.system() == 'windows' and host_machine.cpu_family() == 'x86'))
     cdata.set10('PREFIX', true)
     cdata_asm.set10('PREFIX', true)
 endif
@@ -398,22 +413,13 @@ if is_asm_enabled and host_machine.cpu_family().startswith('x86')
 
     # check NASM version
     if nasm.found()
-        nasm_r = run_command(nasm, '-v')
-
-        if nasm_r.returncode() != 0
-            error('failed running nasm to obtain its version')
-        endif
+        nasm_r = run_command(nasm, '-v', check: true)
 
         out = nasm_r.stdout().strip().split()
         if out[1].to_lower() == 'version'
-            if out[2].version_compare('<2.13.02')
-                error('nasm 2.13.02 or later is required, found nasm @0@'.format(out[2]))
-            elif out[2].version_compare('<2.14') and get_option('enable_avx512')
-                error('nasm 2.14 or later is required for AVX-512 asm.\n' +
-                       'AVX-512 asm can be disabled with \'-Denable_avx512=false\'')
+            if out[2].version_compare('<2.14')
+                error('nasm 2.14 or later is required, found nasm @0@'.format(out[2]))
             endif
-            cdata.set10('HAVE_AVX512ICL', get_option('enable_avx512'))
-            cdata_asm.set10('HAVE_AVX512ICL', get_option('enable_avx512'))
         else
             error('unexpected nasm version string: @0@'.format(nasm_r.stdout()))
         endif
