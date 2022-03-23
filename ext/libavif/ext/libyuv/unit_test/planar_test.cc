@@ -29,6 +29,12 @@
 #include "libyuv/row.h" /* For ScaleSumSamples_Neon */
 #endif
 
+#if defined(LIBYUV_BIT_EXACT)
+#define EXPECTED_ATTENUATE_DIFF 0
+#else
+#define EXPECTED_ATTENUATE_DIFF 2
+#endif
+
 namespace libyuv {
 
 TEST_F(LibYUVPlanarTest, TestAttenuate) {
@@ -100,9 +106,9 @@ TEST_F(LibYUVPlanarTest, TestAttenuate) {
   EXPECT_EQ(32, atten_pixels[128 * 4 + 1]);
   EXPECT_EQ(21, atten_pixels[128 * 4 + 2]);
   EXPECT_EQ(128, atten_pixels[128 * 4 + 3]);
-  EXPECT_NEAR(255, atten_pixels[255 * 4 + 0], 1);
-  EXPECT_NEAR(127, atten_pixels[255 * 4 + 1], 1);
-  EXPECT_NEAR(85, atten_pixels[255 * 4 + 2], 1);
+  EXPECT_NEAR(254, atten_pixels[255 * 4 + 0], EXPECTED_ATTENUATE_DIFF);
+  EXPECT_NEAR(127, atten_pixels[255 * 4 + 1], EXPECTED_ATTENUATE_DIFF);
+  EXPECT_NEAR(85, atten_pixels[255 * 4 + 2], EXPECTED_ATTENUATE_DIFF);
   EXPECT_EQ(255, atten_pixels[255 * 4 + 3]);
 
   free_aligned_buffer_page_end(atten2_pixels);
@@ -158,28 +164,29 @@ TEST_F(LibYUVPlanarTest, ARGBAttenuate_Any) {
   int max_diff = TestAttenuateI(benchmark_width_ + 1, benchmark_height_,
                                 benchmark_iterations_, disable_cpu_flags_,
                                 benchmark_cpu_info_, +1, 0);
-  EXPECT_LE(max_diff, 2);
+
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 TEST_F(LibYUVPlanarTest, ARGBAttenuate_Unaligned) {
   int max_diff =
       TestAttenuateI(benchmark_width_, benchmark_height_, benchmark_iterations_,
                      disable_cpu_flags_, benchmark_cpu_info_, +1, 1);
-  EXPECT_LE(max_diff, 2);
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 TEST_F(LibYUVPlanarTest, ARGBAttenuate_Invert) {
   int max_diff =
       TestAttenuateI(benchmark_width_, benchmark_height_, benchmark_iterations_,
                      disable_cpu_flags_, benchmark_cpu_info_, -1, 0);
-  EXPECT_LE(max_diff, 2);
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 TEST_F(LibYUVPlanarTest, ARGBAttenuate_Opt) {
   int max_diff =
       TestAttenuateI(benchmark_width_, benchmark_height_, benchmark_iterations_,
                      disable_cpu_flags_, benchmark_cpu_info_, +1, 0);
-  EXPECT_LE(max_diff, 2);
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 static int TestUnattenuateI(int width,
@@ -231,28 +238,28 @@ TEST_F(LibYUVPlanarTest, ARGBUnattenuate_Any) {
   int max_diff = TestUnattenuateI(benchmark_width_ + 1, benchmark_height_,
                                   benchmark_iterations_, disable_cpu_flags_,
                                   benchmark_cpu_info_, +1, 0);
-  EXPECT_LE(max_diff, 2);
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 TEST_F(LibYUVPlanarTest, ARGBUnattenuate_Unaligned) {
   int max_diff = TestUnattenuateI(benchmark_width_, benchmark_height_,
                                   benchmark_iterations_, disable_cpu_flags_,
                                   benchmark_cpu_info_, +1, 1);
-  EXPECT_LE(max_diff, 2);
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 TEST_F(LibYUVPlanarTest, ARGBUnattenuate_Invert) {
   int max_diff = TestUnattenuateI(benchmark_width_, benchmark_height_,
                                   benchmark_iterations_, disable_cpu_flags_,
                                   benchmark_cpu_info_, -1, 0);
-  EXPECT_LE(max_diff, 2);
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 TEST_F(LibYUVPlanarTest, ARGBUnattenuate_Opt) {
   int max_diff = TestUnattenuateI(benchmark_width_, benchmark_height_,
                                   benchmark_iterations_, disable_cpu_flags_,
                                   benchmark_cpu_info_, +1, 0);
-  EXPECT_LE(max_diff, 2);
+  EXPECT_LE(max_diff, EXPECTED_ATTENUATE_DIFF);
 }
 
 TEST_F(LibYUVPlanarTest, TestARGBComputeCumulativeSum) {
@@ -1477,6 +1484,146 @@ TEST_F(LibYUVPlanarTest, TestCopyPlane) {
   EXPECT_EQ(0, err);
 }
 
+TEST_F(LibYUVPlanarTest, TestDetilePlane) {
+  int i, j;
+
+  // orig is tiled.  Allocate enough memory for tiles.
+  int orig_width = (benchmark_width_ + 15) & ~15;
+  int orig_height = (benchmark_height_ + 15) & ~15;
+  int orig_plane_size = orig_width * orig_height;
+  int y_plane_size = benchmark_width_ * benchmark_height_;
+  align_buffer_page_end(orig_y, orig_plane_size);
+  align_buffer_page_end(dst_c, y_plane_size);
+  align_buffer_page_end(dst_opt, y_plane_size);
+
+  MemRandomize(orig_y, orig_plane_size);
+  memset(dst_c, 0, y_plane_size);
+  memset(dst_opt, 0, y_plane_size);
+
+  // Disable all optimizations.
+  MaskCpuFlags(disable_cpu_flags_);
+  for (j = 0; j < benchmark_iterations_; j++) {
+    DetilePlane(orig_y, orig_width, dst_c, benchmark_width_, benchmark_width_,
+                benchmark_height_, 16);
+  }
+
+  // Enable optimizations.
+  MaskCpuFlags(benchmark_cpu_info_);
+  for (j = 0; j < benchmark_iterations_; j++) {
+    DetilePlane(orig_y, orig_width, dst_opt, benchmark_width_, benchmark_width_,
+                benchmark_height_, 16);
+  }
+
+  for (i = 0; i < y_plane_size; ++i) {
+    EXPECT_EQ(dst_c[i], dst_opt[i]);
+  }
+
+  free_aligned_buffer_page_end(orig_y);
+  free_aligned_buffer_page_end(dst_c);
+  free_aligned_buffer_page_end(dst_opt);
+}
+
+TEST_F(LibYUVPlanarTest, TestDetileSplitUVPlane_Benchmark) {
+  int i, j;
+
+  // orig is tiled.  Allocate enough memory for tiles.
+  int orig_width = (benchmark_width_ + 15) & ~15;
+  int orig_height = (benchmark_height_ + 15) & ~15;
+  int orig_plane_size = orig_width * orig_height;
+  int u_plane_size = benchmark_width_ * benchmark_height_;
+  int v_plane_size = u_plane_size;
+  align_buffer_page_end(orig_uv, orig_plane_size);
+  align_buffer_page_end(dst_u_c, u_plane_size);
+  align_buffer_page_end(dst_u_opt, u_plane_size);
+  align_buffer_page_end(dst_v_c, v_plane_size);
+  align_buffer_page_end(dst_v_opt, v_plane_size);
+
+  MemRandomize(orig_uv, orig_plane_size);
+  memset(dst_u_c, 0, u_plane_size);
+  memset(dst_u_opt, 0, u_plane_size);
+  memset(dst_v_c, 0, v_plane_size);
+  memset(dst_v_opt, 0, v_plane_size);
+
+  // Disable all optimizations.
+  MaskCpuFlags(disable_cpu_flags_);
+  for (j = 0; j < benchmark_iterations_; j++) {
+    DetileSplitUVPlane(orig_uv, orig_width, dst_u_c, (benchmark_width_ + 1) / 2,
+                       dst_v_c, (benchmark_width_ + 1) / 2, benchmark_width_,
+                       benchmark_height_, 16);
+  }
+
+  // Enable optimizations.
+  MaskCpuFlags(benchmark_cpu_info_);
+  for (j = 0; j < benchmark_iterations_; j++) {
+    DetileSplitUVPlane(
+        orig_uv, orig_width, dst_u_opt, (benchmark_width_ + 1) / 2, dst_v_opt,
+        (benchmark_width_ + 1) / 2, benchmark_width_, benchmark_height_, 16);
+  }
+
+  for (i = 0; i < u_plane_size; ++i) {
+    EXPECT_EQ(dst_u_c[i], dst_u_opt[i]);
+  }
+  for (i = 0; i < v_plane_size; ++i) {
+    EXPECT_EQ(dst_v_c[i], dst_v_opt[i]);
+  }
+
+  free_aligned_buffer_page_end(orig_uv);
+  free_aligned_buffer_page_end(dst_u_c);
+  free_aligned_buffer_page_end(dst_u_opt);
+  free_aligned_buffer_page_end(dst_v_c);
+  free_aligned_buffer_page_end(dst_v_opt);
+}
+
+TEST_F(LibYUVPlanarTest, TestDetileSplitUVPlane_Correctness) {
+  int i, j;
+
+  // orig is tiled.  Allocate enough memory for tiles.
+  int orig_width = (benchmark_width_ + 15) & ~15;
+  int orig_height = (benchmark_height_ + 15) & ~15;
+  int orig_plane_size = orig_width * orig_height;
+  int u_plane_size = benchmark_width_ * benchmark_height_;
+  int v_plane_size = u_plane_size;
+  align_buffer_page_end(orig_uv, orig_plane_size);
+  align_buffer_page_end(detiled_uv, orig_plane_size);
+  align_buffer_page_end(dst_u_two_stage, u_plane_size);
+  align_buffer_page_end(dst_u_opt, u_plane_size);
+  align_buffer_page_end(dst_v_two_stage, v_plane_size);
+  align_buffer_page_end(dst_v_opt, v_plane_size);
+
+  MemRandomize(orig_uv, orig_plane_size);
+  memset(detiled_uv, 0, orig_plane_size);
+  memset(dst_u_two_stage, 0, u_plane_size);
+  memset(dst_u_opt, 0, u_plane_size);
+  memset(dst_v_two_stage, 0, v_plane_size);
+  memset(dst_v_opt, 0, v_plane_size);
+
+  for (j = 0; j < benchmark_iterations_; j++) {
+    DetileSplitUVPlane(
+        orig_uv, orig_width, dst_u_opt, (benchmark_width_ + 1) / 2, dst_v_opt,
+        (benchmark_width_ + 1) / 2, benchmark_width_, benchmark_height_, 16);
+  }
+
+  DetilePlane(orig_uv, orig_width, detiled_uv, benchmark_width_,
+              benchmark_width_, benchmark_height_, 16);
+  SplitUVPlane(detiled_uv, orig_width, dst_u_two_stage,
+               (benchmark_width_ + 1) / 2, dst_v_two_stage,
+               (benchmark_width_ + 1) / 2, benchmark_width_, benchmark_height_);
+
+  for (i = 0; i < u_plane_size; ++i) {
+    EXPECT_EQ(dst_u_two_stage[i], dst_u_opt[i]);
+  }
+  for (i = 0; i < v_plane_size; ++i) {
+    EXPECT_EQ(dst_v_two_stage[i], dst_v_opt[i]);
+  }
+
+  free_aligned_buffer_page_end(orig_uv);
+  free_aligned_buffer_page_end(detiled_uv);
+  free_aligned_buffer_page_end(dst_u_two_stage);
+  free_aligned_buffer_page_end(dst_u_opt);
+  free_aligned_buffer_page_end(dst_v_two_stage);
+  free_aligned_buffer_page_end(dst_v_opt);
+}
+
 static int TestMultiply(int width,
                         int height,
                         int benchmark_iterations,
@@ -1966,7 +2113,7 @@ static int TestBlur(int width,
   return max_diff;
 }
 
-#if defined(ENABLE_SLOW_TESTS) || defined(__x86_64__) || defined(__i386__)
+#if !defined(DISABLE_SLOW_TESTS) || defined(__x86_64__) || defined(__i386__)
 #define DISABLED_ARM(name) name
 #else
 #define DISABLED_ARM(name) DISABLED_##name
@@ -3131,13 +3278,13 @@ TEST_F(LibYUVPlanarTest, SplitXRGBPlane_Opt) {
 #define TESTQPLANARTOP(FUNC, STYPE, DTYPE, DEPTH)                              \
   TESTQPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_ + 1, _Any, +, 0) \
   TESTQPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Unaligned, +,  \
-                  1)                                                           \
+                  2)                                                           \
   TESTQPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Invert, -, 0)  \
   TESTQPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Opt, +, 0)     \
   TESTQPLANAROTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_ + 1, _Any, +,   \
                    0)                                                          \
   TESTQPLANAROTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Unaligned, +, \
-                   1)                                                          \
+                   2)                                                          \
   TESTQPLANAROTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Invert, -, 0) \
   TESTQPLANAROTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Opt, +, 0)
 
@@ -3190,7 +3337,7 @@ TESTQPLANARTOP(MergeARGB16To8, uint16_t, uint8_t, 16)
 #define TESTTPLANARTOP(FUNC, STYPE, DTYPE, DEPTH)                              \
   TESTTPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_ + 1, _Any, +, 0) \
   TESTTPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Unaligned, +,  \
-                  1)                                                           \
+                  2)                                                           \
   TESTTPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Invert, -, 0)  \
   TESTTPLANARTOPI(FUNC, STYPE, DTYPE, DEPTH, benchmark_width_, _Opt, +, 0)
 
