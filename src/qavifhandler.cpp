@@ -483,8 +483,13 @@ bool QAVIFHandler::write(const QImage &image)
         return false;
     }
 
-    if (m_quality >= 100 && !avifCodecName(AVIF_CODEC_CHOICE_AOM, AVIF_CODEC_FLAG_CAN_ENCODE)) {
-        qWarning("You are using %s encoder. It is recommended to enable libAOM encoder in libavif for better near-lossless compression.", encoder_name);
+    bool lossless = false;
+    if (m_quality >= 100) {
+        if (avifCodecName(AVIF_CODEC_CHOICE_AOM, AVIF_CODEC_FLAG_CAN_ENCODE)) {
+            lossless = true;
+        } else {
+            qWarning("You are using %s encoder. It is recommended to enable libAOM encoder in libavif to use lossless compression.", encoder_name);
+        }
     }
 
     int maxQuantizer = AVIF_QUANTIZER_WORST_QUALITY * (100 - qBound(0, m_quality, 100)) / 100;
@@ -692,43 +697,47 @@ bool QAVIFHandler::write(const QImage &image)
 
             // in case primaries or trc were not identified
             if ((primaries_to_save == 2) || (transfer_to_save == 2)) {
-                // upgrade image to higher bit depth
-                if (save_depth == 8) {
-                    save_depth = 10;
-                    if (tmpcolorimage.hasAlphaChannel()) {
-                        tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBA64);
-                    } else {
-                        tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBX64);
+                if (lossless) {
+                    iccprofile = tmpcolorimage.colorSpace().iccProfile();
+                } else {
+                    // upgrade image to higher bit depth
+                    if (save_depth == 8) {
+                        save_depth = 10;
+                        if (tmpcolorimage.hasAlphaChannel()) {
+                            tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBA64);
+                        } else {
+                            tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBX64);
+                        }
                     }
-                }
 
-                if ((primaries_to_save == 2) && (transfer_to_save != 2)) { // other primaries but known trc
-                    primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
-                    matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
+                    if ((primaries_to_save == 2) && (transfer_to_save != 2)) { // other primaries but known trc
+                        primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
+                        matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
 
-                    switch (transfer_to_save) {
-                    case 8: // AVIF_TRANSFER_CHARACTERISTICS_LINEAR
-                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::Linear));
-                        break;
-                    case 4: // AVIF_TRANSFER_CHARACTERISTICS_BT470M
-                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.2f));
-                        break;
-                    case 5: // AVIF_TRANSFER_CHARACTERISTICS_BT470BG
-                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.8f));
-                        break;
-                    default: // AVIF_TRANSFER_CHARACTERISTICS_SRGB + any other
-                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
+                        switch (transfer_to_save) {
+                        case 8: // AVIF_TRANSFER_CHARACTERISTICS_LINEAR
+                            tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::Linear));
+                            break;
+                        case 4: // AVIF_TRANSFER_CHARACTERISTICS_BT470M
+                            tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.2f));
+                            break;
+                        case 5: // AVIF_TRANSFER_CHARACTERISTICS_BT470BG
+                            tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.8f));
+                            break;
+                        default: // AVIF_TRANSFER_CHARACTERISTICS_SRGB + any other
+                            tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
+                            transfer_to_save = (avifTransferCharacteristics)13;
+                            break;
+                        }
+                    } else if ((primaries_to_save != 2) && (transfer_to_save == 2)) { // recognized primaries but other trc
                         transfer_to_save = (avifTransferCharacteristics)13;
-                        break;
+                        tmpcolorimage.convertToColorSpace(tmpcolorimage.colorSpace().withTransferFunction(QColorSpace::TransferFunction::SRgb));
+                    } else { // unrecognized profile
+                        primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
+                        transfer_to_save = (avifTransferCharacteristics)13;
+                        matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
+                        tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
                     }
-                } else if ((primaries_to_save != 2) && (transfer_to_save == 2)) { // recognized primaries but other trc
-                    transfer_to_save = (avifTransferCharacteristics)13;
-                    tmpcolorimage.convertToColorSpace(tmpcolorimage.colorSpace().withTransferFunction(QColorSpace::TransferFunction::SRgb));
-                } else { // unrecognized profile
-                    primaries_to_save = (avifColorPrimaries)1; // AVIF_COLOR_PRIMARIES_BT709
-                    transfer_to_save = (avifTransferCharacteristics)13;
-                    matrix_to_save = (avifMatrixCoefficients)1; // AVIF_MATRIX_COEFFICIENTS_BT709
-                    tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
                 }
             }
         } else { // profile is unsupported by Qt
@@ -738,6 +747,9 @@ bool QAVIFHandler::write(const QImage &image)
             }
         }
 #endif
+        if (lossless && pixel_format == AVIF_PIXEL_FORMAT_YUV444) {
+            matrix_to_save = (avifMatrixCoefficients)0;
+        }
         avif = avifImageCreate(tmpcolorimage.width(), tmpcolorimage.height(), save_depth, pixel_format);
         avif->matrixCoefficients = matrix_to_save;
 
