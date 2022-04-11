@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.5)
 # and find_package()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
 
-project(libavif LANGUAGES C VERSION 0.9.3)
+project(libavif LANGUAGES C VERSION 0.10.0)
 
 # Set C99 as the default
 set(CMAKE_C_STANDARD 99)
@@ -19,7 +19,7 @@ set(CMAKE_C_STANDARD 99)
 #     Increment MINOR. Set PATCH to 0
 #   If the source code was changed, but there were no interface changes:
 #     Increment PATCH.
-set(LIBRARY_VERSION_MAJOR 13)
+set(LIBRARY_VERSION_MAJOR 14)
 set(LIBRARY_VERSION_MINOR 0)
 set(LIBRARY_VERSION_PATCH 0)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
@@ -129,6 +129,19 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang")
         -Wno-sign-conversion
         -Wno-error=c11-extensions
     )
+    # Some headers such as glib-2.0 use identifier names that start with '_' followed by a capital letter.
+    # The C standard reserves names beginning with an underscore and various other combinations.
+    # ISO/IEC 9899:1999 (aka C99 standard) 7.1.3 Reserved identifiers
+    check_c_compiler_flag(-Wreserved-identifier HAVE_RESERVED_IDENTIFIER_WARNING)
+    if(HAVE_RESERVED_IDENTIFIER_WARNING)
+        add_definitions(-Wno-reserved-identifier)
+    endif()
+    # Clang >= 14 warns that mixing declarations and code is incompatible with standards before C99, even if
+    # you compile with -std=c99 or -std=gnu99.
+    check_c_compiler_flag(-Wdeclaration-after-statement HAVE_DECLARATION_AFTER_STATEMENT_WARNING)
+    if(HAVE_DECLARATION_AFTER_STATEMENT_WARNING)
+        add_definitions(-Wno-declaration-after-statement)
+    endif()
     # The detection of cross compilation by -Wpoison-system-directories has false positives on macOS because
     # --sysroot is implicitly added. Turn the warning off.
     if(NOT DEFINED HAVE_POISON_SYSTEM_DIRECTORIES_WARNING)
@@ -226,12 +239,17 @@ endif()
 find_package(libyuv QUIET) # not required
 if(libyuv_FOUND)
     # libyuv 1755 exposed all of the I*Matrix() functions, which libavif relies on.
+    # libyuv 1774 exposed ScalePlane_12 function, which libavif can use for some additional optimizations.
+    # libyuv 1813 added the I*ToARGBMatrixFilter() functions, which libavif can use with the bilinear filter.
     if(NOT LIBYUV_VERSION)
         message(STATUS "libavif: libyuv found, but version unknown; libyuv-based fast paths disabled.")
     elseif(LIBYUV_VERSION LESS 1755)
         message(STATUS "libavif: libyuv (${LIBYUV_VERSION}) found, but is too old; libyuv-based fast paths disabled.")
     else()
         message(STATUS "libavif: libyuv (${LIBYUV_VERSION}) found; libyuv-based fast paths enabled.")
+        if(LIBYUV_VERSION LESS 1813)
+            message(STATUS "libavif: some libyuv optimizations require at least version 1813 to work.")
+        endif()
         set(AVIF_PLATFORM_DEFINITIONS ${AVIF_PLATFORM_DEFINITIONS} -DAVIF_LIBYUV_ENABLED=1)
         set(AVIF_PLATFORM_INCLUDES ${AVIF_PLATFORM_INCLUDES} ${LIBYUV_INCLUDE_DIR})
         set(AVIF_PLATFORM_LIBRARIES ${AVIF_PLATFORM_LIBRARIES} ${LIBYUV_LIBRARY})
@@ -245,7 +263,6 @@ set(AVIF_CODEC_INCLUDES)
 set(AVIF_CODEC_LIBRARIES)
 
 if(AVIF_CODEC_DAV1D)
-    message(STATUS "libavif: Codec enabled: dav1d (decode)")
     set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_DAV1D=1)
     set(AVIF_SRCS ${AVIF_SRCS}
         src/codec_dav1d.c
@@ -276,17 +293,23 @@ if(AVIF_CODEC_DAV1D)
     if(UNIX AND NOT APPLE)
         set(AVIF_PLATFORM_LIBRARIES ${AVIF_PLATFORM_LIBRARIES} ${CMAKE_DL_LIBS}) # for dlsym
     endif()
+
+    message(STATUS "libavif: Codec enabled: dav1d (decode)")
 endif()
 
 if(AVIF_CODEC_LIBGAV1)
-    message(STATUS "libavif: Codec enabled: libgav1 (decode)")
     set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_LIBGAV1=1)
     set(AVIF_SRCS ${AVIF_SRCS}
         src/codec_libgav1.c
     )
 
     if(AVIF_LOCAL_LIBGAV1)
-        set(LIB_FILENAME "${CMAKE_CURRENT_SOURCE_DIR}/ext/libgav1/build/libgav1${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        set (AVIF_LIBGAV1_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/libgav1/build")
+        # If ${ANDROID_ABI} is set, look for the library under that subdirectory.
+        if (DEFINED ANDROID_ABI)
+            set(AVIF_LIBGAV1_BUILD_DIR "${AVIF_LIBGAV1_BUILD_DIR}/${ANDROID_ABI}")
+        endif()
+        set(LIB_FILENAME "${AVIF_LIBGAV1_BUILD_DIR}/libgav1${CMAKE_STATIC_LIBRARY_SUFFIX}")
         if(NOT EXISTS "${LIB_FILENAME}")
             message(FATAL_ERROR "libavif: ${LIB_FILENAME} is missing, bailing out")
         endif()
@@ -303,10 +326,11 @@ if(AVIF_CODEC_LIBGAV1)
         endif()
         set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${LIBGAV1_LIBRARY})
     endif()
+
+    message(STATUS "libavif: Codec enabled: libgav1 (decode)")
 endif()
 
 if(AVIF_CODEC_RAV1E)
-    message(STATUS "libavif: Codec enabled: rav1e (encode)")
     set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_RAV1E=1)
     set(AVIF_SRCS ${AVIF_SRCS}
         src/codec_rav1e.c
@@ -328,19 +352,20 @@ if(AVIF_CODEC_RAV1E)
             find_package(rav1e REQUIRED)
             set(AVIF_CODEC_INCLUDES ${AVIF_CODEC_INCLUDES} ${RAV1E_INCLUDE_DIR})
         endif()
-        set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${RAV1E_LIBRARY})
+        set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${RAV1E_LIBRARIES})
     endif()
 
     # Unfortunately, rav1e requires a few more libraries
     if(WIN32)
-        set(AVIF_PLATFORM_LIBRARIES ${AVIF_PLATFORM_LIBRARIES} ws2_32.lib userenv.lib)
+        set(AVIF_PLATFORM_LIBRARIES ${AVIF_PLATFORM_LIBRARIES} ws2_32.lib bcrypt.lib userenv.lib)
     elseif(UNIX AND NOT APPLE)
         set(AVIF_PLATFORM_LIBRARIES ${AVIF_PLATFORM_LIBRARIES} ${CMAKE_DL_LIBS}) # for backtrace
     endif()
+
+    message(STATUS "libavif: Codec enabled: rav1e (encode)")
 endif()
 
 if(AVIF_CODEC_SVT)
-    message(STATUS "libavif: Codec enabled: svt (encode)")
     set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_SVT=1)
     set(AVIF_SRCS ${AVIF_SRCS}
         src/codec_svt.c
@@ -364,18 +389,20 @@ if(AVIF_CODEC_SVT)
         endif()
         set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${SVT_LIBRARY})
     endif()
+
+    message(STATUS "libavif: Codec enabled: svt (encode)")
 endif()
 
 if(AVIF_CODEC_AOM)
     set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM=1)
     if(AVIF_CODEC_AOM_ENCODE AND AVIF_CODEC_AOM_DECODE)
-        message(STATUS "libavif: Codec enabled: aom (encode/decode)")
+        set(AVIF_CODEC_AOM_ENCODE_DECODE_CONFIG "encode/decode")
         set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM_ENCODE=1 -DAVIF_CODEC_AOM_DECODE=1)
     elseif(AVIF_CODEC_AOM_ENCODE)
-        message(STATUS "libavif: Codec enabled: aom (encode only)")
+        set(AVIF_CODEC_AOM_ENCODE_DECODE_CONFIG "encode only")
         set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM_ENCODE=1)
     elseif(AVIF_CODEC_AOM_DECODE)
-        message(STATUS "libavif: Codec enabled: aom (decode only)")
+        set(AVIF_CODEC_AOM_ENCODE_DECODE_CONFIG "decode only")
         set(AVIF_CODEC_DEFINITIONS ${AVIF_CODEC_DEFINITIONS} -DAVIF_CODEC_AOM_DECODE=1)
     else()
         message(FATAL_ERROR "libavif: AVIF_CODEC_AOM is on, but both AVIF_CODEC_AOM_ENCODE and AVIF_CODEC_AOM_DECODE are off. Disable AVIF_CODEC_AOM to disable both parts of the codec.")
@@ -401,6 +428,8 @@ if(AVIF_CODEC_AOM)
         endif()
         set(AVIF_CODEC_LIBRARIES ${AVIF_CODEC_LIBRARIES} ${AOM_LIBRARIES})
     endif()
+
+    message(STATUS "libavif: Codec enabled: aom (${AVIF_CODEC_AOM_ENCODE_DECODE_CONFIG})")
 endif()
 
 if(NOT AVIF_CODEC_AOM AND NOT AVIF_CODEC_DAV1D AND NOT AVIF_CODEC_LIBGAV1)
@@ -462,49 +491,40 @@ if(AVIF_CODEC_LIBRARIES MATCHES vmaf)
 endif()
 
 option(AVIF_BUILD_APPS "Build avif apps." OFF)
-if(AVIF_BUILD_APPS)
+option(AVIF_BUILD_TESTS "Build avif tests." OFF)
+
+if(AVIF_BUILD_APPS OR AVIF_BUILD_TESTS)
     find_package(ZLIB REQUIRED)
     find_package(PNG REQUIRED)
     find_package(JPEG REQUIRED)
 
-    add_executable(avifenc
-        apps/avifenc.c
-
+    add_library(avif_apps STATIC # Static so it does not have to be installed.
         apps/shared/avifjpeg.c
         apps/shared/iccjpeg.c
         apps/shared/avifpng.c
         apps/shared/avifutil.c
-        apps/shared/y4m.c
-    )
+        apps/shared/y4m.c)
+    target_link_libraries(avif_apps avif ${PNG_LIBRARY} ${ZLIB_LIBRARY} ${JPEG_LIBRARY})
+    target_include_directories(avif_apps
+                               PRIVATE
+                                   $<TARGET_PROPERTY:avif,INTERFACE_INCLUDE_DIRECTORIES>
+                                   ${PNG_PNG_INCLUDE_DIR}
+                                   ${JPEG_INCLUDE_DIR}
+                               INTERFACE
+                                   apps/shared)
+endif()
+
+if(AVIF_BUILD_APPS)
+    add_executable(avifenc apps/avifenc.c)
     if(AVIF_LOCAL_LIBGAV1 OR AVIF_CODEC_LIBRARIES MATCHES vmaf)
         set_target_properties(avifenc PROPERTIES LINKER_LANGUAGE "CXX")
     endif()
-    target_link_libraries(avifenc avif ${AVIF_PLATFORM_LIBRARIES} ${PNG_LIBRARY} ${ZLIB_LIBRARY} ${JPEG_LIBRARY})
-    target_include_directories(avifenc
-                               PRIVATE
-                                   $<TARGET_PROPERTY:avif,INTERFACE_INCLUDE_DIRECTORIES>
-                                   ${CMAKE_CURRENT_SOURCE_DIR}/apps/shared
-                                   ${PNG_PNG_INCLUDE_DIR}
-                                   ${JPEG_INCLUDE_DIR})
-    add_executable(avifdec
-        apps/avifdec.c
-
-        apps/shared/avifjpeg.c
-        apps/shared/iccjpeg.c
-        apps/shared/avifpng.c
-        apps/shared/avifutil.c
-        apps/shared/y4m.c
-    )
+    target_link_libraries(avifenc avif avif_apps ${AVIF_PLATFORM_LIBRARIES})
+    add_executable(avifdec apps/avifdec.c)
     if(AVIF_LOCAL_LIBGAV1 OR AVIF_CODEC_LIBRARIES MATCHES vmaf)
         set_target_properties(avifdec PROPERTIES LINKER_LANGUAGE "CXX")
     endif()
-    target_link_libraries(avifdec avif ${AVIF_PLATFORM_LIBRARIES} ${PNG_LIBRARY} ${ZLIB_LIBRARY} ${JPEG_LIBRARY})
-    target_include_directories(avifdec
-                               PRIVATE
-                                   $<TARGET_PROPERTY:avif,INTERFACE_INCLUDE_DIRECTORIES>
-                                   ${CMAKE_CURRENT_SOURCE_DIR}/apps/shared
-                                   ${PNG_PNG_INCLUDE_DIR}
-                                   ${JPEG_INCLUDE_DIR})
+    target_link_libraries(avifdec avif avif_apps ${AVIF_PLATFORM_LIBRARIES})
 
     if(NOT SKIP_INSTALL_APPS AND NOT SKIP_INSTALL_ALL)
         install(TARGETS avifenc avifdec
@@ -515,44 +535,9 @@ if(AVIF_BUILD_APPS)
     endif()
 endif()
 
-option(AVIF_BUILD_TESTS "Build avif tests." OFF)
 if(AVIF_BUILD_TESTS)
-    add_executable(aviftest
-        apps/shared/y4m.c
-        tests/aviftest.c
-        tests/cJSON.c
-        tests/compare.c
-        tests/testcase.c
-    )
-    if(AVIF_LOCAL_LIBGAV1)
-        set_target_properties(aviftest PROPERTIES LINKER_LANGUAGE "CXX")
-    endif()
-    target_link_libraries(aviftest avif ${AVIF_PLATFORM_LIBRARIES})
-    target_include_directories(aviftest PRIVATE apps/shared)
-
-    add_executable(avifyuv
-        tests/avifyuv.c
-    )
-    if(AVIF_LOCAL_LIBGAV1)
-        set_target_properties(avifyuv PROPERTIES LINKER_LANGUAGE "CXX")
-    endif()
-    target_link_libraries(avifyuv avif ${AVIF_PLATFORM_LIBRARIES})
-
-    add_custom_target(avif_test_all
-        COMMAND $<TARGET_FILE:aviftest> ${CMAKE_CURRENT_SOURCE_DIR}/tests/data
-        DEPENDS aviftest
-    )
-
-    if(AVIF_ENABLE_COVERAGE)
-        add_custom_target(avif_coverage
-            COMMAND LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/aviftest.profraw $<TARGET_FILE:aviftest> ${CMAKE_CURRENT_SOURCE_DIR}/tests/data --io-only
-            COMMAND ${XCRUN} llvm-profdata merge -sparse ${CMAKE_BINARY_DIR}/aviftest.profraw -o ${CMAKE_BINARY_DIR}/aviftest.profdata
-            COMMAND cmake -E make_directory ${CMAKE_BINARY_DIR}/coverage
-            COMMAND ${XCRUN} llvm-cov show $<TARGET_FILE:aviftest> -instr-profile=${CMAKE_BINARY_DIR}/aviftest.profdata -project-title=libavif --format html -output-dir=${CMAKE_BINARY_DIR}/coverage
-            COMMAND echo Coverage report here: ${CMAKE_BINARY_DIR}/coverage/index.html
-            DEPENDS aviftest
-        )
-    endif()
+    enable_testing() # Allow ctest to be called from top-level directory.
+    add_subdirectory(tests)
 endif()
 
 if(NOT SKIP_INSTALL_LIBRARIES AND NOT SKIP_INSTALL_ALL)
