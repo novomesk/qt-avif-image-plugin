@@ -1,0 +1,7 @@
+description: Qt plug-in to allow Qt and KDE based applications to read/write AVIF images.
+platforms:
+    - name: Linux
+    - name: FreeBSD
+    - name: macOS
+    - name: Windows
+    - name: Android
