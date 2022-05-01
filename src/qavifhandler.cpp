@@ -770,9 +770,7 @@ bool QAVIFHandler::write(const QImage &image)
         if (save_depth > 8) { // 10bit depth
             rgb.depth = 16;
 
-            if (tmpcolorimage.hasAlphaChannel()) {
-                avif->alphaRange = AVIF_RANGE_FULL;
-            } else {
+            if (!tmpcolorimage.hasAlphaChannel()) {
                 rgb.ignoreAlpha = AVIF_TRUE;
             }
 
@@ -782,7 +780,6 @@ bool QAVIFHandler::write(const QImage &image)
 
             if (tmpcolorimage.hasAlphaChannel()) {
                 rgb.format = AVIF_RGB_FORMAT_RGBA;
-                avif->alphaRange = AVIF_RANGE_FULL;
             } else {
                 rgb.format = AVIF_RGB_FORMAT_RGB;
             }
