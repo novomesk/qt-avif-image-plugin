@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QImage>
 #include <QPointF>
+#include <QSize>
 #include <QVariant>
 #include <avif/avif.h>
 #include <qimageiohandler.h>
@@ -37,6 +38,7 @@ private:
     static QPointF CompatibleChromacity(qreal chrX, qreal chrY);
 
     bool ensureParsed() const;
+    bool ensureOpened() const;
     bool ensureDecoder();
     bool decode_one_frame();
 
@@ -44,6 +46,7 @@ private:
         ParseAvifError = -1,
         ParseAvifNotParsed = 0,
         ParseAvifSuccess = 1,
+        ParseAvifMetadata = 2,
     };
 
     ParseAvifState m_parseState;
@@ -51,6 +54,7 @@ private:
 
     uint32_t m_container_width;
     uint32_t m_container_height;
+    QSize m_estimated_dimensions;
 
     QByteArray m_rawData;
     avifROData m_rawAvifData;
