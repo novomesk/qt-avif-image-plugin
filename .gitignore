@@ -1,0 +1,10 @@
+.moc/
+.obj/
+.qmake.stash
+Makefile
+lib/
+mkspecs/
+plugins/
+ext/libavif/build/
+ext/libavif/ext/aom/build.libavif/
+ext/libavif/ext/libyuv/build/
