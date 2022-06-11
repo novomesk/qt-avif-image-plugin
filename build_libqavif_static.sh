@@ -1,8 +1,14 @@
 #!/bin/bash
 
 if ! [ -x "$(command -v qmake)" ]; then
-  echo 'Error: qmake is not installed.' >&2
-  exit 1
+  if ! [ -x "$(command -v qmake5)" ]; then
+    echo 'Error: qmake or qmake5 is not installed.' >&2
+    exit 1
+  else
+    QMAKE_EXE=qmake5
+  fi
+else
+  QMAKE_EXE=qmake
 fi
 
 if ! [ -x "$(command -v make)" ]; then
@@ -21,7 +27,7 @@ fi
 
 cd ..
 
-qmake qt-avif-image-plugin_local-libavif.pro
+$QMAKE_EXE qt-avif-image-plugin_local-libavif.pro
 
 if ! [ -f Makefile ]; then
   echo 'qmake failed to produce Makefile' >&2
