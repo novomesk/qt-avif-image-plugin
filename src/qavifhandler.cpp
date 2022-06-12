@@ -145,6 +145,9 @@ bool QAVIFHandler::ensureDecoder()
 
     m_decoder = avifDecoderCreate();
 
+    m_decoder->ignoreExif = AVIF_TRUE;
+    m_decoder->ignoreXMP = AVIF_TRUE;
+
 #if AVIF_VERSION >= 80400
     m_decoder->maxThreads = qBound(1, QThread::idealThreadCount(), 64);
 #endif
