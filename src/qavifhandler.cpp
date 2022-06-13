@@ -256,9 +256,9 @@ bool QAVIFHandler::decode_one_frame()
         }
     } else {
         if (loadalpha) {
-            resultformat = QImage::Format_RGBA8888;
+            resultformat = QImage::Format_ARGB32;
         } else {
-            resultformat = QImage::Format_RGBX8888;
+            resultformat = QImage::Format_RGB32;
         }
     }
     QImage result(m_decoder->image->width, m_decoder->image->height, resultformat);
@@ -351,16 +351,18 @@ bool QAVIFHandler::decode_one_frame()
         rgb.depth = 16;
         rgb.format = AVIF_RGB_FORMAT_RGBA;
 
-        if (!loadalpha) {
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
-            if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
-                resultformat = QImage::Format_Grayscale16;
-            }
-#endif
+        if (!loadalpha && (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400)) {
+            resultformat = QImage::Format_Grayscale16;
         }
+#endif
     } else {
         rgb.depth = 8;
-        rgb.format = AVIF_RGB_FORMAT_RGBA;
+#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
+        rgb.format = AVIF_RGB_FORMAT_BGRA;
+#else
+        rgb.format = AVIF_RGB_FORMAT_ARGB;
+#endif
 
 #if AVIF_VERSION >= 80400
         if (m_decoder->imageCount > 1) {
@@ -369,14 +371,8 @@ bool QAVIFHandler::decode_one_frame()
         }
 #endif
 
-        if (loadalpha) {
-            resultformat = QImage::Format_ARGB32;
-        } else {
-            if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
-                resultformat = QImage::Format_Grayscale8;
-            } else {
-                resultformat = QImage::Format_RGB32;
-            }
+        if (!loadalpha && (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400)) {
+            resultformat = QImage::Format_Grayscale8;
         }
     }
 
