@@ -359,6 +359,7 @@ static void build_wedge_inter_predictor_from_buf(
 
   if (is_compound && is_masked_compound_type(comp_data->type)) {
     if (!plane && comp_data->type == COMPOUND_DIFFWTD) {
+#if CONFIG_AV1_HIGHBITDEPTH
       if (is_hbd) {
         av1_build_compound_diffwtd_mask_highbd(
             comp_data->seg_mask, comp_data->mask_type,
@@ -369,6 +370,12 @@ static void build_wedge_inter_predictor_from_buf(
             comp_data->seg_mask, comp_data->mask_type, ext_dst0,
             ext_dst_stride0, ext_dst1, ext_dst_stride1, h, w);
       }
+#else
+      (void)is_hbd;
+      av1_build_compound_diffwtd_mask(comp_data->seg_mask, comp_data->mask_type,
+                                      ext_dst0, ext_dst_stride0, ext_dst1,
+                                      ext_dst_stride1, h, w);
+#endif  // CONFIG_AV1_HIGHBITDEPTH
     }
 #if CONFIG_AV1_HIGHBITDEPTH
     if (is_hbd) {

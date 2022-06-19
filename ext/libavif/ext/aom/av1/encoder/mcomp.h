@@ -183,6 +183,8 @@ typedef struct {
                           // prune_mesh_search.
   int prune_mesh_search;  // Disables mesh search if the best_mv after a normal
                           // search if close to the start_mv.
+  int mesh_search_mv_diff_threshold;  // mv diff threshold to enable
+                                      // prune_mesh_search
   int force_mesh_thresh;  // Forces mesh search if the residue variance is
                           // higher than the threshold.
   const struct MESH_PATTERN *mesh_patterns[2];

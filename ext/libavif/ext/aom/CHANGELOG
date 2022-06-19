@@ -1,3 +1,139 @@
+2022-06-17 v3.4.0
+  This release includes compression efficiency and perceptual quality
+  improvements, speedup and memory optimizations, and some new features.
+  There are no ABI or API breaking changes in this release.
+
+  - New Features
+    * New --dist-metric flag with "qm-psnr" value to use quantization
+      matrices in the distortion computation for RD search. The default
+      value is "psnr".
+    * New command line option "--auto-intra-tools-off=1" to make
+      all-intra encoding faster for high bit rate under
+      "--deltaq-mode=3" mode.
+    * New rate control library aom_av1_rc for real-time hardware
+      encoders. Supports CBR for both one spatial layer and SVC.
+    * New image format AOM_IMG_FMT_NV12 can be used as input to the
+      encoder. The presence of AOM_IMG_FMT_NV12 can be detected at
+      compile time by checking if the macro AOM_HAVE_IMG_FMT_NV12 is
+      defined.
+    * New codec controls for the encoder:
+      o AV1E_SET_AUTO_INTRA_TOOLS_OFF. Only in effect if
+        --deltaq-mode=3.
+      o AV1E_SET_RTC_EXTERNAL_RC
+      o AV1E_SET_FP_MT. Only supported if libaom is built with
+        -DCONFIG_FRAME_PARALLEL_ENCODE=1.
+      o AV1E_GET_TARGET_SEQ_LEVEL_IDX
+    * New key-value pairs for the key-value API:
+      o --auto-intra-tools-off=0 (default) or 1. Only in effect if
+        --deltaq-mode=3.
+      o --strict-level-conformance=0 (default) or 1
+      o --fp-mt=0 (default) or 1. Only supported if libaom is built
+        with -DCONFIG_FRAME_PARALLEL_ENCODE=1.
+    * New aomenc options (not supported by the key-value API):
+      o --nv12
+
+  - Compression Efficiency Improvements
+    * Correctly calculate SSE for high bitdepth in skip mode, 0.2% to
+      0.6% coding gain.
+    * RTC at speed 9/10: BD-rate gain of ~4/5%
+    * RTC screen content coding: many improvements for real-time screen
+      at speed 10 (quality, speedup, and rate control), up to high
+      resolutions (1080p).
+    * RTC-SVC: fixes to make intra-only frames work for spatial layers.
+    * RTC-SVC: quality improvements for temporal layers.
+    * AV1 RT: A new passive rate control strategy for screen content, an
+      average of 7.5% coding gain, with some clips of 20+%. The feature
+      is turned off by default due to higher bit rate variation.
+
+  - Perceptual Quality Improvements
+    * RTC: Visual quality improvements for high speeds (9/10)
+    * Improvements in coding quality for all intra mode
+
+  - Speedup and Memory Optimizations
+    * ~10% speedup in good quality mode encoding.
+    * ~7% heap memory reduction in good quality encoding mode for speed
+      5 and 6.
+    * Ongoing improvements to intra-frame encoding performance on Arm
+    * Faster encoding speed for "--deltaq-mode=3" mode.
+    * ~10% speedup for speed 5/6, ~15% speedup for speed 7/8, and
+      ~10% speedup for speed 9/10 in real time encoding mode
+    * ~20% heap memory reduction in still-picture encoding mode for
+      360p-720p resolutions with multiple threads
+    * ~13% speedup for speed 6 and ~12% speedup for speed 9 in
+      still-picture encoding mode.
+    * Optimizations to improve multi-thread efficiency for still-picture
+      encoding mode.
+
+  - Bug Fixes
+    * b/204460717: README.md: replace master with main
+    * b/210677928: libaom disable_order is surprising for
+      max_reference_frames=3
+    * b/222461449: -DCONFIG_TUNE_BUTTERAUGLI=1 broken
+    * b/227207606: write_greyscale writes incorrect chroma in highbd
+      mode
+    * b/229955363: Integer-overflow in linsolve_wiener
+    * https://crbug.com/aomedia/2032
+    * https://crbug.com/aomedia/2397
+    * https://crbug.com/aomedia/2563
+    * https://crbug.com/aomedia/2815
+    * https://crbug.com/aomedia/3009
+    * https://crbug.com/aomedia/3018
+    * https://crbug.com/aomedia/3045
+    * https://crbug.com/aomedia/3101
+    * https://crbug.com/aomedia/3130
+    * https://crbug.com/aomedia/3173
+    * https://crbug.com/aomedia/3184
+    * https://crbug.com/aomedia/3187
+    * https://crbug.com/aomedia/3190
+    * https://crbug.com/aomedia/3195
+    * https://crbug.com/aomedia/3197
+    * https://crbug.com/aomedia/3201
+    * https://crbug.com/aomedia/3202
+    * https://crbug.com/aomedia/3204
+    * https://crbug.com/aomedia/3205
+    * https://crbug.com/aomedia/3207
+    * https://crbug.com/aomedia/3208
+    * https://crbug.com/aomedia/3209
+    * https://crbug.com/aomedia/3213
+    * https://crbug.com/aomedia/3214
+    * https://crbug.com/aomedia/3219
+    * https://crbug.com/aomedia/3222
+    * https://crbug.com/aomedia/3223
+    * https://crbug.com/aomedia/3225
+    * https://crbug.com/aomedia/3226
+    * https://crbug.com/aomedia/3228
+    * https://crbug.com/aomedia/3232
+    * https://crbug.com/aomedia/3236
+    * https://crbug.com/aomedia/3237
+    * https://crbug.com/aomedia/3238
+    * https://crbug.com/aomedia/3240
+    * https://crbug.com/aomedia/3243
+    * https://crbug.com/aomedia/3244
+    * https://crbug.com/aomedia/3246
+    * https://crbug.com/aomedia/3248
+    * https://crbug.com/aomedia/3250
+    * https://crbug.com/aomedia/3251
+    * https://crbug.com/aomedia/3252
+    * https://crbug.com/aomedia/3255
+    * https://crbug.com/aomedia/3257
+    * https://crbug.com/aomedia/3259
+    * https://crbug.com/aomedia/3260
+    * https://crbug.com/aomedia/3267
+    * https://crbug.com/aomedia/3268
+    * https://crbug.com/aomedia/3269
+    * https://crbug.com/aomedia/3276
+    * https://crbug.com/aomedia/3278
+    * https://crbug.com/chromium/1290068
+    * https://crbug.com/chromium/1303237
+    * https://crbug.com/chromium/1304990
+    * https://crbug.com/chromium/1321141
+    * https://crbug.com/chromium/1321388
+    * https://crbug.com/oss-fuzz/44846
+    * https://crbug.com/oss-fuzz/44856
+    * https://crbug.com/oss-fuzz/44862
+    * https://crbug.com/oss-fuzz/44904
+    * https://crbug.com/oss-fuzz/45056
+
 2022-01-28 v3.3.0
   This release includes compression efficiency and perceptual quality
   improvements, speedup and memory optimizations, some new features, and

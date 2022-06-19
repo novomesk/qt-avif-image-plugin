@@ -8,20 +8,21 @@
 # License 1.0 was not distributed with this source code in the PATENTS file, you
 # can obtain it at www.aomedia.org/license/patent.
 #
-if(AOM_BUILD_CMAKE_TOOLCHAINS_ARM64_ANDROID_CLANG_CMAKE_)
+if(AOM_BUILD_CMAKE_TOOLCHAINS_ANDROID_CMAKE_)
   return()
-endif() # AOM_BUILD_CMAKE_TOOLCHAINS_ARM64_ANDROID_CLANG_CMAKE_
-set(AOM_BUILD_CMAKE_TOOLCHAINS_ARM64_ANDROID_CLANG_CMAKE_ 1)
+endif() # AOM_BUILD_CMAKE_TOOLCHAINS_ANDROID_CMAKE_
+set(AOM_BUILD_CMAKE_TOOLCHAINS_ANDROID_CMAKE_ 1)
 
 if(NOT ANDROID_PLATFORM)
-  set(ANDROID_PLATFORM android-21)
+  set(ANDROID_PLATFORM android-24)
 endif()
 
+# Choose target architecture with:
+#
+# -DANDROID_ABI={armeabi-v7a,armeabi-v7a with NEON,arm64-v8a,x86,x86_64}
 if(NOT ANDROID_ABI)
   set(ANDROID_ABI arm64-v8a)
 endif()
-
-set(AS_EXECUTABLE as)
 
 # Toolchain files don't have access to cached variables:
 # https://gitlab.kitware.com/cmake/cmake/issues/16170. Set an intermediate
@@ -39,10 +40,16 @@ endif()
 
 include("${AOM_ANDROID_NDK_PATH}/build/cmake/android.toolchain.cmake")
 
-# No intrinsics flag required for arm64-android-clang.
-set(AOM_NEON_INTRIN_FLAG "")
+if(ANDROID_ABI MATCHES "^armeabi")
+  set(AOM_NEON_INTRIN_FLAG "-mfpu=neon")
+endif()
 
-# No runtime cpu detect for arm64-android-clang.
-set(CONFIG_RUNTIME_CPU_DETECT 0 CACHE STRING "")
+if(ANDROID_ABI MATCHES "^arm")
+  set(AS_EXECUTABLE as)
+  # No runtime cpu detect for arm targets.
+  set(CONFIG_RUNTIME_CPU_DETECT 0 CACHE STRING "")
+elseif(ANDROID_ABI MATCHES "^x86")
+  set(AS_EXECUTABLE yasm)
+endif()
 
 set(CMAKE_SYSTEM_NAME "Android")

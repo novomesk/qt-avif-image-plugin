@@ -101,9 +101,10 @@ TEST_P(EncInvalidTest, InvalidParam) {
 // The string type typically involves reading a path/file, which brings
 // potential fails.
 const KeyValParam enc_valid_params[] = {
-  std::make_tuple("min-gf-interval", "10"),    // uint
-  std::make_tuple("min-partition-size", "4"),  // int
-  std::make_tuple("tune", "psnr"),             // enum
+  std::make_tuple("auto-intra-tools-off", "1"),  // uint
+  std::make_tuple("min-gf-interval", "10"),      // uint
+  std::make_tuple("min-partition-size", "4"),    // int
+  std::make_tuple("tune", "psnr"),               // enum
 };
 
 const KeyValParam enc_invalid_params[] = {

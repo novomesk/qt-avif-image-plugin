@@ -39,8 +39,25 @@ aom_codec_err_t aom_codec_enc_init_ver(aom_codec_ctx_t *ctx,
                                        const aom_codec_enc_cfg_t *cfg,
                                        aom_codec_flags_t flags, int ver) {
   aom_codec_err_t res;
+  // The value of AOM_ENCODER_ABI_VERSION in libaom v3.0.0 and v3.1.0 - v3.1.3.
+  //
+  // We are compatible with these older libaom releases. AOM_ENCODER_ABI_VERSION
+  // was incremented after these releases for two reasons:
+  // 1. AOM_ENCODER_ABI_VERSION takes contribution from
+  //    AOM_EXT_PART_ABI_VERSION. The external partition API is still
+  //    experimental, so it should not be considered as part of the stable ABI.
+  //    fd9ed8366 External partition: Define APIs
+  //    https://aomedia-review.googlesource.com/c/aom/+/135663
+  // 2. As a way to detect the presence of speeds 7-9 in all-intra mode. I (wtc)
+  //    suggested this change because I misunderstood how
+  //    AOM_ENCODER_ABI_VERSION was used.
+  //    bbdfa68d1 AllIntra: Redefine all-intra mode speed features for speed 7+
+  //    https://aomedia-review.googlesource.com/c/aom/+/140624
+  const int aom_encoder_abi_version_25 = 25;
 
-  if (ver != AOM_ENCODER_ABI_VERSION)
+  // TODO(bug aomedia:3228): Remove the check for aom_encoder_abi_version_25 in
+  // libaom v4.0.0.
+  if (ver != AOM_ENCODER_ABI_VERSION && ver != aom_encoder_abi_version_25)
     res = AOM_CODEC_ABI_MISMATCH;
   else if (!ctx || !iface || !cfg)
     res = AOM_CODEC_INVALID_PARAM;

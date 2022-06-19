@@ -50,6 +50,12 @@ static const struct arg_enum_list tuning_enum[] = {
   { NULL, 0 }
 };
 
+static const struct arg_enum_list dist_metric_enum[] = {
+  { "psnr", AOM_DIST_METRIC_PSNR },
+  { "qm-psnr", AOM_DIST_METRIC_QM_PSNR },
+  { NULL, 0 }
+};
+
 #if CONFIG_AV1_ENCODER
 static const struct arg_enum_list timing_info_enum[] = {
   { "unspecified", AOM_TIMING_UNSPECIFIED },
@@ -140,6 +146,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .debugmode =
       ARG_DEF("D", "debug", 0, "Debug mode (makes output deterministic)"),
   .outputfile = ARG_DEF("o", "output", 1, "Output filename"),
+  .use_nv12 = ARG_DEF(NULL, "nv12", 0, "Input file is NV12"),
   .use_yv12 = ARG_DEF(NULL, "yv12", 0, "Input file is YV12"),
   .use_i420 = ARG_DEF(NULL, "i420", 0, "Input file is I420 (default)"),
   .use_i422 = ARG_DEF(NULL, "i422", 0, "Input file is I422"),
@@ -157,9 +164,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .verbosearg = ARG_DEF("v", "verbose", 0, "Show encoder parameters"),
   .psnrarg = ARG_DEF(
       NULL, "psnr", -1,
-      "Show PSNR in status line"
+      "Show PSNR in status line "
       "(0: Disable PSNR status line display, 1: PSNR calculated using input "
-      "bit-depth (default), 2: PSNR calculated using stream bit-depth), "
+      "bit-depth (default), 2: PSNR calculated using stream bit-depth); "
       "takes default option when arguments are not specified"),
   .use_cfg = ARG_DEF("c", "cfg", 1, "Config file to use"),
   .recontest = ARG_DEF_ENUM(NULL, "test-decode", 1,
@@ -175,20 +182,18 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "rate-hist", 1, "Show rate histogram (n-buckets)"),
   .disable_warnings =
       ARG_DEF(NULL, "disable-warnings", 0,
-              "Disable warnings about potentially incorrect encode settings."),
+              "Disable warnings about potentially incorrect encode settings"),
   .disable_warning_prompt =
       ARG_DEF("y", "disable-warning-prompt", 0,
-              "Display warnings, but do not prompt user to continue."),
-  .bitdeptharg = ARG_DEF_ENUM(
-      "b", "bit-depth", 1,
-      "Bit depth for codec (8 for version <=1, 10 or 12 for version 2)",
-      bitdepth_enum),
+              "Display warnings, but do not prompt user to continue"),
+  .bitdeptharg =
+      ARG_DEF_ENUM("b", "bit-depth", 1, "Bit depth for codec", bitdepth_enum),
   .inbitdeptharg = ARG_DEF(NULL, "input-bit-depth", 1, "Bit depth of input"),
 
   .input_chroma_subsampling_x = ARG_DEF(NULL, "input-chroma-subsampling-x", 1,
-                                        "chroma subsampling x value."),
+                                        "Chroma subsampling x value"),
   .input_chroma_subsampling_y = ARG_DEF(NULL, "input-chroma-subsampling-y", 1,
-                                        "chroma subsampling y value."),
+                                        "Chroma subsampling y value"),
 
   .usage = ARG_DEF("u", "usage", 1,
                    "Usage profile number to use (0: good, 1: rt, 2: allintra)"),
@@ -284,31 +289,39 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "arnr-strength", 1, "AltRef filter strength (0..6)"),
   .tune_metric = ARG_DEF_ENUM(NULL, "tune", 1, "Distortion metric tuned with",
                               tuning_enum),
+  .dist_metric = ARG_DEF_ENUM(
+      NULL, "dist-metric", 1,
+      "Distortion metric to use for in-block optimization", dist_metric_enum),
   .cq_level =
       ARG_DEF(NULL, "cq-level", 1, "Constant/Constrained Quality level"),
   .max_intra_rate_pct =
       ARG_DEF(NULL, "max-intra-rate", 1, "Max I-frame bitrate (pct)"),
 #if CONFIG_AV1_ENCODER
   .cpu_used_av1 = ARG_DEF(NULL, "cpu-used", 1,
-                          "Speed setting (0..6 in good mode, 6..10 in realtime "
+                          "Speed setting (0..6 in good mode, 5..10 in realtime "
                           "mode, 0..9 in all intra mode)"),
   .rowmtarg =
       ARG_DEF(NULL, "row-mt", 1,
               "Enable row based multi-threading (0: off, 1: on (default))"),
+#if CONFIG_FRAME_PARALLEL_ENCODE
+  .fpmtarg = ARG_DEF(
+      NULL, "fp-mt", 1,
+      "Enable frame parallel multi-threading (0: off (default), 1: on)"),
+#endif
   .tile_cols =
       ARG_DEF(NULL, "tile-columns", 1, "Number of tile columns to use, log2"),
   .tile_rows =
       ARG_DEF(NULL, "tile-rows", 1, "Number of tile rows to use, log2"),
   .enable_tpl_model = ARG_DEF(NULL, "enable-tpl-model", 1,
                               "RDO based on frame temporal dependency "
-                              "(0: off, 1: backward source based). "
-                              "This is required for deltaq mode."),
+                              "(0: off, 1: backward source based); "
+                              "required for deltaq mode"),
   .enable_keyframe_filtering = ARG_DEF(
       NULL, "enable-keyframe-filtering", 1,
-      "Apply temporal filtering on key frame"
+      "Apply temporal filtering on key frame "
       "(0: no filter, 1: filter without overlay (default), "
       "2: filter with overlay - experimental, may break random access in "
-      "players.)"),
+      "players)"),
   .tile_width = ARG_DEF(NULL, "tile-width", 1, "Tile widths (comma separated)"),
   .tile_height =
       ARG_DEF(NULL, "tile-height", 1, "Tile heights (command separated)"),
@@ -320,8 +333,8 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       "1: true (default), 2: disable for non-reference frames)"),
   .enable_restoration = ARG_DEF(NULL, "enable-restoration", 1,
                                 "Enable the loop restoration filter (0: false "
-                                "(default in Realtime mode), "
-                                "1: true (default in Non-realtime mode))"),
+                                "(default in realtime mode), "
+                                "1: true (default in non-realtime mode))"),
   .enable_rect_partitions = ARG_DEF(NULL, "enable-rect-partitions", 1,
                                     "Enable rectangular partitions "
                                     "(0: false, 1: true (default))"),
@@ -334,9 +347,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .min_partition_size =
       ARG_DEF(NULL, "min-partition-size", 1,
               "Set min partition size "
-              "(4:4x4, 8:8x8, 16:16x16, 32:32x32, 64:64x64, 128:128x128). "
-              "On frame with 4k+ resolutions or higher speed settings, the min "
-              "partition size will have a minimum of 8."),
+              "(4:4x4, 8:8x8, 16:16x16, 32:32x32, 64:64x64, 128:128x128); "
+              "with 4k+ resolutions or higher speed settings, min "
+              "partition size will have a minimum of 8"),
   .max_partition_size =
       ARG_DEF(NULL, "max-partition-size", 1,
               "Set max partition size "
@@ -414,7 +427,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .enable_diagonal_intra =
       ARG_DEF(NULL, "enable-diagonal-intra", 1,
               "Enable diagonal (D45 to D203) intra prediction modes, which are "
-              "a subset of directional modes. Has no effect if "
+              "a subset of directional modes; has no effect if "
               "enable-directional-intra is 0 (0: false, 1: true (default))"),
   .force_video_mode = ARG_DEF(NULL, "force-video-mode", 1,
                               "Force video mode (0: false, 1: true (default))"),
@@ -435,7 +448,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .disable_trellis_quant = ARG_DEF(
       NULL, "disable-trellis-quant", 1,
       "Disable trellis optimization of quantized coefficients (0: false "
-      "1: true  2: true for rd search 3: true for estimate yrd serch "
+      "1: true  2: true for rd search 3: true for estimate yrd search "
       "(default))"),
   .enable_qm =
       ARG_DEF(NULL, "enable-qm", 1,
@@ -474,7 +487,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "overrides maximum number of tile groups"),
   .timing_info = ARG_DEF_ENUM(
       NULL, "timing-info", 1,
-      "Signal timing info in the bitstream (model unly works for no "
+      "Signal timing info in the bitstream (model only works for no "
       "hidden frames, no super-res yet):",
       timing_info_enum),
 #if CONFIG_TUNE_VMAF
@@ -518,8 +531,8 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "deltaq-mode", 1,
               "Delta qindex mode (0: off, 1: deltaq objective (default), "
               "2: deltaq placeholder, 3: key frame visual quality, 4: user "
-              "rating based visual quality optimization). "
-              "Currently this requires enable-tpl-model as a prerequisite."),
+              "rating based visual quality optimization); "
+              "requires --enable-tpl-model=1"),
   .deltaq_strength = ARG_DEF(NULL, "deltaq-strength", 1,
                              "Deltaq strength for"
                              " --deltaq-mode=4 (%)"),
@@ -534,32 +547,31 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "max-inter-rate", 1, "Max P-frame bitrate (pct)"),
   .min_gf_interval = ARG_DEF(
       NULL, "min-gf-interval", 1,
-      "min gf/arf frame interval (default 0, indicating in-built behavior)"),
+      "Min gf/arf frame interval (default 0, indicating in-built behavior)"),
   .max_gf_interval = ARG_DEF(
       NULL, "max-gf-interval", 1,
-      "max gf/arf frame interval (default 0, indicating in-built behavior)"),
+      "Max gf/arf frame interval (default 0, indicating in-built behavior)"),
   .gf_min_pyr_height =
       ARG_DEF(NULL, "gf-min-pyr-height", 1,
               "Min height for GF group pyramid structure (0 (default) to 5)"),
   .gf_max_pyr_height = ARG_DEF(
       NULL, "gf-max-pyr-height", 1,
-      "maximum height for GF group pyramid structure (0 to 5 (default))"),
+      "Maximum height for GF group pyramid structure (0 to 5 (default))"),
   .max_reference_frames = ARG_DEF(NULL, "max-reference-frames", 1,
-                                  "maximum number of reference frames allowed "
+                                  "Maximum number of reference frames allowed "
                                   "per frame (3 to 7 (default))"),
   .reduced_reference_set =
       ARG_DEF(NULL, "reduced-reference-set", 1,
               "Use reduced set of single and compound references (0: off "
               "(default), 1: on)"),
-  .target_seq_level_idx = ARG_DEF(
-      NULL, "target-seq-level-idx", 1,
-      "Target sequence level index. "
-      "Possible values are in the form of \"ABxy\"(pad leading zeros if "
-      "less than 4 digits). "
-      "AB: Operating point(OP) index, "
-      "xy: Target level index for the OP. "
-      "E.g. \"0\" means target level index 0 for the 0th OP, "
-      "\"1021\" means target level index 21 for the 10th OP."),
+  .target_seq_level_idx =
+      ARG_DEF(NULL, "target-seq-level-idx", 1,
+              "Target sequence level index. "
+              "Possible values are in the form of \"ABxy\". "
+              "AB: Operating point (OP) index, "
+              "xy: Target level index for the OP. "
+              "E.g. \"0\" means target level index 0 (2.0) for the 0th OP, "
+              "\"1019\" means target level index 19 (6.3) for the 10th OP."),
   .set_min_cr = ARG_DEF(
       NULL, "min-cr", 1,
       "Set minimum compression ratio. Take integer values. Default is 0. "
@@ -590,7 +602,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .cdf_update_mode =
       ARG_DEF(NULL, "cdf-update-mode", 1,
               "CDF update mode for entropy coding "
-              "(0: no CDF update, 1: update CDF on all frames(default), "
+              "(0: no CDF update, 1: update CDF on all frames (default), "
               "2: selectively update CDF on some frames)"),
 
   .superblock_size = ARG_DEF_ENUM(NULL, "sb-size", 1, "Superblock size to use",
@@ -600,7 +612,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "set-tier-mask", 1,
               "Set bit mask to specify which tier each of the 32 possible "
               "operating points conforms to. "
-              "Bit value 0(defualt): Main Tier, 1: High Tier."),
+              "Bit value 0 (default): Main Tier, 1: High Tier."),
 
   .use_fixed_qp_offsets =
       ARG_DEF(NULL, "use-fixed-qp-offsets", 1,
@@ -623,10 +635,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       "Set average corpus complexity per mb for single pass VBR using lap. "
       "(0..10000), default is 0"),
 
-  .fwd_kf_dist =
-      ARG_DEF(NULL, "fwd-kf-dist", -1,
-              "Set distance between forward keyframes. A value of -1 means no "
-              "repetitive forward keyframes. Default is -1."),
+  .fwd_kf_dist = ARG_DEF(NULL, "fwd-kf-dist", -1,
+                         "Set distance between forward keyframes. A value of "
+                         "-1 (default) means no repetitive forward keyframes."),
 
   .enable_tx_size_search = ARG_DEF(
       NULL, "enable-tx-size-search", 1,
@@ -637,21 +648,30 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .loopfilter_control = ARG_DEF(
       NULL, "loopfilter-control", 1,
       "Control loop filtering "
-      "(0: Loopfilter disabled for all frames, 1: Enable "
-      "loopfilter for all frames (default), 2: Disable loopfilter for "
-      "non-reference frames, 3: Disable loopfilter for frames with low motion"),
+      "(0: Loopfilter disabled for all frames, 1: Enable loopfilter for all "
+      "frames (default), 2: Disable loopfilter for non-reference frames, 3: "
+      "Disable loopfilter for frames with low motion)"),
+
+  .auto_intra_tools_off = ARG_DEF(
+      NULL, "auto-intra-tools-off", 1,
+      "Automatically turn off several intra coding tools for allintra mode; "
+      "only in effect if --deltaq-mode=3"),
 
   .two_pass_input =
       ARG_DEF(NULL, "two-pass-input", 1,
-              "The input file for the second pass for three-pass encoding."),
+              "The input file for the second pass for three-pass encoding"),
   .two_pass_output = ARG_DEF(
       NULL, "two-pass-output", 1,
-      "The output file for the first two passes for three-pass encoding."),
+      "The output file for the first two passes for three-pass encoding"),
   .two_pass_width =
-      ARG_DEF(NULL, "two-pass-width", 1, "The width of two-pass-input."),
+      ARG_DEF(NULL, "two-pass-width", 1, "The width of two-pass-input"),
   .two_pass_height =
-      ARG_DEF(NULL, "two-pass-height", 1, "The height of two-pass-input."),
+      ARG_DEF(NULL, "two-pass-height", 1, "The height of two-pass-input"),
   .second_pass_log =
-      ARG_DEF("spf", "second-pass-log", 1, "Log file from second pass."),
+      ARG_DEF("spf", "second-pass-log", 1, "Log file from second pass"),
+  .strict_level_conformance =
+      ARG_DEF(NULL, "strict-level-conformance", 1,
+              "When set to 1, exit the encoder when it fails to encode "
+              "to a given target level"),
 #endif  // CONFIG_AV1_ENCODER
 };
