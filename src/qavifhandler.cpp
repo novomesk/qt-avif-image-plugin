@@ -124,6 +124,7 @@ bool QAVIFHandler::ensureOpened() const
         }
     }
 
+    that->m_parseState = ParseAvifError;
     return false;
 }
 
