@@ -1,6 +1,6 @@
 TARGET = qavif
 
-HEADERS = src/qavifhandler_p.h
+HEADERS = src/qavifhandler_p.h src/util_p.h
 SOURCES = src/qavifhandler.cpp
 OTHER_FILES = src/avif.json
 

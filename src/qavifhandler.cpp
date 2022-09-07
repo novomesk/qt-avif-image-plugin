@@ -39,6 +39,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #include "qavifhandler_p.h"
+#include "util_p.h"
+
 #include <cfloat>
 
 QAVIFHandler::QAVIFHandler()
@@ -262,7 +264,7 @@ bool QAVIFHandler::decode_one_frame()
             resultformat = QImage::Format_RGB32;
         }
     }
-    QImage result(m_decoder->image->width, m_decoder->image->height, resultformat);
+    QImage result = imageAlloc(m_decoder->image->width, m_decoder->image->height, resultformat);
 
     if (result.isNull()) {
         qWarning("Memory cannot be allocated");
