@@ -857,7 +857,7 @@ bool QAVIFHandler::write(const QImage &image)
     avifImageDestroy(avif);
 
     if (res == AVIF_RESULT_OK) {
-        qint64 status = device()->write((const char *)raw.data, raw.size);
+        qint64 status = device()->write(reinterpret_cast<const char *>(raw.data), raw.size);
         avifRWDataFree(&raw);
 
         if (status > 0) {
