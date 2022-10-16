@@ -69,6 +69,11 @@ bool QAVIFHandler::canRead() const
 
     if (m_parseState != ParseAvifError) {
         setFormat("avif");
+
+        if (m_parseState == ParseAvifFinished) {
+            return false;
+        }
+
         return true;
     }
     return false;
@@ -96,7 +101,7 @@ bool QAVIFHandler::canRead(QIODevice *device)
 
 bool QAVIFHandler::ensureParsed() const
 {
-    if (m_parseState == ParseAvifSuccess || m_parseState == ParseAvifMetadata) {
+    if (m_parseState == ParseAvifSuccess || m_parseState == ParseAvifMetadata || m_parseState == ParseAvifFinished) {
         return true;
     }
     if (m_parseState == ParseAvifError) {
@@ -110,7 +115,7 @@ bool QAVIFHandler::ensureParsed() const
 
 bool QAVIFHandler::ensureOpened() const
 {
-    if (m_parseState == ParseAvifSuccess) {
+    if (m_parseState == ParseAvifSuccess || m_parseState == ParseAvifFinished) {
         return true;
     }
     if (m_parseState == ParseAvifError) {
@@ -485,6 +490,13 @@ bool QAVIFHandler::read(QImage *image)
     *image = m_current_image;
     if (imageCount() >= 2) {
         m_must_jump_to_next_image = true;
+        if (m_decoder->imageIndex >= m_decoder->imageCount - 1) {
+            // all frames in animation have been read
+            m_parseState = ParseAvifFinished;
+        }
+    } else {
+        // the static image has been read
+        m_parseState = ParseAvifFinished;
     }
     return true;
 }
@@ -951,6 +963,7 @@ bool QAVIFHandler::jumpToNextImage()
 
     if (m_decoder->imageIndex >= 0) {
         if (m_decoder->imageCount < 2) {
+            m_parseState = ParseAvifSuccess;
             return true;
         }
 
@@ -995,10 +1008,12 @@ bool QAVIFHandler::jumpToImage(int imageNumber)
 
     if (m_decoder->imageCount < 2) { // not an animation
         if (imageNumber == 0) {
-            return ensureOpened();
-        } else {
-            return false;
+            if (ensureOpened()) {
+                m_parseState = ParseAvifSuccess;
+                return true;
+            }
         }
+        return false;
     }
 
     if (imageNumber < 0 || imageNumber >= m_decoder->imageCount) { // wrong index
@@ -1007,6 +1022,7 @@ bool QAVIFHandler::jumpToImage(int imageNumber)
 
     if (imageNumber == m_decoder->imageIndex) { // we are here already
         m_must_jump_to_next_image = false;
+        m_parseState = ParseAvifSuccess;
         return true;
     }
 
@@ -1065,7 +1081,8 @@ int QAVIFHandler::loopCount() const
         return 0;
     }
 
-    return 1;
+    // Endless loop
+    return -1;
 }
 
 QPointF QAVIFHandler::CompatibleChromacity(qreal chrX, qreal chrY)
