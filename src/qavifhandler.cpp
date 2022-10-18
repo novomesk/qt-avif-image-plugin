@@ -164,6 +164,10 @@ bool QAVIFHandler::ensureDecoder()
     m_decoder->strictFlags = AVIF_STRICT_DISABLED;
 #endif
 
+#if AVIF_VERSION >= 110000
+    m_decoder->imageDimensionLimit = 65535;
+#endif
+
     avifResult decodeResult;
 
     decodeResult = avifDecoderSetIOMemory(m_decoder, m_rawAvifData.data, m_rawAvifData.size);
