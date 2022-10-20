@@ -228,8 +228,8 @@ void aom_hadamard_lp_8x8_c(const int16_t *src_diff, ptrdiff_t src_stride,
   for (int idx = 0; idx < 64; ++idx) coeff[idx] = buffer2[idx];
 }
 
-void aom_hadamard_8x8_dual_c(const int16_t *src_diff, ptrdiff_t src_stride,
-                             int16_t *coeff) {
+void aom_hadamard_lp_8x8_dual_c(const int16_t *src_diff, ptrdiff_t src_stride,
+                                int16_t *coeff) {
   for (int i = 0; i < 2; i++) {
     aom_hadamard_lp_8x8_c(src_diff + (i * 8), src_stride,
                           (int16_t *)coeff + (i * 64));

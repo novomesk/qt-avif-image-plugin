@@ -428,6 +428,26 @@ static int64_t scale_part_thresh_content(int64_t threshold_base, int speed,
   return threshold;
 }
 
+static AOM_INLINE void tune_thresh_based_on_qindex_window(
+    int qindex, int th, int source_sad, int ag_idx, int64_t thresholds[]) {
+  const int win = 45;
+  double weight;
+
+  if (qindex < th - win)
+    weight = 1.0;
+  else if (qindex > th + win)
+    weight = 0.0;
+  else
+    weight = 1.0 - (qindex - th + win) / (2 * win);
+  thresholds[1] =
+      (int)((1 - weight) * (thresholds[1] << 1) + weight * thresholds[1]);
+  thresholds[2] =
+      (int)((1 - weight) * (thresholds[2] << 1) + weight * thresholds[2]);
+  const int fac = (!ag_idx && source_sad != kLowSad) ? 1 : 2;
+  thresholds[3] =
+      (int)((1 - weight) * (thresholds[3] << fac) + weight * thresholds[3]);
+}
+
 static AOM_INLINE void set_vbp_thresholds(AV1_COMP *cpi, int64_t thresholds[],
                                           int q, int content_lowsumdiff,
                                           int source_sad_nonrd,
@@ -477,7 +497,7 @@ static AOM_INLINE void set_vbp_thresholds(AV1_COMP *cpi, int64_t thresholds[],
     if (noise_level == kHigh)
       threshold_base = (5 * threshold_base) >> 1;
     else if (noise_level == kMedium &&
-             !cpi->sf.rt_sf.force_large_partition_blocks)
+             !cpi->sf.rt_sf.prefer_large_partition_blocks)
       threshold_base = (5 * threshold_base) >> 2;
   }
   // TODO(kyslov) Enable var based partition adjusment on temporal denoising
@@ -548,7 +568,8 @@ static AOM_INLINE void set_vbp_thresholds(AV1_COMP *cpi, int64_t thresholds[],
   } else {
     thresholds[2] = (5 * threshold_base) >> 1;
   }
-  if (cpi->sf.rt_sf.force_large_partition_blocks) {
+  // Tune thresholds less or more aggressively to prefer larger partitions
+  if (cpi->sf.rt_sf.prefer_large_partition_blocks >= 4) {
     double weight;
     const int win = 20;
     if (current_qindex < QINDEX_LARGE_BLOCK_THR - win)
@@ -597,7 +618,17 @@ static AOM_INLINE void set_vbp_thresholds(AV1_COMP *cpi, int64_t thresholds[],
           (int)((1 - weight) * (thresholds[2] << 4) + weight * thresholds[2]);
       thresholds[3] = INT32_MAX;
     }
+  } else if (cpi->sf.rt_sf.prefer_large_partition_blocks >= 2) {
+    tune_thresh_based_on_qindex_window(
+        current_qindex, QINDEX_LARGE_BLOCK_THR, source_sad_nonrd,
+        cpi->sf.rt_sf.prefer_large_partition_blocks - 2, thresholds);
+  } else if (cpi->sf.rt_sf.prefer_large_partition_blocks >= 1) {
+    thresholds[3] <<= 2;
+    thresholds[1] <<= (source_sad_nonrd == kLowSad) ? 1 : 0;
+    thresholds[2] <<= (source_sad_nonrd == kLowSad) ? 1 : 0;
   }
+  if (cpi->sf.part_sf.disable_8x8_part_based_on_qidx && (current_qindex < 128))
+    thresholds[3] = INT64_MAX;
 }
 
 // Set temporal variance low flag for superblock 64x64.
@@ -893,31 +924,75 @@ void av1_set_variance_partition_thresholds(AV1_COMP *cpi, int q,
 
 static AOM_INLINE void chroma_check(AV1_COMP *cpi, MACROBLOCK *x,
                                     BLOCK_SIZE bsize, unsigned int y_sad,
-                                    int is_key_frame) {
+                                    unsigned int y_sad_g, int is_key_frame,
+                                    int zero_motion, unsigned int *uv_sad) {
   int i;
   MACROBLOCKD *xd = &x->e_mbd;
-
+  int shift = 3;
   if (is_key_frame || cpi->oxcf.tool_cfg.enable_monochrome) return;
 
+  if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN &&
+      cpi->rc.high_source_sad)
+    shift = 5;
+
+  MB_MODE_INFO *mi = xd->mi[0];
+  const AV1_COMMON *const cm = &cpi->common;
+  const YV12_BUFFER_CONFIG *yv12 = get_ref_frame_yv12_buf(cm, LAST_FRAME);
+  const YV12_BUFFER_CONFIG *yv12_g = get_ref_frame_yv12_buf(cm, GOLDEN_FRAME);
+  const struct scale_factors *const sf =
+      get_ref_scale_factors_const(cm, LAST_FRAME);
+  struct buf_2d dst;
+  unsigned int uv_sad_g = 0;
+
   for (i = 1; i <= 2; ++i) {
-    unsigned int uv_sad = UINT_MAX;
     struct macroblock_plane *p = &x->plane[i];
     struct macroblockd_plane *pd = &xd->plane[i];
     const BLOCK_SIZE bs =
         get_plane_block_size(bsize, pd->subsampling_x, pd->subsampling_y);
 
-    if (bs != BLOCK_INVALID)
-      uv_sad = cpi->ppi->fn_ptr[bs].sdf(p->src.buf, p->src.stride, pd->dst.buf,
-                                        pd->dst.stride);
+    if (bs != BLOCK_INVALID) {
+      // For last:
+      if (zero_motion) {
+        if (mi->ref_frame[0] == LAST_FRAME) {
+          uv_sad[i - 1] = cpi->ppi->fn_ptr[bs].sdf(
+              p->src.buf, p->src.stride, pd->pre[0].buf, pd->pre[0].stride);
+        } else {
+          uint8_t *src = (i == 1) ? yv12->u_buffer : yv12->v_buffer;
+          setup_pred_plane(&dst, xd->mi[0]->bsize, src, yv12->uv_crop_width,
+                           yv12->uv_crop_height, yv12->uv_stride, xd->mi_row,
+                           xd->mi_col, sf, xd->plane[i].subsampling_x,
+                           xd->plane[i].subsampling_y);
 
-    if (uv_sad > (y_sad >> 1))
+          uv_sad[i - 1] = cpi->ppi->fn_ptr[bs].sdf(p->src.buf, p->src.stride,
+                                                   dst.buf, dst.stride);
+        }
+      } else {
+        uv_sad[i - 1] = cpi->ppi->fn_ptr[bs].sdf(p->src.buf, p->src.stride,
+                                                 pd->dst.buf, pd->dst.stride);
+      }
+
+      // For golden:
+      if (y_sad_g != UINT_MAX) {
+        uint8_t *src = (i == 1) ? yv12_g->u_buffer : yv12_g->v_buffer;
+        setup_pred_plane(&dst, xd->mi[0]->bsize, src, yv12_g->uv_crop_width,
+                         yv12_g->uv_crop_height, yv12_g->uv_stride, xd->mi_row,
+                         xd->mi_col, sf, xd->plane[i].subsampling_x,
+                         xd->plane[i].subsampling_y);
+        uv_sad_g = cpi->ppi->fn_ptr[bs].sdf(p->src.buf, p->src.stride, dst.buf,
+                                            dst.stride);
+      }
+    }
+
+    if (uv_sad[i - 1] > (y_sad >> 1))
       x->color_sensitivity_sb[i - 1] = 1;
-    else if (uv_sad < (y_sad >> 3))
+    else if (uv_sad[i - 1] < (y_sad >> shift))
       x->color_sensitivity_sb[i - 1] = 0;
     // Borderline case: to be refined at coding block level in nonrd_pickmode,
     // for coding block size < sb_size.
     else
       x->color_sensitivity_sb[i - 1] = 2;
+
+    x->color_sensitivity_sb_g[i - 1] = uv_sad_g > y_sad_g / 6;
   }
 }
 
@@ -1035,7 +1110,7 @@ static void fill_variance_tree_leaves(
 }
 
 static void setup_planes(AV1_COMP *cpi, MACROBLOCK *x, unsigned int *y_sad,
-                         unsigned int *y_sad_g,
+                         unsigned int *y_sad_g, unsigned int *y_sad_last,
                          MV_REFERENCE_FRAME *ref_frame_partition, int mi_row,
                          int mi_col) {
   AV1_COMMON *const cm = &cpi->common;
@@ -1052,7 +1127,8 @@ static void setup_planes(AV1_COMP *cpi, MACROBLOCK *x, unsigned int *y_sad,
 
   // For non-SVC GOLDEN is another temporal reference. Check if it should be
   // used as reference for partitioning.
-  if (!cpi->ppi->use_svc && (cpi->ref_frame_flags & AOM_GOLD_FLAG)) {
+  if (!cpi->ppi->use_svc && (cpi->ref_frame_flags & AOM_GOLD_FLAG) &&
+      x->content_state_sb.source_sad_nonrd != kZeroSad) {
     yv12_g = get_ref_frame_yv12_buf(cm, GOLDEN_FRAME);
     if (yv12_g && yv12_g != yv12) {
       av1_setup_pre_planes(xd, 0, yv12_g, mi_row, mi_col,
@@ -1082,6 +1158,7 @@ static void setup_planes(AV1_COMP *cpi, MACROBLOCK *x, unsigned int *y_sad,
         x->plane[0].src.buf, x->plane[0].src.stride, xd->plane[0].pre[0].buf,
         xd->plane[0].pre[0].stride);
   }
+  *y_sad_last = *y_sad;
 
   // Pick the ref frame for partitioning, use golden frame only if its
   // lower sad.
@@ -1104,7 +1181,7 @@ static void setup_planes(AV1_COMP *cpi, MACROBLOCK *x, unsigned int *y_sad,
     set_ref_ptrs(cm, xd, mi->ref_frame[0], mi->ref_frame[1]);
     av1_enc_build_inter_predictor(cm, xd, mi_row, mi_col, NULL,
                                   cm->seq_params->sb_size, AOM_PLANE_Y,
-                                  AOM_PLANE_Y);
+                                  AOM_PLANE_V);
   }
 }
 
@@ -1157,7 +1234,9 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   const uint8_t *d;
   int sp;
   int dp;
+  unsigned int uv_sad[2];
   NOISE_LEVEL noise_level = kLow;
+  int zero_motion = 1;
 
   int is_key_frame =
       (frame_is_intra_only(cm) ||
@@ -1171,6 +1250,7 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
 
   unsigned int y_sad = UINT_MAX;
   unsigned int y_sad_g = UINT_MAX;
+  unsigned int y_sad_last = UINT_MAX;
   BLOCK_SIZE bsize = is_small_sb ? BLOCK_64X64 : BLOCK_128X128;
 
   // Ref frame used in partitioning.
@@ -1230,14 +1310,15 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   }
 
   if (!is_key_frame) {
-    setup_planes(cpi, x, &y_sad, &y_sad_g, &ref_frame_partition, mi_row,
-                 mi_col);
+    setup_planes(cpi, x, &y_sad, &y_sad_g, &y_sad_last, &ref_frame_partition,
+                 mi_row, mi_col);
 
     MB_MODE_INFO *mi = xd->mi[0];
     // Use reference SB directly for zero mv.
     if (mi->mv[0].as_int != 0) {
       d = xd->plane[0].dst.buf;
       dp = xd->plane[0].dst.stride;
+      zero_motion = 0;
     } else {
       d = xd->plane[0].pre[0].buf;
       dp = xd->plane[0].pre[0].stride;
@@ -1247,6 +1328,11 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
     dp = 0;
   }
 
+  uv_sad[0] = 0;
+  uv_sad[1] = 0;
+  chroma_check(cpi, x, bsize, y_sad_last, y_sad_g, is_key_frame, zero_motion,
+               uv_sad);
+
   x->force_zeromv_skip = 0;
   const unsigned int thresh_exit_part =
       (cm->seq_params->sb_size == BLOCK_64X64) ? 5000 : 10000;
@@ -1255,15 +1341,15 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   // and exit, and force zeromv_last skip mode for nonrd_pickmode.
   // Only do this when the cyclic refresh is applied, and only on the base
   // segment (so the QP-boosted segment can still contnue cleaning/ramping
-  // up the quality).
-  // TODO(marpan): Check color component for setting this skip.
+  // up the quality). Condition on color uv_sad is also added.
   if (!is_key_frame && cpi->sf.rt_sf.part_early_exit_zeromv &&
       cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ &&
       cpi->cyclic_refresh->apply_cyclic_refresh &&
       segment_id == CR_SEGMENT_ID_BASE &&
       x->content_state_sb.source_sad_nonrd == kZeroSad &&
       ref_frame_partition == LAST_FRAME && xd->mi[0]->mv[0].as_int == 0 &&
-      y_sad < thresh_exit_part) {
+      y_sad < thresh_exit_part && uv_sad[0]<(3 * thresh_exit_part)>> 2 &&
+      uv_sad[1]<(3 * thresh_exit_part)>> 2) {
     const int block_width = mi_size_wide[cm->seq_params->sb_size];
     const int block_height = mi_size_high[cm->seq_params->sb_size];
     if (mi_col + block_width <= tile->mi_col_end &&
@@ -1340,7 +1426,7 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
                    (((maxvar_16x16[m][i] - minvar_16x16[m][i]) >
                          (thresholds[2] >> 1) &&
                      maxvar_16x16[m][i] > thresholds[2]) ||
-                    (cpi->sf.rt_sf.force_large_partition_blocks &&
+                    (cpi->sf.rt_sf.prefer_large_partition_blocks &&
                      x->content_state_sb.source_sad_nonrd > kLowSad &&
                      cpi->rc.frame_source_sad < 20000 &&
                      maxvar_16x16[m][i] > (thresholds[2] >> 4) &&
@@ -1366,7 +1452,7 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
           (max_var_32x32[m] - min_var_32x32[m]) > 3 * (thresholds[1] >> 3) &&
           max_var_32x32[m] > thresholds[1] >> 1 &&
           (noise_level >= kMedium || cpi->ppi->use_svc ||
-           cpi->sf.rt_sf.force_large_partition_blocks)) {
+           cpi->sf.rt_sf.prefer_large_partition_blocks)) {
         force_split[1 + m] = PART_EVAL_ONLY_SPLIT;
         force_split[0] = PART_EVAL_ONLY_SPLIT;
       }
@@ -1446,7 +1532,6 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
     set_low_temp_var_flag(cpi, &x->part_search_info, xd, vt, thresholds,
                           ref_frame_partition, mi_col, mi_row);
   }
-  chroma_check(cpi, x, bsize, y_sad, is_key_frame);
 
   if (vt2) aom_free(vt2);
   if (vt) aom_free(vt);

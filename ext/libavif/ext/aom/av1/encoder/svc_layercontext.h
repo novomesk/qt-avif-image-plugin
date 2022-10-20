@@ -112,6 +112,7 @@ typedef struct SVC {
   unsigned char buffer_spatial_layer[REF_FRAMES];
   int skip_mvsearch_last;
   int skip_mvsearch_gf;
+  int skip_mvsearch_altref;
   int spatial_layer_fb[REF_FRAMES];
   int temporal_layer_fb[REF_FRAMES];
   int num_encoded_top_layer;

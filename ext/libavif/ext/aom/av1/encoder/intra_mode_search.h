@@ -299,12 +299,15 @@ static AOM_INLINE void init_intra_mode_search_state(
  * The first 13 modes are from DC_PRED to PAETH_PRED, followed by directional
  * modes. Each of the main 8 directional modes have 6 = MAX_ANGLE_DELTA * 2
  * delta angles.
- * \param[in]    mode_idx           mode index in intra mode decision
- *                                  process.
- * \param[in]    mbmi               Pointer to structure holding
- *                                  the mode info for the current macroblock.
+ * \param[in]    mode_idx                  mode index in intra mode decision
+ *                                         process.
+ * \param[in]    mbmi                      Pointer to structure holding the mode
+ *                                         info for the current macroblock.
+ * \param[in]    reorder_delta_angle_eval  Indicates whether to reorder the
+ *                                         evaluation of delta angle modes.
  */
-void set_y_mode_and_delta_angle(const int mode_idx, MB_MODE_INFO *const mbmi);
+void set_y_mode_and_delta_angle(const int mode_idx, MB_MODE_INFO *const mbmi,
+                                int reorder_delta_angle_eval);
 
 /*! \brief prune luma intra mode based on the model rd.
  * \param[in]    this_model_rd              model rd for current mode.

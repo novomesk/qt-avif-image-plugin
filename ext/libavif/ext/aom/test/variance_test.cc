@@ -383,7 +383,7 @@ void SumOfSquaresTest::RefTest() {
 
 template <typename Func>
 struct TestParams {
-  TestParams(int log2w = 0, int log2h = 0, Func function = NULL,
+  TestParams(int log2w = 0, int log2h = 0, Func function = nullptr,
              int bit_depth_value = 0)
       : log2width(log2w), log2height(log2h), func(function) {
     use_high_bit_depth = (bit_depth_value > 0);
@@ -434,8 +434,8 @@ class MseWxHTestClass
   virtual void TearDown() {
     aom_free(src_);
     aom_free(dst_);
-    src_ = NULL;
-    dst_ = NULL;
+    src_ = nullptr;
+    dst_ = nullptr;
   }
 
  protected:
@@ -546,8 +546,8 @@ class MainTestClass
 
     aom_free(src_);
     delete[] ref_;
-    src_ = NULL;
-    ref_ = NULL;
+    src_ = nullptr;
+    ref_ = nullptr;
   }
 
  protected:
@@ -1591,8 +1591,8 @@ class MseHBDWxHTestClass
   virtual void TearDown() {
     aom_free(src_);
     aom_free(dst_);
-    src_ = NULL;
-    dst_ = NULL;
+    src_ = nullptr;
+    dst_ = nullptr;
   }
 
  protected:

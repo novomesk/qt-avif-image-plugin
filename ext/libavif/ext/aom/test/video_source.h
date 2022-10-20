@@ -19,9 +19,15 @@
 #endif
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <memory>
 #include <string>
-#include "test/acm_random.h"
+
 #include "aom/aom_encoder.h"
+#include "test/acm_random.h"
+#if !defined(_WIN32)
+#include "third_party/googletest/src/googletest/include/gtest/gtest.h"
+#endif
 
 namespace libaom_test {
 
@@ -35,7 +41,7 @@ namespace libaom_test {
 // A simple function to encapsulate cross platform retrieval of test data path
 static std::string GetDataPath() {
   const char *const data_path = getenv("LIBAOM_TEST_DATA_PATH");
-  if (data_path == NULL) {
+  if (data_path == nullptr) {
 #ifdef LIBAOM_TEST_DATA_PATH
     // In some environments, we cannot set environment variables
     // Instead, we set the data path by using a preprocessor symbol
@@ -69,11 +75,24 @@ static FILE *GetTempOutFile(std::string *file_name) {
       return fopen(fname, "wb+");
     }
   }
-  return NULL;
+  return nullptr;
 #else
-  char name_template[] = "/tmp/libaomtest.XXXXXX";
-  const int fd = mkstemp(name_template);
-  *file_name = name_template;
+  std::string temp_dir = testing::TempDir();
+  if (temp_dir.empty()) return nullptr;
+  // Versions of testing::TempDir() prior to release-1.11.0-214-g5e6a5336 may
+  // use the value of an environment variable without checking for a trailing
+  // path delimiter.
+  if (temp_dir[temp_dir.size() - 1] != '/') temp_dir += '/';
+  const char name_template[] = "libaomtest.XXXXXX";
+  std::unique_ptr<char[]> temp_file_name(
+      new char[temp_dir.size() + sizeof(name_template)]);
+  if (temp_file_name == nullptr) return nullptr;
+  memcpy(temp_file_name.get(), temp_dir.data(), temp_dir.size());
+  memcpy(temp_file_name.get() + temp_dir.size(), name_template,
+         sizeof(name_template));
+  const int fd = mkstemp(temp_file_name.get());
+  if (fd == -1) return nullptr;
+  *file_name = temp_file_name.get();
   return fdopen(fd, "wb+");
 #endif
 }
@@ -94,7 +113,7 @@ class TempOutFile {
   void CloseFile() {
     if (file_) {
       fclose(file_);
-      file_ = NULL;
+      file_ = nullptr;
     }
   }
   FILE *file_;
@@ -113,7 +132,7 @@ class VideoSource {
   // Advance the cursor to the next frame
   virtual void Next() = 0;
 
-  // Get the current video frame, or NULL on End-Of-Stream.
+  // Get the current video frame, or nullptr on End-Of-Stream.
   virtual aom_image_t *img() const = 0;
 
   // Get the presentation timestamp of the current frame.
@@ -135,7 +154,7 @@ class VideoSource {
 class DummyVideoSource : public VideoSource {
  public:
   DummyVideoSource()
-      : img_(NULL), limit_(100), width_(80), height_(64),
+      : img_(nullptr), limit_(100), width_(80), height_(64),
         format_(AOM_IMG_FMT_I420) {
     ReallocImage();
   }
@@ -152,7 +171,9 @@ class DummyVideoSource : public VideoSource {
     FillFrame();
   }
 
-  virtual aom_image_t *img() const { return (frame_ < limit_) ? img_ : NULL; }
+  virtual aom_image_t *img() const {
+    return (frame_ < limit_) ? img_ : nullptr;
+  }
 
   // Models a stream where Timebase = 1/FPS, so pts == frame.
   virtual aom_codec_pts_t pts() const { return frame_; }
@@ -192,7 +213,7 @@ class DummyVideoSource : public VideoSource {
 
   void ReallocImage() {
     aom_img_free(img_);
-    img_ = aom_img_alloc(NULL, format_, width_, height_, 32);
+    img_ = aom_img_alloc(nullptr, format_, width_, height_, 32);
     ASSERT_NE(img_, nullptr);
     raw_sz_ = ((img_->w + 31) & ~31) * img_->h * img_->bps / 8;
   }

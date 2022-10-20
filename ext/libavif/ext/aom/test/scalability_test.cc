@@ -38,7 +38,8 @@ class ScalabilityTest
     if (video->frame() == 0) {
       encoder->Control(AOME_SET_CPUUSED, kCpuUsed);
       encoder->Control(AOME_SET_NUMBER_SPATIAL_LAYERS, num_spatial_layers_);
-    } else if (video->frame() % num_spatial_layers_) {
+    }
+    if (video->frame() % num_spatial_layers_) {
       frame_flags_ = AOM_EFLAG_NO_REF_LAST2 | AOM_EFLAG_NO_REF_LAST3 |
                      AOM_EFLAG_NO_REF_GF | AOM_EFLAG_NO_REF_ARF |
                      AOM_EFLAG_NO_REF_BWD | AOM_EFLAG_NO_REF_ARF2 |

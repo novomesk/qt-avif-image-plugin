@@ -412,25 +412,28 @@ static int ransac(const int *matched_points, int npoints,
   corners1 = (double *)aom_malloc(sizeof(*corners1) * npoints * 2);
   corners2 = (double *)aom_malloc(sizeof(*corners2) * npoints * 2);
   image1_coord = (double *)aom_malloc(sizeof(*image1_coord) * npoints * 2);
-
   motions =
-      (RANSAC_MOTION *)aom_malloc(sizeof(RANSAC_MOTION) * num_desired_motions);
-  for (i = 0; i < num_desired_motions; ++i) {
-    motions[i].inlier_indices =
-        (int *)aom_malloc(sizeof(*motions->inlier_indices) * npoints);
-    clear_motion(motions + i, npoints);
-  }
+      (RANSAC_MOTION *)aom_calloc(num_desired_motions, sizeof(RANSAC_MOTION));
   current_motion.inlier_indices =
       (int *)aom_malloc(sizeof(*current_motion.inlier_indices) * npoints);
-  clear_motion(&current_motion, npoints);
-
-  worst_kept_motion = motions;
-
   if (!(points1 && points2 && corners1 && corners2 && image1_coord && motions &&
         current_motion.inlier_indices)) {
     ret_val = 1;
     goto finish_ransac;
   }
+
+  for (i = 0; i < num_desired_motions; ++i) {
+    motions[i].inlier_indices =
+        (int *)aom_malloc(sizeof(*motions->inlier_indices) * npoints);
+    if (!motions[i].inlier_indices) {
+      ret_val = 1;
+      goto finish_ransac;
+    }
+    clear_motion(motions + i, npoints);
+  }
+  clear_motion(&current_motion, npoints);
+
+  worst_kept_motion = motions;
 
   cnp1 = corners1;
   cnp2 = corners2;
@@ -542,10 +545,12 @@ finish_ransac:
   aom_free(corners2);
   aom_free(image1_coord);
   aom_free(current_motion.inlier_indices);
-  for (i = 0; i < num_desired_motions; ++i) {
-    aom_free(motions[i].inlier_indices);
+  if (motions) {
+    for (i = 0; i < num_desired_motions; ++i) {
+      aom_free(motions[i].inlier_indices);
+    }
+    aom_free(motions);
   }
-  aom_free(motions);
 
   return ret_val;
 }
@@ -593,25 +598,28 @@ static int ransac_double_prec(const double *matched_points, int npoints,
   corners1 = (double *)aom_malloc(sizeof(*corners1) * npoints * 2);
   corners2 = (double *)aom_malloc(sizeof(*corners2) * npoints * 2);
   image1_coord = (double *)aom_malloc(sizeof(*image1_coord) * npoints * 2);
-
   motions =
-      (RANSAC_MOTION *)aom_malloc(sizeof(RANSAC_MOTION) * num_desired_motions);
-  for (i = 0; i < num_desired_motions; ++i) {
-    motions[i].inlier_indices =
-        (int *)aom_malloc(sizeof(*motions->inlier_indices) * npoints);
-    clear_motion(motions + i, npoints);
-  }
+      (RANSAC_MOTION *)aom_calloc(num_desired_motions, sizeof(RANSAC_MOTION));
   current_motion.inlier_indices =
       (int *)aom_malloc(sizeof(*current_motion.inlier_indices) * npoints);
-  clear_motion(&current_motion, npoints);
-
-  worst_kept_motion = motions;
-
   if (!(points1 && points2 && corners1 && corners2 && image1_coord && motions &&
         current_motion.inlier_indices)) {
     ret_val = 1;
     goto finish_ransac;
   }
+
+  for (i = 0; i < num_desired_motions; ++i) {
+    motions[i].inlier_indices =
+        (int *)aom_malloc(sizeof(*motions->inlier_indices) * npoints);
+    if (!motions[i].inlier_indices) {
+      ret_val = 1;
+      goto finish_ransac;
+    }
+    clear_motion(motions + i, npoints);
+  }
+  clear_motion(&current_motion, npoints);
+
+  worst_kept_motion = motions;
 
   cnp1 = corners1;
   cnp2 = corners2;
@@ -721,10 +729,12 @@ finish_ransac:
   aom_free(corners2);
   aom_free(image1_coord);
   aom_free(current_motion.inlier_indices);
-  for (i = 0; i < num_desired_motions; ++i) {
-    aom_free(motions[i].inlier_indices);
+  if (motions) {
+    for (i = 0; i < num_desired_motions; ++i) {
+      aom_free(motions[i].inlier_indices);
+    }
+    aom_free(motions);
   }
-  aom_free(motions);
 
   return ret_val;
 }

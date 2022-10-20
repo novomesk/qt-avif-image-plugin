@@ -278,7 +278,7 @@ void AV1LbdInvTxfm2d::RunAV1InvTxfm2dTest(TxType tx_type, TxSize tx_size,
                                           int run_times, int gt_int16) {
   FwdTxfm2dFunc fwd_func_ = libaom_test::fwd_txfm_func_ls[tx_size];
   InvTxfm2dFunc ref_func_ = libaom_test::inv_txfm_func_ls[tx_size];
-  if (fwd_func_ == NULL || ref_func_ == NULL || target_func_ == NULL) {
+  if (fwd_func_ == nullptr || ref_func_ == nullptr || target_func_ == nullptr) {
     return;
   }
   const int bd = 8;

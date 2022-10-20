@@ -95,12 +95,9 @@ void aom_blend_a64_vmask_neon(uint8_t *dst, uint32_t dst_stride,
       tmp1 = vreinterpret_u8_u32(tmp1_32);
       res = vmull_u8(m, tmp0);
       res = vmlal_u8(res, max_minus_m, tmp1);
-      vst1_lane_u32(
-          (uint32_t *)(dst + (0 * dst_stride)),
-          vreinterpret_u32_u8(vrshrn_n_u16(res, AOM_BLEND_A64_ROUND_BITS)), 0);
-      vst1_lane_u32(
-          (uint32_t *)(dst + (1 * dst_stride)),
-          vreinterpret_u32_u8(vrshrn_n_u16(res, AOM_BLEND_A64_ROUND_BITS)), 1);
+      const uint8x8_t result = vrshrn_n_u16(res, AOM_BLEND_A64_ROUND_BITS);
+      store_unaligned_u8_4x1(dst + 0 * dst_stride, result, 0);
+      store_unaligned_u8_4x1(dst + 1 * dst_stride, result, 1);
       src0 += (2 * src0_stride);
       src1 += (2 * src1_stride);
       dst += (2 * dst_stride);
@@ -127,12 +124,9 @@ void aom_blend_a64_vmask_neon(uint8_t *dst, uint32_t dst_stride,
       tmp1 = vreinterpret_u8_u16(tmp1_16);
       res = vmull_u8(m, tmp0);
       res = vmlal_u8(res, max_minus_m, tmp1);
-      vst1_lane_u16(
-          (uint16_t *)(dst + (0 * dst_stride)),
-          vreinterpret_u16_u8(vrshrn_n_u16(res, AOM_BLEND_A64_ROUND_BITS)), 0);
-      vst1_lane_u16(
-          (uint16_t *)(dst + (1 * dst_stride)),
-          vreinterpret_u16_u8(vrshrn_n_u16(res, AOM_BLEND_A64_ROUND_BITS)), 1);
+      const uint8x8_t result = vrshrn_n_u16(res, AOM_BLEND_A64_ROUND_BITS);
+      store_unaligned_u8_2x1(dst + 0 * dst_stride, result, 0);
+      store_unaligned_u8_2x1(dst + 1 * dst_stride, result, 1);
       src0 += (2 * src0_stride);
       src1 += (2 * src1_stride);
       dst += (2 * dst_stride);

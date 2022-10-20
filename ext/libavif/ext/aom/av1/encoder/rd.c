@@ -14,8 +14,6 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "config/av1_rtcd.h"
-
 #include "aom_dsp/aom_dsp_common.h"
 #include "aom_mem/aom_mem.h"
 #include "aom_ports/bitops.h"
@@ -25,23 +23,17 @@
 #include "av1/common/common.h"
 #include "av1/common/entropy.h"
 #include "av1/common/entropymode.h"
-#include "av1/common/mvref_common.h"
 #include "av1/common/pred_common.h"
 #include "av1/common/quant_common.h"
 #include "av1/common/reconinter.h"
 #include "av1/common/reconintra.h"
 #include "av1/common/seg_common.h"
 
-#include "av1/encoder/av1_quantize.h"
 #include "av1/encoder/cost.h"
-#include "av1/encoder/encodemb.h"
 #include "av1/encoder/encodemv.h"
 #include "av1/encoder/encoder.h"
-#include "av1/encoder/encodetxb.h"
-#include "av1/encoder/mcomp.h"
 #include "av1/encoder/ratectrl.h"
 #include "av1/encoder/rd.h"
-#include "av1/encoder/tokenize.h"
 
 #define RD_THRESH_POW 1.25
 
@@ -706,6 +698,34 @@ static INLINE int is_frame_level_cost_upd_freq_set(
           cost_upd_level == INTERNAL_COST_UPD_TILE || fill_costs);
 }
 
+// Decide whether we want to update the mode entropy cost for the current frame.
+// The logit is currently inherited from selective_disable_cdf_rtc.
+static AOM_INLINE int should_force_mode_cost_update(const AV1_COMP *cpi) {
+  const REAL_TIME_SPEED_FEATURES *const rt_sf = &cpi->sf.rt_sf;
+  if (!rt_sf->frame_level_mode_cost_update) {
+    return false;
+  }
+
+  if (cpi->oxcf.algo_cfg.cdf_update_mode == 2) {
+    return cpi->frames_since_last_update == 1;
+  } else if (cpi->oxcf.algo_cfg.cdf_update_mode == 1) {
+    if (cpi->svc.number_spatial_layers == 1 &&
+        cpi->svc.number_temporal_layers == 1) {
+      const AV1_COMMON *const cm = &cpi->common;
+      const RATE_CONTROL *const rc = &cpi->rc;
+
+      return frame_is_intra_only(cm) || is_frame_resize_pending(cpi) ||
+             rc->high_source_sad || rc->frames_since_key < 10 ||
+             cpi->cyclic_refresh->counter_encode_maxq_scene_change < 10 ||
+             cm->current_frame.frame_number % 8 == 0;
+    } else if (cpi->svc.number_temporal_layers > 1) {
+      return cpi->svc.temporal_layer_id != cpi->svc.number_temporal_layers - 1;
+    }
+  }
+
+  return false;
+}
+
 void av1_initialize_rd_consts(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
@@ -744,7 +764,8 @@ void av1_initialize_rd_consts(AV1_COMP *cpi) {
     av1_fill_coeff_costs(&x->coeff_costs, cm->fc, av1_num_planes(cm));
 
   // Frame level mode cost update
-  if (is_frame_level_cost_upd_freq_set(cm, inter_sf->mode_cost_upd_level,
+  if (should_force_mode_cost_update(cpi) ||
+      is_frame_level_cost_upd_freq_set(cm, inter_sf->mode_cost_upd_level,
                                        use_nonrd_pick_mode, frames_since_key))
     av1_fill_mode_rates(cm, &x->mode_costs, cm->fc);
 

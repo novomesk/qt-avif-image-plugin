@@ -1354,7 +1354,7 @@ static int64_t motion_mode_rd(
         get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
     int use_actual_frame_probs = 1;
     int prune_obmc;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
     use_actual_frame_probs =
         (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) ? 0 : 1;
     if (!use_actual_frame_probs) {
@@ -2906,11 +2906,16 @@ static int64_t handle_inter_mode(
         }
 
         if (cpi->sf.rt_sf.skip_newmv_mode_based_on_sse) {
-          const double scale_factor[11] = { 0.7, 0.7, 0.7, 0.7, 0.7, 0.8,
-                                            0.8, 0.9, 0.9, 0.9, 0.9 };
-          assert(num_pels_log2_lookup[bsize] >= 4);
-          if (args->best_pred_sse <
-              scale_factor[num_pels_log2_lookup[bsize] - 4] * this_sse)
+          const int th_idx = cpi->sf.rt_sf.skip_newmv_mode_based_on_sse - 1;
+          const int pix_idx = num_pels_log2_lookup[bsize] - 4;
+          const double scale_factor[3][11] = {
+            { 0.7, 0.7, 0.7, 0.7, 0.7, 0.8, 0.8, 0.9, 0.9, 0.9, 0.9 },
+            { 0.7, 0.7, 0.7, 0.7, 0.8, 0.8, 1, 1, 1, 1, 1 },
+            { 0.7, 0.7, 0.7, 0.7, 1, 1, 1, 1, 1, 1, 1 }
+          };
+          assert(pix_idx >= 0);
+          assert(th_idx <= 2);
+          if (args->best_pred_sse < scale_factor[th_idx][pix_idx] * this_sse)
             continue;
         }
       }
@@ -4047,7 +4052,7 @@ static AOM_INLINE void set_params_rd_pick_inter_mode(
       get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
   int use_actual_frame_probs = 1;
   int prune_obmc;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   use_actual_frame_probs =
       (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) ? 0 : 1;
   if (!use_actual_frame_probs) {
@@ -5384,7 +5389,8 @@ static AOM_INLINE void search_intra_modes_in_interframe(
     if (sf->intra_sf.skip_intra_in_interframe &&
         search_state->intra_search_state.skip_intra_modes)
       break;
-    set_y_mode_and_delta_angle(mode_idx, mbmi);
+    set_y_mode_and_delta_angle(
+        mode_idx, mbmi, sf->intra_sf.prune_luma_odd_delta_angles_in_intra);
     assert(mbmi->mode < INTRA_MODE_END);
 
     // Use intra_y_mode_mask speed feature to skip intra mode evaluation.

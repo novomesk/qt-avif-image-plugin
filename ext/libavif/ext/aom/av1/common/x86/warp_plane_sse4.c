@@ -613,7 +613,7 @@ static INLINE void store_vertical_filter_output(
       res_lo_16 = _mm_srai_epi16(_mm_add_epi16(res_lo_16, *round_bits_const),
                                  round_bits);
       __m128i res_8_lo = _mm_packus_epi16(res_lo_16, res_lo_16);
-      *(uint32_t *)dst8 = _mm_cvtsi128_si32(res_8_lo);
+      *(int *)dst8 = _mm_cvtsi128_si32(res_8_lo);
     } else {
       _mm_storel_epi64(p, temp_lo_16);
     }
@@ -645,7 +645,7 @@ static INLINE void store_vertical_filter_output(
         res_hi_16 = _mm_srai_epi16(_mm_add_epi16(res_hi_16, *round_bits_const),
                                    round_bits);
         __m128i res_8_hi = _mm_packus_epi16(res_hi_16, res_hi_16);
-        *(uint32_t *)dst8_4 = _mm_cvtsi128_si32(res_8_hi);
+        *(int *)dst8_4 = _mm_cvtsi128_si32(res_8_hi);
 
       } else {
         _mm_storel_epi64(p4, temp_hi_16);
@@ -667,7 +667,7 @@ static INLINE void store_vertical_filter_output(
     // to only output 4 pixels at this point, to avoid encode/decode
     // mismatches when encoding with multiple threads.
     if (p_width == 4) {
-      *(uint32_t *)p = _mm_cvtsi128_si32(res_8bit);
+      *(int *)p = _mm_cvtsi128_si32(res_8bit);
     } else {
       _mm_storel_epi64(p, res_8bit);
     }

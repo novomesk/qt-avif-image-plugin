@@ -426,7 +426,7 @@ void av1_convolve_2d_sr_sse2(const uint8_t *src, int src_stride, uint8_t *dst,
           if (w == 2) {
             *(uint16_t *)p = (uint16_t)_mm_cvtsi128_si32(res);
           } else if (w == 4) {
-            *(uint32_t *)p = _mm_cvtsi128_si32(res);
+            *(int *)p = _mm_cvtsi128_si32(res);
           } else {
             _mm_storel_epi64(p, res);
           }
@@ -534,7 +534,7 @@ void av1_dist_wtd_convolve_2d_copy_sse2(const uint8_t *src, int src_stride,
           if (w > 4)
             _mm_storel_epi64((__m128i *)(&dst0[j]), res_8);
           else
-            *(uint32_t *)(&dst0[j]) = _mm_cvtsi128_si32(res_8);
+            *(int *)(&dst0[j]) = _mm_cvtsi128_si32(res_8);
         } else {
           _mm_store_si128((__m128i *)(&dst[j]), res_unsigned);
         }

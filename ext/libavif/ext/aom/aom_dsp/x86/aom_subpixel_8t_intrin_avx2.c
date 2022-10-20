@@ -43,8 +43,8 @@
 
 static INLINE void xx_storeu2_epi32(const uint8_t *output_ptr,
                                     const ptrdiff_t stride, const __m256i *a) {
-  *((uint32_t *)(output_ptr)) = _mm_cvtsi128_si32(_mm256_castsi256_si128(*a));
-  *((uint32_t *)(output_ptr + stride)) =
+  *((int *)(output_ptr)) = _mm_cvtsi128_si32(_mm256_castsi256_si128(*a));
+  *((int *)(output_ptr + stride)) =
       _mm_cvtsi128_si32(_mm256_extracti128_si256(*a, 1));
 }
 
@@ -151,7 +151,7 @@ static void aom_filter_block1d4_h4_avx2(
     srcRegFilt1_1 = _mm_packus_epi16(srcRegFilt1_1, _mm_setzero_si128());
 
     // save 4 bytes
-    *((uint32_t *)(output_ptr)) = _mm_cvtsi128_si32(srcRegFilt1_1);
+    *((int *)(output_ptr)) = _mm_cvtsi128_si32(srcRegFilt1_1);
   }
 }
 
@@ -256,7 +256,7 @@ static void aom_filter_block1d4_h8_avx2(
     srcRegFilt1_1 = _mm_packus_epi16(srcRegFilt1_1, _mm_setzero_si128());
 
     // save 4 bytes
-    *((uint32_t *)(output_ptr)) = _mm_cvtsi128_si32(srcRegFilt1_1);
+    *((int *)(output_ptr)) = _mm_cvtsi128_si32(srcRegFilt1_1);
   }
 }
 

@@ -115,17 +115,6 @@ class ScreenContentToolsMultiThreadTestLarge
     : public ScreenContentToolsTestLarge {};
 
 TEST_P(ScreenContentToolsMultiThreadTestLarge, ScreenContentToolsTest) {
-  // TODO(aomedia:3278): This test is known to have data races. Do not run the
-  // test under ThreadSanitizer.
-#if defined(__has_feature)
-#if __has_feature(thread_sanitizer)
-  GTEST_SKIP()
-      << "Skipping the test under ThreadSanitizer. See bug aomedia:3278.";
-#endif
-#elif defined(__SANITIZE_THREAD__)
-  GTEST_SKIP()
-      << "Skipping the test under ThreadSanitizer. See bug aomedia:3278.";
-#endif
   // Don't force screen content, however as the input is screen content
   // allow_screen_content_tools should still be turned on even with
   // multi-threaded encoding.

@@ -117,14 +117,10 @@ static INLINE void blend_4x4(uint8_t *dst, uint32_t dst_stride,
   uint8x8_t res_0 = vqmovun_s16(src0_0);
   uint8x8_t res_1 = vqmovun_s16(src0_1);
 
-  vst1_lane_u32((uint32_t *)(dst + 0 * dst_stride), vreinterpret_u32_u8(res_0),
-                0);
-  vst1_lane_u32((uint32_t *)(dst + 1 * dst_stride), vreinterpret_u32_u8(res_0),
-                1);
-  vst1_lane_u32((uint32_t *)(dst + 2 * dst_stride), vreinterpret_u32_u8(res_1),
-                0);
-  vst1_lane_u32((uint32_t *)(dst + 3 * dst_stride), vreinterpret_u32_u8(res_1),
-                1);
+  store_unaligned_u8_4x1(dst + 0 * dst_stride, res_0, 0);
+  store_unaligned_u8_4x1(dst + 1 * dst_stride, res_0, 1);
+  store_unaligned_u8_4x1(dst + 2 * dst_stride, res_1, 0);
+  store_unaligned_u8_4x1(dst + 3 * dst_stride, res_1, 1);
 }
 
 void aom_lowbd_blend_a64_d16_mask_neon(

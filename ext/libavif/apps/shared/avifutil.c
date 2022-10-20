@@ -7,7 +7,13 @@
 #include <stdio.h>
 #include <string.h>
 
-static int32_t calcGCD(int32_t a, int32_t b)
+#include "avifjpeg.h"
+#include "avifpng.h"
+#include "y4m.h"
+
+// |a| and |b| hold int32_t values. The int64_t type is used so that we can negate INT32_MIN without
+// overflowing int32_t.
+static int64_t calcGCD(int64_t a, int64_t b)
 {
     if (a < 0) {
         a *= -1;
@@ -15,27 +21,25 @@ static int32_t calcGCD(int32_t a, int32_t b)
     if (b < 0) {
         b *= -1;
     }
-    while (a > 0) {
-        if (a < b) {
-            int32_t t = a;
-            a = b;
-            b = t;
-        }
-        a = a - b;
+    while (b != 0) {
+        int64_t r = a % b;
+        a = b;
+        b = r;
     }
-    return b;
+    return a;
 }
 
 static void printClapFraction(const char * name, int32_t n, int32_t d)
 {
     printf("%s: %d/%d", name, n, d);
-    int32_t gcd = calcGCD(n, d);
-    if (gcd > 1) {
-        int32_t rn = n / gcd;
-        int32_t rd = d / gcd;
-        printf(" (%d/%d)", rn, rd);
+    if (d != 0) {
+        int64_t gcd = calcGCD(n, d);
+        if (gcd > 1) {
+            int32_t rn = (int32_t)(n / gcd);
+            int32_t rd = (int32_t)(d / gcd);
+            printf(" (%d/%d)", rn, rd);
+        }
     }
-    printf(", ");
 }
 
 static void avifImageDumpInternal(const avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifBool alphaPresent, avifProgressiveState progressiveState)
@@ -53,19 +57,27 @@ static void avifImageDumpInternal(const avifImage * avif, uint32_t gridCols, uin
         printf(" * Chroma Sam. Pos: %u\n", avif->yuvChromaSamplePosition);
     }
     printf(" * Alpha          : %s\n", alphaPresent ? (avif->alphaPremultiplied ? "Premultiplied" : "Not premultiplied") : "Absent");
-    if (avif->alphaRange == AVIF_RANGE_LIMITED) {
-        printf("                    Limited range\n");
-        printf("                    WARNING: Limited-range alpha is deprecated. Use full-range alpha instead.\n");
-    }
     printf(" * Range          : %s\n", (avif->yuvRange == AVIF_RANGE_FULL) ? "Full" : "Limited");
 
     printf(" * Color Primaries: %u\n", avif->colorPrimaries);
     printf(" * Transfer Char. : %u\n", avif->transferCharacteristics);
     printf(" * Matrix Coeffs. : %u\n", avif->matrixCoefficients);
 
-    printf(" * ICC Profile    : %s (" AVIF_FMT_ZU " bytes)\n", (avif->icc.size > 0) ? "Present" : "Absent", avif->icc.size);
-    printf(" * XMP Metadata   : %s (" AVIF_FMT_ZU " bytes)\n", (avif->xmp.size > 0) ? "Present" : "Absent", avif->xmp.size);
-    printf(" * EXIF Metadata  : %s (" AVIF_FMT_ZU " bytes)\n", (avif->exif.size > 0) ? "Present" : "Absent", avif->exif.size);
+    if (avif->icc.size != 0) {
+        printf(" * ICC Profile    : Present (" AVIF_FMT_ZU " bytes)\n", avif->icc.size);
+    } else {
+        printf(" * ICC Profile    : Absent\n");
+    }
+    if (avif->xmp.size != 0) {
+        printf(" * XMP Metadata   : Present (" AVIF_FMT_ZU " bytes)\n", avif->xmp.size);
+    } else {
+        printf(" * XMP Metadata   : Absent\n");
+    }
+    if (avif->exif.size != 0) {
+        printf(" * Exif Metadata  : Present (" AVIF_FMT_ZU " bytes)\n", avif->exif.size);
+    } else {
+        printf(" * Exif Metadata  : Absent\n");
+    }
 
     if (avif->transformFlags == AVIF_TRANSFORM_NONE) {
         printf(" * Transformations: None\n");
@@ -78,8 +90,11 @@ static void avifImageDumpInternal(const avifImage * avif, uint32_t gridCols, uin
         if (avif->transformFlags & AVIF_TRANSFORM_CLAP) {
             printf("    * clap (Clean Aperture): ");
             printClapFraction("W", (int32_t)avif->clap.widthN, (int32_t)avif->clap.widthD);
+            printf(", ");
             printClapFraction("H", (int32_t)avif->clap.heightN, (int32_t)avif->clap.heightD);
+            printf(", ");
             printClapFraction("hOff", (int32_t)avif->clap.horizOffN, (int32_t)avif->clap.horizOffD);
+            printf(", ");
             printClapFraction("vOff", (int32_t)avif->clap.vertOffN, (int32_t)avif->clap.vertOffD);
             printf("\n");
 
@@ -108,13 +123,13 @@ static void avifImageDumpInternal(const avifImage * avif, uint32_t gridCols, uin
     printf(" * Progressive    : %s\n", avifProgressiveStateToString(progressiveState));
 }
 
-void avifImageDump(avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifProgressiveState progressiveState)
+void avifImageDump(const avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifProgressiveState progressiveState)
 {
     const avifBool alphaPresent = avif->alphaPlane && (avif->alphaRowBytes > 0);
     avifImageDumpInternal(avif, gridCols, gridRows, alphaPresent, progressiveState);
 }
 
-void avifContainerDump(avifDecoder * decoder)
+void avifContainerDump(const avifDecoder * decoder)
 {
     avifImageDumpInternal(decoder->image, 0, 0, decoder->alphaPresent, decoder->progressiveState);
 }
@@ -210,6 +225,44 @@ avifAppFileFormat avifGuessFileFormat(const char * filename)
         return AVIF_APP_FILE_FORMAT_PNG;
     }
     return AVIF_APP_FILE_FORMAT_UNKNOWN;
+}
+
+avifAppFileFormat avifReadImage(const char * filename,
+                                avifPixelFormat requestedFormat,
+                                int requestedDepth,
+                                avifChromaDownsampling chromaDownsampling,
+                                avifBool ignoreICC,
+                                avifBool ignoreExif,
+                                avifBool ignoreXMP,
+                                avifImage * image,
+                                uint32_t * outDepth,
+                                avifAppSourceTiming * sourceTiming,
+                                struct y4mFrameIterator ** frameIter)
+{
+    const avifAppFileFormat format = avifGuessFileFormat(filename);
+    if (format == AVIF_APP_FILE_FORMAT_Y4M) {
+        if (!y4mRead(filename, image, sourceTiming, frameIter)) {
+            return AVIF_APP_FILE_FORMAT_UNKNOWN;
+        }
+        if (outDepth) {
+            *outDepth = image->depth;
+        }
+    } else if (format == AVIF_APP_FILE_FORMAT_JPEG) {
+        if (!avifJPEGRead(filename, image, requestedFormat, requestedDepth, chromaDownsampling, ignoreICC, ignoreExif, ignoreXMP)) {
+            return AVIF_APP_FILE_FORMAT_UNKNOWN;
+        }
+        if (outDepth) {
+            *outDepth = 8;
+        }
+    } else if (format == AVIF_APP_FILE_FORMAT_PNG) {
+        if (!avifPNGRead(filename, image, requestedFormat, requestedDepth, chromaDownsampling, ignoreICC, ignoreExif, ignoreXMP, outDepth)) {
+            return AVIF_APP_FILE_FORMAT_UNKNOWN;
+        }
+    } else {
+        fprintf(stderr, "Unrecognized file format for input file: %s\n", filename);
+        return AVIF_APP_FILE_FORMAT_UNKNOWN;
+    }
+    return format;
 }
 
 void avifDumpDiagnostics(const avifDiagnostics * diag)

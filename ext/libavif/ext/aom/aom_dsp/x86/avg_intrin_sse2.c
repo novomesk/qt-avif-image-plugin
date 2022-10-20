@@ -181,7 +181,7 @@ void aom_hadamard_4x4_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
   src[0] = _mm_loadl_epi64((const __m128i *)src_diff);
   src[1] = _mm_loadl_epi64((const __m128i *)(src_diff += src_stride));
   src[2] = _mm_loadl_epi64((const __m128i *)(src_diff += src_stride));
-  src[3] = _mm_loadl_epi64((const __m128i *)(src_diff += src_stride));
+  src[3] = _mm_loadl_epi64((const __m128i *)(src_diff + src_stride));
 
   hadamard_col4_sse2(src, 0);
   hadamard_col4_sse2(src, 1);
@@ -278,7 +278,7 @@ static INLINE void hadamard_8x8_sse2(const int16_t *src_diff,
   src[4] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
   src[5] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
   src[6] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-  src[7] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
+  src[7] = _mm_load_si128((const __m128i *)(src_diff + src_stride));
 
   hadamard_col8_sse2(src, 0);
   hadamard_col8_sse2(src, 1);
@@ -342,7 +342,7 @@ void aom_pixel_scale_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
       src[4] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
       src[5] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
       src[6] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-      src[7] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
+      src[7] = _mm_load_si128((const __m128i *)(src_diff + src_stride));
 
       src[0] = _mm_slli_epi16(src[0], log_scale);
       src[1] = _mm_slli_epi16(src[1], log_scale);
@@ -384,7 +384,7 @@ static INLINE void hadamard_lp_8x8_sse2(const int16_t *src_diff,
   src[4] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
   src[5] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
   src[6] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-  src[7] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
+  src[7] = _mm_load_si128((const __m128i *)(src_diff + src_stride));
 
   hadamard_col8_sse2(src, 0);
   hadamard_col8_sse2(src, 1);
@@ -411,8 +411,8 @@ void aom_hadamard_lp_8x8_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
   hadamard_lp_8x8_sse2(src_diff, src_stride, coeff);
 }
 
-void aom_hadamard_8x8_dual_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
-                                int16_t *coeff) {
+void aom_hadamard_lp_8x8_dual_sse2(const int16_t *src_diff,
+                                   ptrdiff_t src_stride, int16_t *coeff) {
   for (int i = 0; i < 2; i++) {
     hadamard_lp_8x8_sse2(src_diff + (i * 8), src_stride, coeff + (i * 64));
   }

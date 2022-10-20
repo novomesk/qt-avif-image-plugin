@@ -66,7 +66,7 @@ class ActiveMapTest
       aom_active_map_t map = aom_active_map_t();
       map.cols = (kWidth + 15) / 16;
       map.rows = (kHeight + 15) / 16;
-      map.active_map = NULL;
+      map.active_map = nullptr;
       encoder->Control(AOME_SET_ACTIVEMAP, &map);
     }
   }

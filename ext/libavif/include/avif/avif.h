@@ -17,7 +17,7 @@ extern "C" {
 // AVIF_BUILDING_SHARED_LIBS should only be defined when libavif is being built
 // as a shared library.
 // AVIF_DLL should be defined if libavif is a shared library. If you are using
-// libavif as CMake dependency, through CMake package config file or through
+// libavif as a CMake dependency, through a CMake package config file or through
 // pkg-config, this is defined automatically.
 //
 // Here's what AVIF_API will be defined as in shared build:
@@ -56,7 +56,7 @@ extern "C" {
 // downstream projects to do greater-than preprocessor checks on AVIF_VERSION
 // to leverage in-development code without breaking their stable builds.
 #define AVIF_VERSION_MAJOR 0
-#define AVIF_VERSION_MINOR 10
+#define AVIF_VERSION_MINOR 11
 #define AVIF_VERSION_PATCH 1
 #define AVIF_VERSION_DEVEL 0
 #define AVIF_VERSION \
@@ -68,9 +68,12 @@ typedef int avifBool;
 
 #define AVIF_DIAGNOSTICS_ERROR_BUFFER_SIZE 256
 
-// A reasonable default for maximum image size to avoid out-of-memory errors or integer overflow in
-// (32-bit) int or unsigned int arithmetic operations.
+// A reasonable default for maximum image size (in pixel count) to avoid out-of-memory errors or
+// integer overflow in (32-bit) int or unsigned int arithmetic operations.
 #define AVIF_DEFAULT_IMAGE_SIZE_LIMIT (16384 * 16384)
+
+// A reasonable default for maximum image dimension (width or height).
+#define AVIF_DEFAULT_IMAGE_DIMENSION_LIMIT 32768
 
 // a 12 hour AVIF image sequence, running at 60 fps (a basic sanity check as this is quite ridiculous)
 #define AVIF_DEFAULT_IMAGE_COUNT_LIMIT (12 * 3600 * 60)
@@ -94,18 +97,13 @@ typedef enum avifPlanesFlag
 } avifPlanesFlag;
 typedef uint32_t avifPlanesFlags;
 
-enum avifChannelIndex
+typedef enum avifChannelIndex
 {
-    // rgbPlanes
-    AVIF_CHAN_R = 0,
-    AVIF_CHAN_G = 1,
-    AVIF_CHAN_B = 2,
-
-    // yuvPlanes
+    // These can be used as the index for the yuvPlanes and yuvRowBytes arrays in avifImage.
     AVIF_CHAN_Y = 0,
     AVIF_CHAN_U = 1,
     AVIF_CHAN_V = 2
-};
+} avifChannelIndex;
 
 // ---------------------------------------------------------------------------
 // Version
@@ -151,7 +149,9 @@ typedef enum avifResult
     AVIF_RESULT_WAITING_ON_IO, // similar to EAGAIN/EWOULDBLOCK, this means the avifIO doesn't have necessary data available yet
     AVIF_RESULT_INVALID_ARGUMENT, // an argument passed into this function is invalid
     AVIF_RESULT_NOT_IMPLEMENTED,  // a requested code path is not (yet) implemented
-    AVIF_RESULT_OUT_OF_MEMORY
+    AVIF_RESULT_OUT_OF_MEMORY,
+    AVIF_RESULT_CANNOT_CHANGE_SETTING, // a setting that can't change is changed during encoding
+    AVIF_RESULT_INCOMPATIBLE_IMAGE     // the image is incompatible with already encoded images
 } avifResult;
 
 AVIF_API const char * avifResultToString(avifResult result);
@@ -178,13 +178,18 @@ typedef struct avifRWData
 #define AVIF_DATA_EMPTY { NULL, 0 }
 // clang-format on
 
+// The avifRWData input must be zero-initialized before being manipulated with these functions.
 AVIF_API void avifRWDataRealloc(avifRWData * raw, size_t newSize);
 AVIF_API void avifRWDataSet(avifRWData * raw, const uint8_t * data, size_t len);
 AVIF_API void avifRWDataFree(avifRWData * raw);
 
 // ---------------------------------------------------------------------------
 // avifPixelFormat
-
+//
+// Note to libavif maintainers: The lookup tables in avifImageYUVToRGBLibYUV
+// rely on the ordering of this enum values for their correctness. So changing
+// the values in this enum will require auditing avifImageYUVToRGBLibYUV for
+// correctness.
 typedef enum avifPixelFormat
 {
     // No YUV pixels are present. Alpha plane can still be present.
@@ -193,7 +198,8 @@ typedef enum avifPixelFormat
     AVIF_PIXEL_FORMAT_YUV444,
     AVIF_PIXEL_FORMAT_YUV422,
     AVIF_PIXEL_FORMAT_YUV420,
-    AVIF_PIXEL_FORMAT_YUV400
+    AVIF_PIXEL_FORMAT_YUV400,
+    AVIF_PIXEL_FORMAT_COUNT
 } avifPixelFormat;
 AVIF_API const char * avifPixelFormatToString(avifPixelFormat format);
 
@@ -432,7 +438,6 @@ typedef struct avifImage
     uint32_t yuvRowBytes[AVIF_PLANE_COUNT_YUV];
     avifBool imageOwnsYUVPlanes;
 
-    avifRange alphaRange;
     uint8_t * alphaPlane;
     uint32_t alphaRowBytes;
     avifBool imageOwnsAlphaPlane;
@@ -469,20 +474,23 @@ typedef struct avifImage
     avifRWData xmp;
 } avifImage;
 
-AVIF_API avifImage * avifImageCreate(int width, int height, int depth, avifPixelFormat yuvFormat);
+AVIF_API avifImage * avifImageCreate(uint32_t width, uint32_t height, uint32_t depth, avifPixelFormat yuvFormat);
 AVIF_API avifImage * avifImageCreateEmpty(void); // helper for making an image to decode into
-AVIF_API void avifImageCopy(avifImage * dstImage, const avifImage * srcImage, avifPlanesFlags planes); // deep copy
+AVIF_API avifResult avifImageCopy(avifImage * dstImage, const avifImage * srcImage, avifPlanesFlags planes); // deep copy
 AVIF_API avifResult avifImageSetViewRect(avifImage * dstImage, const avifImage * srcImage, const avifCropRect * rect); // shallow copy, no metadata
 AVIF_API void avifImageDestroy(avifImage * image);
 
 AVIF_API void avifImageSetProfileICC(avifImage * image, const uint8_t * icc, size_t iccSize);
-
-// Warning: If the Exif payload is set and invalid, avifEncoderWrite() may return AVIF_RESULT_INVALID_EXIF_PAYLOAD
+// Sets Exif metadata. Attempts to parse the Exif metadata for Exif orientation. Sets
+// image->transformFlags, image->irot and image->imir if the Exif metadata is parsed successfully,
+// otherwise leaves image->transformFlags, image->irot and image->imir unchanged.
+// Warning: If the Exif payload is set and invalid, avifEncoderWrite() may return AVIF_RESULT_INVALID_EXIF_PAYLOAD.
 AVIF_API void avifImageSetMetadataExif(avifImage * image, const uint8_t * exif, size_t exifSize);
+// Sets XMP metadata.
 AVIF_API void avifImageSetMetadataXMP(avifImage * image, const uint8_t * xmp, size_t xmpSize);
 
-AVIF_API void avifImageAllocatePlanes(avifImage * image, avifPlanesFlags planes); // Ignores any pre-existing planes
-AVIF_API void avifImageFreePlanes(avifImage * image, avifPlanesFlags planes);     // Ignores already-freed planes
+AVIF_API avifResult avifImageAllocatePlanes(avifImage * image, avifPlanesFlags planes); // Ignores any pre-existing planes
+AVIF_API void avifImageFreePlanes(avifImage * image, avifPlanesFlags planes);           // Ignores already-freed planes
 AVIF_API void avifImageStealPlanes(avifImage * dstImage, avifImage * srcImage, avifPlanesFlags planes);
 
 // ---------------------------------------------------------------------------
@@ -523,19 +531,16 @@ AVIF_API void avifImageStealPlanes(avifImage * dstImage, avifImage * srcImage, a
 // conversion, if necessary. Pixels in an avifRGBImage buffer are always full range, and conversion
 // routines will fail if the width and height don't match the associated avifImage.
 
-// If libavif is built with libyuv fast paths enabled, libavif will use libyuv for conversion from
-// YUV to RGB if the following requirements are met:
-//
-// * YUV depth: 8
-// * RGB depth: 8
-// * rgb.chromaUpsampling: AVIF_CHROMA_UPSAMPLING_AUTOMATIC, AVIF_CHROMA_UPSAMPLING_FASTEST
-// * rgb.format: AVIF_RGB_FORMAT_RGBA, AVIF_RGB_FORMAT_BGRA (420/422 support for AVIF_RGB_FORMAT_ABGR, AVIF_RGB_FORMAT_ARGB)
-// * CICP is one of the following combinations (CP/TC/MC/Range):
-//   * x/x/[2|5|6]/Full
-//   * [5|6]/x/12/Full
-//   * x/x/[1|2|5|6|9]/Limited
-//   * [1|2|5|6|9]/x/12/Limited
+// If libavif is built with a version of libyuv offering a fast conversion between RGB and YUV for
+// the given inputs, libavif will use it. See reformat_libyuv.c for the details.
+// libyuv is faster but may have slightly less precision than built-in conversion, so avoidLibYUV
+// can be set to AVIF_TRUE when AVIF_CHROMA_UPSAMPLING_BEST_QUALITY or
+// AVIF_CHROMA_DOWNSAMPLING_BEST_QUALITY is used, to get the most precise but slowest results.
 
+// Note to libavif maintainers: The lookup tables in avifImageYUVToRGBLibYUV
+// rely on the ordering of this enum values for their correctness. So changing
+// the values in this enum will require auditing avifImageYUVToRGBLibYUV for
+// correctness.
 typedef enum avifRGBFormat
 {
     AVIF_RGB_FORMAT_RGB = 0,
@@ -543,30 +548,55 @@ typedef enum avifRGBFormat
     AVIF_RGB_FORMAT_ARGB,
     AVIF_RGB_FORMAT_BGR,
     AVIF_RGB_FORMAT_BGRA,
-    AVIF_RGB_FORMAT_ABGR
+    AVIF_RGB_FORMAT_ABGR,
+    // RGB_565 format uses five bits for the red and blue components and six
+    // bits for the green component. Each RGB pixel is 16 bits (2 bytes), which
+    // is packed as follows:
+    //   uint16_t: [r4 r3 r2 r1 r0 g5 g4 g3 g2 g1 g0 b4 b3 b2 b1 b0]
+    //   r4 and r0 are the MSB and LSB of the red component respectively.
+    //   g5 and g0 are the MSB and LSB of the green component respectively.
+    //   b4 and b0 are the MSB and LSB of the blue component respectively.
+    // This format is only supported for YUV -> RGB conversion and when
+    // avifRGBImage.depth is set to 8.
+    AVIF_RGB_FORMAT_RGB_565,
+    AVIF_RGB_FORMAT_COUNT
 } avifRGBFormat;
 AVIF_API uint32_t avifRGBFormatChannelCount(avifRGBFormat format);
 AVIF_API avifBool avifRGBFormatHasAlpha(avifRGBFormat format);
 
 typedef enum avifChromaUpsampling
 {
-    AVIF_CHROMA_UPSAMPLING_AUTOMATIC = 0,    // Chooses best trade off of speed/quality (prefers libyuv, else uses BEST_QUALITY)
-    AVIF_CHROMA_UPSAMPLING_FASTEST = 1,      // Chooses speed over quality (prefers libyuv, else uses NEAREST)
-    AVIF_CHROMA_UPSAMPLING_BEST_QUALITY = 2, // Chooses the best quality upsampling, given settings (avoids libyuv)
-    AVIF_CHROMA_UPSAMPLING_NEAREST = 3,      // Uses nearest-neighbor filter (built-in)
-    AVIF_CHROMA_UPSAMPLING_BILINEAR = 4      // Uses bilinear filter (built-in)
+    AVIF_CHROMA_UPSAMPLING_AUTOMATIC = 0,    // Chooses best trade off of speed/quality (uses BILINEAR libyuv if available,
+                                             // or falls back to NEAREST libyuv if available, or falls back to BILINEAR built-in)
+    AVIF_CHROMA_UPSAMPLING_FASTEST = 1,      // Chooses speed over quality (same as NEAREST)
+    AVIF_CHROMA_UPSAMPLING_BEST_QUALITY = 2, // Chooses the best quality upsampling, given settings (same as BILINEAR)
+    AVIF_CHROMA_UPSAMPLING_NEAREST = 3,      // Uses nearest-neighbor filter
+    AVIF_CHROMA_UPSAMPLING_BILINEAR = 4      // Uses bilinear filter
 } avifChromaUpsampling;
+
+typedef enum avifChromaDownsampling
+{
+    AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC = 0,    // Chooses best trade off of speed/quality (same as AVERAGE)
+    AVIF_CHROMA_DOWNSAMPLING_FASTEST = 1,      // Chooses speed over quality (same as AVERAGE)
+    AVIF_CHROMA_DOWNSAMPLING_BEST_QUALITY = 2, // Chooses the best quality upsampling (same as AVERAGE)
+    AVIF_CHROMA_DOWNSAMPLING_AVERAGE = 3,      // Uses averaging filter
+    AVIF_CHROMA_DOWNSAMPLING_SHARP_YUV = 4     // Uses sharp yuv filter (libsharpyuv), available for 4:2:0 only, ignored for 4:2:2
+} avifChromaDownsampling;
 
 typedef struct avifRGBImage
 {
-    uint32_t width;       // must match associated avifImage
-    uint32_t height;      // must match associated avifImage
-    uint32_t depth;       // legal depths [8, 10, 12, 16]. if depth>8, pixels must be uint16_t internally
-    avifRGBFormat format; // all channels are always full range
-    avifChromaUpsampling chromaUpsampling; // Defaults to AVIF_CHROMA_UPSAMPLING_AUTOMATIC: How to upsample non-4:4:4 UV (ignored for 444) when converting to RGB.
-                                           // Unused when converting to YUV. avifRGBImageSetDefaults() prefers quality over speed.
-    avifBool ignoreAlpha;        // Used for XRGB formats, treats formats containing alpha (such as ARGB) as if they were
-                                 // RGB, treating the alpha bits as if they were all 1.
+    uint32_t width;                        // must match associated avifImage
+    uint32_t height;                       // must match associated avifImage
+    uint32_t depth;                        // legal depths [8, 10, 12, 16]. if depth>8, pixels must be uint16_t internally
+    avifRGBFormat format;                  // all channels are always full range
+    avifChromaUpsampling chromaUpsampling; // How to upsample from 4:2:0 or 4:2:2 UV when converting to RGB (ignored for 4:4:4 and 4:0:0).
+                                           // Ignored when converting to YUV. Defaults to AVIF_CHROMA_UPSAMPLING_AUTOMATIC.
+    avifChromaDownsampling chromaDownsampling; // How to downsample to 4:2:0 or 4:2:2 UV when converting from RGB (ignored for 4:4:4 and 4:0:0).
+                                               // Ignored when converting to RGB. Defaults to AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC.
+    avifBool avoidLibYUV; // If AVIF_FALSE and libyuv conversion between RGB and YUV (including upsampling or downsampling if any)
+                          // is available for the avifImage/avifRGBImage combination, then libyuv is used. Default is AVIF_FALSE.
+    avifBool ignoreAlpha; // Used for XRGB formats, treats formats containing alpha (such as ARGB) as if they were RGB, treating
+                          // the alpha bits as if they were all 1.
     avifBool alphaPremultiplied; // indicates if RGB value is pre-multiplied by alpha. Default: false
     avifBool isFloat; // indicates if RGBA values are in half float (f16) format. Valid only when depth == 16. Default: false
 
@@ -625,30 +655,6 @@ typedef uint32_t avifCodecFlags;
 // If this returns NULL, the codec choice/flag combination is unavailable
 AVIF_API const char * avifCodecName(avifCodecChoice choice, avifCodecFlags requiredFlags);
 AVIF_API avifCodecChoice avifCodecChoiceFromName(const char * name);
-
-typedef struct avifCodecConfigurationBox
-{
-    // [skipped; is constant] unsigned int (1)marker = 1;
-    // [skipped; is constant] unsigned int (7)version = 1;
-
-    uint8_t seqProfile;           // unsigned int (3) seq_profile;
-    uint8_t seqLevelIdx0;         // unsigned int (5) seq_level_idx_0;
-    uint8_t seqTier0;             // unsigned int (1) seq_tier_0;
-    uint8_t highBitdepth;         // unsigned int (1) high_bitdepth;
-    uint8_t twelveBit;            // unsigned int (1) twelve_bit;
-    uint8_t monochrome;           // unsigned int (1) monochrome;
-    uint8_t chromaSubsamplingX;   // unsigned int (1) chroma_subsampling_x;
-    uint8_t chromaSubsamplingY;   // unsigned int (1) chroma_subsampling_y;
-    uint8_t chromaSamplePosition; // unsigned int (2) chroma_sample_position;
-
-    // unsigned int (3)reserved = 0;
-    // unsigned int (1)initial_presentation_delay_present;
-    // if (initial_presentation_delay_present) {
-    //     unsigned int (4)initial_presentation_delay_minus_one;
-    // } else {
-    //     unsigned int (4)reserved = 0;
-    // }
-} avifCodecConfigurationBox;
 
 // ---------------------------------------------------------------------------
 // avifIO
@@ -827,6 +833,7 @@ typedef struct avifDecoder
     // enough input bytes to decode all of that frame. If this is true, avifDecoder will decode each
     // subimage or grid cell as soon as possible. The benefits are: grid images may be partially
     // displayed before being entirely available, and the overall decoding may finish earlier.
+    // Must be set before calling avifDecoderNextImage() or avifDecoderNthImage().
     // WARNING: Experimental feature.
     avifBool allowIncremental;
 
@@ -838,11 +845,16 @@ typedef struct avifDecoder
     avifBool ignoreExif;
     avifBool ignoreXMP;
 
-    // This represents the maximum size of a image (in pixel count) that libavif and the underlying
-    // AV1 decoder should attempt to decode. It defaults to AVIF_DEFAULT_IMAGE_SIZE_LIMIT, and can be
-    // set to a smaller value. The value 0 is reserved.
+    // This represents the maximum size of an image (in pixel count) that libavif and the underlying
+    // AV1 decoder should attempt to decode. It defaults to AVIF_DEFAULT_IMAGE_SIZE_LIMIT, and can
+    // be set to a smaller value. The value 0 is reserved.
     // Note: Only some underlying AV1 codecs support a configurable size limit (such as dav1d).
     uint32_t imageSizeLimit;
+
+    // This represents the maximum dimension of an image (width or height) that libavif should
+    // attempt to decode. It defaults to AVIF_DEFAULT_IMAGE_DIMENSION_LIMIT. Set it to 0 to ignore
+    // the limit.
+    uint32_t imageDimensionLimit;
 
     // This provides an upper bound on how many images the decoder is willing to attempt to decode,
     // to provide a bit of protection from malicious or malformed AVIFs citing millions upon
@@ -959,9 +971,9 @@ AVIF_API avifResult avifDecoderNthImageTiming(const avifDecoder * decoder, uint3
 // function can be called next to retrieve the number of top rows that can be immediately accessed
 // from the luma plane of decoder->image, and alpha if any. The corresponding rows from the chroma planes,
 // if any, can also be accessed (half rounded up if subsampled, same number of rows otherwise).
-// decoder->allowIncremental must be set to true.
-// Returns decoder->image->height when the last call to avifDecoderNextImage() or avifDecoderNthImage()
-// returned AVIF_RESULT_OK. Returns 0 in all other cases.
+// decoder->allowIncremental must be set to true before calling avifDecoderNextImage() or
+// avifDecoderNthImage(). Returns decoder->image->height when the last call to avifDecoderNextImage() or
+// avifDecoderNthImage() returned AVIF_RESULT_OK. Returns 0 in all other cases.
 // WARNING: Experimental feature.
 AVIF_API uint32_t avifDecoderDecodedRowCount(const avifDecoder * decoder);
 
@@ -1004,10 +1016,14 @@ struct avifCodecSpecificOptions;
 // * Quality range: [AVIF_QUANTIZER_BEST_QUALITY - AVIF_QUANTIZER_WORST_QUALITY]
 // * To enable tiling, set tileRowsLog2 > 0 and/or tileColsLog2 > 0.
 //   Tiling values range [0-6], where the value indicates a request for 2^n tiles in that dimension.
+//   If autoTiling is set to AVIF_TRUE, libavif ignores tileRowsLog2 and tileColsLog2 and
+//   automatically chooses suitable tiling values.
 // * Speed range: [AVIF_SPEED_SLOWEST - AVIF_SPEED_FASTEST]. Slower should make for a better quality
 //   image in less bytes. AVIF_SPEED_DEFAULT means "Leave the AV1 codec to its default speed settings"./
 //   If avifEncoder uses rav1e, the speed value is directly passed through (0-10). If libaom is used,
 //   a combination of settings are tweaked to simulate this speed range.
+// * Some encoder settings can be changed after encoding starts. Changes will take effect in the next
+//   call to avifEncoderAddImage().
 typedef struct avifEncoder
 {
     // Defaults to AVIF_CODEC_CHOICE_AUTO: Preference determined by order in availableCodecs table (avif.c)
@@ -1015,15 +1031,17 @@ typedef struct avifEncoder
 
     // settings (see Notes above)
     int maxThreads;
+    int speed;
+    int keyframeInterval; // How many frames between automatic forced keyframes; 0 to disable (default).
+    uint64_t timescale;   // timescale of the media (Hz)
+    // changeable encoder settings
     int minQuantizer;
     int maxQuantizer;
     int minQuantizerAlpha;
     int maxQuantizerAlpha;
     int tileRowsLog2;
     int tileColsLog2;
-    int speed;
-    int keyframeInterval; // How many frames between automatic forced keyframes; 0 to disable (default).
-    uint64_t timescale;   // timescale of the media (Hz)
+    avifBool autoTiling;
 
     // stats from the most recent write
     avifIOStats ioStats;
@@ -1066,6 +1084,7 @@ typedef uint32_t avifAddImageFlags;
 // * avifEncoderDestroy()
 //
 
+// durationInTimescales is ignored if AVIF_ADD_IMAGE_FLAG_SINGLE is set in addImageFlags.
 AVIF_API avifResult avifEncoderAddImage(avifEncoder * encoder, const avifImage * image, uint64_t durationInTimescales, avifAddImageFlags addImageFlags);
 AVIF_API avifResult avifEncoderAddImageGrid(avifEncoder * encoder,
                                             uint32_t gridCols,
@@ -1074,10 +1093,10 @@ AVIF_API avifResult avifEncoderAddImageGrid(avifEncoder * encoder,
                                             avifAddImageFlags addImageFlags);
 AVIF_API avifResult avifEncoderFinish(avifEncoder * encoder, avifRWData * output);
 
-// Codec-specific, optional "advanced" tuning settings, in the form of string key/value pairs. These
-// should be set as early as possible, preferably just after creating avifEncoder but before
-// performing any other actions.
-// key must be non-NULL, but passing a NULL value will delete that key, if it exists.
+// Codec-specific, optional "advanced" tuning settings, in the form of string key/value pairs,
+// to be consumed by the codec in the next avifEncoderAddImage() call.
+// See the codec documentation to know if a setting is persistent or applied only to the next frame.
+// key must be non-NULL, but passing a NULL value will delete the pending key, if it exists.
 // Setting an incorrect or unknown option for the current codec will cause errors of type
 // AVIF_RESULT_INVALID_CODEC_SPECIFIC_OPTION from avifEncoderWrite() or avifEncoderAddImage().
 AVIF_API void avifEncoderSetCodecSpecificOption(avifEncoder * encoder, const char * key, const char * value);

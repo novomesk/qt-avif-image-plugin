@@ -110,6 +110,7 @@ list(APPEND AOM_AV1_DECODER_SOURCES
 
 list(APPEND AOM_AV1_ENCODER_SOURCES
             "${AOM_ROOT}/av1/av1_cx_iface.c"
+            "${AOM_ROOT}/av1/av1_cx_iface.h"
             "${AOM_ROOT}/av1/encoder/aq_complexity.c"
             "${AOM_ROOT}/av1/encoder/aq_complexity.h"
             "${AOM_ROOT}/av1/encoder/aq_cyclicrefresh.c"
@@ -186,6 +187,7 @@ list(APPEND AOM_AV1_ENCODER_SOURCES
             "${AOM_ROOT}/av1/encoder/lookahead.h"
             "${AOM_ROOT}/av1/encoder/mcomp.c"
             "${AOM_ROOT}/av1/encoder/mcomp.h"
+            "${AOM_ROOT}/av1/encoder/mcomp_structs.h"
             "${AOM_ROOT}/av1/encoder/ml.c"
             "${AOM_ROOT}/av1/encoder/ml.h"
             "${AOM_ROOT}/av1/encoder/model_rd.h"

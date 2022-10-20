@@ -49,20 +49,28 @@ xy* aom_nonmax_suppression(const xy* corners, const int* scores, int num_corners
   int point_above = 0;
   int point_below = 0;
 
-
-  if(num_corners < 1)
+  *ret_num_nonmax = 0;
+  if(!(corners && scores) || num_corners < 1)
   {
-    *ret_num_nonmax = 0;
     return 0;
   }
 
   ret_nonmax = (xy*)malloc(num_corners * sizeof(xy));
+  if(!ret_nonmax)
+  {
+    return 0;
+  }
 
   /* Find where each row begins
      (the corners are output in raster scan order). A beginning of -1 signifies
      that there are no corners on that row. */
   last_row = corners[num_corners-1].y;
   row_start = (int*)malloc((last_row+1)*sizeof(int));
+  if(!row_start)
+  {
+    free(ret_nonmax);
+    return 0;
+  }
 
   for(i=0; i < last_row+1; i++)
     row_start[i] = -1;

@@ -462,7 +462,8 @@ static AOM_INLINE void write_segment_id(AV1_COMP *cpi, MACROBLOCKD *const xd,
 
   AV1_COMMON *const cm = &cpi->common;
   int cdf_num;
-  const int pred = av1_get_spatial_seg_pred(cm, xd, &cdf_num);
+  const int pred = av1_get_spatial_seg_pred(cm, xd, &cdf_num,
+                                            cpi->cyclic_refresh->skip_over4x4);
   const int mi_row = xd->mi_row;
   const int mi_col = xd->mi_col;
 

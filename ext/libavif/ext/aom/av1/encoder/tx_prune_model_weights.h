@@ -9,6 +9,10 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
+/*! \file
+ * Contains the details of the ML models used for pruning transform size. This
+ * file is only included by av1/encoder/tx_search.c.
+ */
 #ifndef AOM_AV1_ENCODER_TX_PRUNE_MODEL_WEIGHTS_H_
 #define AOM_AV1_ENCODER_TX_PRUNE_MODEL_WEIGHTS_H_
 
@@ -2317,7 +2321,7 @@ static const NN_CONFIG av1_tx_type_nnconfig_16x4_ver = {
 /******************************************************************************/
 
 // Map tx_size to its corresponding neural net model for tx type prediction.
-static const NN_CONFIG *av1_tx_type_nnconfig_map_hor[] = {
+static const NN_CONFIG *const av1_tx_type_nnconfig_map_hor[] = {
   &av1_tx_type_nnconfig_4x4_hor,   // 4x4 transform
   &av1_tx_type_nnconfig_8x8_hor,   // 8x8 transform
   &av1_tx_type_nnconfig_16x16,     // 16x16 transform
@@ -2339,7 +2343,7 @@ static const NN_CONFIG *av1_tx_type_nnconfig_map_hor[] = {
   NULL,                            // 64x16 transform
 };
 
-static const NN_CONFIG *av1_tx_type_nnconfig_map_ver[] = {
+static const NN_CONFIG *const av1_tx_type_nnconfig_map_ver[] = {
   &av1_tx_type_nnconfig_4x4_ver,   // 4x4 transform
   &av1_tx_type_nnconfig_8x8_ver,   // 8x8 transform
   &av1_tx_type_nnconfig_16x16,     // 16x16 transform
@@ -3291,7 +3295,7 @@ static const NN_CONFIG av1_tx_split_nnconfig_16x64 = {
 /******************************************************************************/
 
 // Map block size to its corresponding neural net model for tx split prediction.
-static const NN_CONFIG *av1_tx_split_nnconfig_map[TX_SIZES_ALL] = {
+static const NN_CONFIG *const av1_tx_split_nnconfig_map[TX_SIZES_ALL] = {
   NULL,                          // TX_4X4,
   &av1_tx_split_nnconfig_8x8,    // TX_8X8,
   &av1_tx_split_nnconfig_16x16,  // TX_16X16,
@@ -3312,6 +3316,104 @@ static const NN_CONFIG *av1_tx_split_nnconfig_map[TX_SIZES_ALL] = {
   &av1_tx_split_nnconfig_16x64,  // TX_16X64,
   &av1_tx_split_nnconfig_16x64,  // TX_64X16,
 };
+
+#if !CONFIG_REALTIME_ONLY
+#define NUM_INTRA_TX_SPLIT_FEATURES 14
+#define NUM_INTRA_TX_SPLIT_HIDDEN_LAYERS 1
+#define NUM_INTRA_TX_SPLIT_HIDDEN_NODES 16
+// Model to prune intra transform depth for intra 8x8 block.
+static const float av1_intra_tx_split_8x8_mean[NUM_INTRA_TX_SPLIT_FEATURES] = {
+  0.110706f,  18.901518f, 0.250436f,  13.483487f, 0.118141f,
+  14.318728f, 0.028409f,  14.257664f, 0.045839f,  15.143358f,
+  9.702971f,  14.300809f, 6.018646f,  3.682534f,
+};
+
+static const float av1_intra_tx_split_8x8_std[NUM_INTRA_TX_SPLIT_FEATURES] = {
+  13.750575f, 13.440116f, 14.334330f, 12.236641f, 18.415247f,
+  12.733355f, 18.309339f, 12.858130f, 23.465142f, 13.447014f,
+  8.625048f,  10.456774f, 1.185447f,  1.810423f,
+};
+
+static const float av1_intra_tx_split_nn_weights_8x8_layer0
+    [NUM_INTRA_TX_SPLIT_FEATURES * NUM_INTRA_TX_SPLIT_HIDDEN_NODES] = {
+      -0.156142f, -0.753623f, 0.026883f,  0.039188f,  -0.035310f, 0.106140f,
+      0.051622f,  0.077838f,  0.101632f,  0.107278f,  0.232200f,  0.269083f,
+      0.048966f,  -1.553293f, -0.113983f, -0.151248f, -0.067369f, 0.787292f,
+      0.076651f,  -0.802634f, 0.266414f,  1.107563f,  -0.068848f, -0.956468f,
+      -0.074920f, -0.192258f, 0.006207f,  0.176196f,  -0.493442f, 0.152290f,
+      -0.208874f, -0.014658f, 0.297385f,  -0.351695f, 0.246295f,  -0.178519f,
+      -0.204191f, 0.049663f,  -0.330343f, -0.299754f, 0.246215f,  -0.014558f,
+      -0.117611f, 0.206445f,  0.045840f,  -0.047563f, -0.049679f, 0.406892f,
+      -0.052307f, -1.513404f, 0.166166f,  0.520760f,  -0.143320f, -0.593928f,
+      -0.010533f, 0.250752f,  0.076738f,  0.537512f,  -0.082619f, -1.534031f,
+      0.047109f,  0.634247f,  -0.089730f, 0.545534f,  -0.022742f, -0.779047f,
+      -0.606358f, -0.199145f, -0.051269f, 0.248784f,  0.327545f,  -0.851751f,
+      0.071739f,  0.035975f,  0.387781f,  -0.136427f, -0.284436f, 0.578449f,
+      -0.198276f, 0.579950f,  0.600111f,  -0.370164f, -0.215297f, 0.517342f,
+      0.200061f,  -2.507660f, -0.030851f, 0.227315f,  -0.078289f, 0.276052f,
+      -0.050281f, 0.251481f,  -0.139318f, 0.281175f,  0.226524f,  0.058968f,
+      0.197436f,  0.517294f,  -0.105914f, -1.599567f, 0.064985f,  0.043209f,
+      -0.280038f, 0.126874f,  0.330387f,  -0.014407f, 0.031241f,  0.237801f,
+      0.948959f,  -0.253791f, -0.022622f, -0.061430f, 0.265852f,  0.750823f,
+      0.086606f,  0.853527f,  -0.180971f, -1.255744f, -0.152979f, -1.022198f,
+      -0.044708f, 0.506424f,  -0.501968f, -0.416863f, -0.012688f, 0.193523f,
+      -0.093698f, 0.430875f,  0.007379f,  0.019278f,  0.080890f,  0.462755f,
+      -0.054326f, -0.157611f, -0.004851f, -1.275676f, -0.060528f, -0.508170f,
+      0.195429f,  -0.023534f, 0.355211f,  0.983561f,  -0.122036f, -0.911948f,
+      -0.172280f, -1.135245f, -0.043211f, 0.576456f,  -0.075247f, 0.429734f,
+      -0.246309f, -0.355575f, -0.048809f, 0.217113f,  0.078385f,  0.720341f,
+      0.007070f,  0.144617f,  -0.167642f, 0.303056f,  -0.031425f, 0.123448f,
+      -0.320530f, 0.164070f,  -0.497849f, -0.233918f, -0.032123f, 0.084983f,
+      0.312216f,  0.062609f,  -0.389815f, 0.237593f,  0.000157f,  -0.642068f,
+      0.167898f,  0.495234f,  -0.083493f, -0.555971f, 0.124437f,  0.381125f,
+      -0.459219f, 0.047924f,  -0.138222f, -2.232816f, 0.127585f,  -0.102420f,
+      0.131598f,  0.036837f,  -0.163055f, -0.067429f, -0.078521f, -0.055666f,
+      1.387057f,  0.400154f,  -0.003355f, -0.073627f, -0.305098f, -0.413383f,
+      -0.008266f, -0.038329f, 0.209808f,  0.375777f,  0.037274f,  -0.050226f,
+      -0.100576f, 0.237441f,  0.237854f,  0.828296f,  0.001149f,  -0.093964f,
+      0.214051f,  -0.031486f, -0.561307f, 0.014540f,  0.169357f,  0.323202f,
+      -0.395334f, -0.038941f, 0.476800f,  -0.213122f, -0.287521f, -0.420717f,
+      -0.054142f, -0.102266f,
+    };
+
+static const float
+    av1_intra_tx_split_nn_bias_8x8_layer0[NUM_INTRA_TX_SPLIT_HIDDEN_NODES] = {
+      -1.150850f, -0.236404f, 0.184554f,  -0.904162f, -0.949979f, 0.427016f,
+      -0.546867f, -0.611094f, -0.676570f, -0.208959f, -0.286384f, 0.562238f,
+      0.434197f,  -0.746518f, 0.123085f,  -0.549836f,
+    };
+
+static const float av1_intra_tx_split_nn_weights_8x8_layer1
+    [NUM_INTRA_TX_SPLIT_HIDDEN_NODES] = {
+      0.749814f,  0.598172f,  0.375611f, 0.751612f,  0.947538f, -0.282228f,
+      -1.457522f, -1.092290f, 0.738657f, 0.575779f,  0.514823f, -0.560616f,
+      -0.491619f, -1.482014f, 0.524625f, -0.533590f,
+    };
+
+static const float av1_intra_tx_split_nn_bias_8x8_layer1[1] = {
+  -0.488888f,
+};
+
+static const NN_CONFIG av1_intra_tx_split_nnconfig_8x8 = {
+  NUM_INTRA_TX_SPLIT_FEATURES,       // num_inputs
+  1,                                 // num_outputs
+  NUM_INTRA_TX_SPLIT_HIDDEN_LAYERS,  // num_hidden_layers
+  {
+      NUM_INTRA_TX_SPLIT_HIDDEN_NODES,
+  },  // num_hidden_nodes
+  {
+      av1_intra_tx_split_nn_weights_8x8_layer0,
+      av1_intra_tx_split_nn_weights_8x8_layer1,
+  },
+  {
+      av1_intra_tx_split_nn_bias_8x8_layer0,
+      av1_intra_tx_split_nn_bias_8x8_layer1,
+  },
+};
+
+static const float av1_intra_tx_prune_nn_thresh_8x8[2] = { -0.405465f,
+                                                           0.405465f };
+#endif  // !CONFIG_REALTIME_ONLY
 
 #ifdef __cplusplus
 }  // extern "C"

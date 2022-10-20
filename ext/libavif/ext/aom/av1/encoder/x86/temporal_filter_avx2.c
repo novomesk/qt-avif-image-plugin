@@ -51,7 +51,7 @@ static AOM_FORCE_INLINE void get_squared_error_16x16_avx2(
 
     _mm256_storeu_si256((__m256i *)(dst), vsqdiff1);
     // Set zero to uninitialized memory to avoid uninitialized loads later
-    *(uint32_t *)(dst + 16) = _mm_cvtsi128_si32(_mm_setzero_si128());
+    *(int *)(dst + 16) = _mm_cvtsi128_si32(_mm_setzero_si128());
 
     src1 += stride, src2 += stride2;
     dst += sse_stride;
@@ -85,7 +85,7 @@ static AOM_FORCE_INLINE void get_squared_error_32x32_avx2(
     _mm256_storeu_si256((__m256i *)(dst), vres1);
     _mm256_storeu_si256((__m256i *)(dst + 16), vres2);
     // Set zero to uninitialized memory to avoid uninitialized loads later
-    *(uint32_t *)(dst + 32) = _mm_cvtsi128_si32(_mm_setzero_si128());
+    *(int *)(dst + 32) = _mm_cvtsi128_si32(_mm_setzero_si128());
 
     src1 += stride;
     src2 += stride2;

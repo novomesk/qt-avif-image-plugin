@@ -36,7 +36,7 @@ TEST(FirstpassTest, FirstpassInfoInitWithExtBuf) {
 
 TEST(FirstpassTest, FirstpassInfoInitWithStaticBuf) {
   FIRSTPASS_INFO firstpass_info;
-  aom_codec_err_t ret = av1_firstpass_info_init(&firstpass_info, NULL, 0);
+  aom_codec_err_t ret = av1_firstpass_info_init(&firstpass_info, nullptr, 0);
   EXPECT_EQ(firstpass_info.stats_count, 0);
   EXPECT_EQ(firstpass_info.cur_index, 0);
   EXPECT_EQ(ret, AOM_CODEC_OK);
@@ -44,7 +44,7 @@ TEST(FirstpassTest, FirstpassInfoInitWithStaticBuf) {
 
 TEST(FirstpassTest, FirstpassInfoPushPop) {
   FIRSTPASS_INFO firstpass_info;
-  av1_firstpass_info_init(&firstpass_info, NULL, 0);
+  av1_firstpass_info_init(&firstpass_info, nullptr, 0);
   EXPECT_EQ(firstpass_info.stats_buf_size, FIRSTPASS_INFO_STATIC_BUF_SIZE);
   for (int i = 0; i < FIRSTPASS_INFO_STATIC_BUF_SIZE; ++i) {
     FIRSTPASS_STATS stats;
@@ -85,7 +85,7 @@ TEST(FirstpassTest, FirstpassInfoPushPop) {
 
 TEST(FirstpassTest, FirstpassInfoTotalStats) {
   FIRSTPASS_INFO firstpass_info;
-  av1_firstpass_info_init(&firstpass_info, NULL, 0);
+  av1_firstpass_info_init(&firstpass_info, nullptr, 0);
   EXPECT_EQ(firstpass_info.total_stats.frame, 0);
   for (int i = 0; i < 10; ++i) {
     FIRSTPASS_STATS stats;
@@ -98,7 +98,7 @@ TEST(FirstpassTest, FirstpassInfoTotalStats) {
 
 TEST(FirstpassTest, FirstpassInfoMoveCurr) {
   FIRSTPASS_INFO firstpass_info;
-  av1_firstpass_info_init(&firstpass_info, NULL, 0);
+  av1_firstpass_info_init(&firstpass_info, nullptr, 0);
   int frame_cnt = 0;
   EXPECT_EQ(firstpass_info.stats_buf_size, FIRSTPASS_INFO_STATIC_BUF_SIZE);
   for (int i = 0; i < FIRSTPASS_INFO_STATIC_BUF_SIZE; ++i) {

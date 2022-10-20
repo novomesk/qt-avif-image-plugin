@@ -47,7 +47,7 @@ class TestImage {
     assert(0 <= x0_ && x0_ <= RS_SCALE_SUBPEL_MASK);
 
     w_dst_ = w_src_;
-    av1_calculate_unscaled_superres_size(&w_dst_, NULL, superres_denom);
+    av1_calculate_unscaled_superres_size(&w_dst_, nullptr, superres_denom);
 
     src_stride_ = ALIGN_POWER_OF_TWO(w_src_ + 2 * kHPad, 4);
     dst_stride_ = ALIGN_POWER_OF_TWO(w_dst_ + 2 * kHPad, 4);
@@ -161,7 +161,7 @@ void TestImage<Pixel>::Check() const {
 template <typename Pixel>
 class ConvolveHorizRSTestBase : public ::testing::Test {
  public:
-  ConvolveHorizRSTestBase() : image_(NULL) {}
+  ConvolveHorizRSTestBase() : image_(nullptr) {}
   virtual ~ConvolveHorizRSTestBase() {}
   virtual void TearDown() {}
 

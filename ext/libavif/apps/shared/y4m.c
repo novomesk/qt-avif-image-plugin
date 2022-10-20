@@ -348,16 +348,17 @@ avifBool y4mRead(const char * inputFilename, avifImage * avif, avifAppSourceTimi
         *sourceTiming = frame.sourceTiming;
     }
 
-    avifImageFreePlanes(avif, AVIF_PLANES_YUV | AVIF_PLANES_A);
+    avifImageFreePlanes(avif, AVIF_PLANES_ALL);
     avif->width = frame.width;
     avif->height = frame.height;
     avif->depth = frame.depth;
     avif->yuvFormat = frame.format;
     avif->yuvRange = frame.range;
     avif->yuvChromaSamplePosition = frame.chromaSamplePosition;
-    avifImageAllocatePlanes(avif, AVIF_PLANES_YUV);
-    if (frame.hasAlpha) {
-        avifImageAllocatePlanes(avif, AVIF_PLANES_A);
+    avifResult allocationResult = avifImageAllocatePlanes(avif, frame.hasAlpha ? AVIF_PLANES_ALL : AVIF_PLANES_YUV);
+    if (allocationResult != AVIF_RESULT_OK) {
+        fprintf(stderr, "Failed to allocate the planes: %s\n", avifResultToString(allocationResult));
+        goto cleanup;
     }
 
     avifPixelFormatInfo formatInfo;
@@ -456,7 +457,8 @@ avifBool y4mWrite(const char * outputFilename, const avifImage * avif)
                     y4mHeaderFormat = "Cmono XYSCSS=400";
                     break;
                 case AVIF_PIXEL_FORMAT_NONE:
-                    // will error later; this case is here for warning's sake
+                case AVIF_PIXEL_FORMAT_COUNT:
+                    // will error later; these cases are here for warning's sake
                     break;
             }
             break;
@@ -475,7 +477,8 @@ avifBool y4mWrite(const char * outputFilename, const avifImage * avif)
                     y4mHeaderFormat = "Cmono10 XYSCSS=400";
                     break;
                 case AVIF_PIXEL_FORMAT_NONE:
-                    // will error later; this case is here for warning's sake
+                case AVIF_PIXEL_FORMAT_COUNT:
+                    // will error later; these cases are here for warning's sake
                     break;
             }
             break;
@@ -494,7 +497,8 @@ avifBool y4mWrite(const char * outputFilename, const avifImage * avif)
                     y4mHeaderFormat = "Cmono12 XYSCSS=400";
                     break;
                 case AVIF_PIXEL_FORMAT_NONE:
-                    // will error later; this case is here for warning's sake
+                case AVIF_PIXEL_FORMAT_COUNT:
+                    // will error later; these cases are here for warning's sake
                     break;
             }
             break;

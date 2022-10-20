@@ -13,9 +13,12 @@
 #include <algorithm>
 #include <cassert>
 #include <climits>
+#include <functional>
 #include <numeric>
+#include <sstream>
 #include <vector>
 
+#include "aom/aom_codec.h"
 #include "av1/encoder/pass2_strategy.h"
 #include "av1/encoder/tpl_model.h"
 
@@ -38,9 +41,17 @@ GopFrame GopFrameInvalid() {
 }
 
 void SetGopFrameByType(GopFrameType gop_frame_type, GopFrame *gop_frame) {
+  gop_frame->update_type = gop_frame_type;
   switch (gop_frame_type) {
     case GopFrameType::kRegularKey:
       gop_frame->is_key_frame = 1;
+      gop_frame->is_arf_frame = 0;
+      gop_frame->is_show_frame = 1;
+      gop_frame->is_golden_frame = 1;
+      gop_frame->encode_ref_mode = EncodeRefMode::kRegular;
+      break;
+    case GopFrameType::kRegularGolden:
+      gop_frame->is_key_frame = 0;
       gop_frame->is_arf_frame = 0;
       gop_frame->is_show_frame = 1;
       gop_frame->is_golden_frame = 1;
@@ -67,7 +78,7 @@ void SetGopFrameByType(GopFrameType gop_frame_type, GopFrame *gop_frame) {
       gop_frame->is_golden_frame = 0;
       gop_frame->encode_ref_mode = EncodeRefMode::kRegular;
       break;
-    case GopFrameType::kShowExisting:
+    case GopFrameType::kIntermediateOverlay:
       gop_frame->is_key_frame = 0;
       gop_frame->is_arf_frame = 0;
       gop_frame->is_show_frame = 1;
@@ -86,11 +97,13 @@ void SetGopFrameByType(GopFrameType gop_frame_type, GopFrame *gop_frame) {
 
 GopFrame GopFrameBasic(int global_coding_idx_offset,
                        int global_order_idx_offset, int coding_idx,
-                       int order_idx, int depth, GopFrameType gop_frame_type) {
+                       int order_idx, int depth, int display_idx,
+                       GopFrameType gop_frame_type) {
   GopFrame gop_frame = {};
   gop_frame.is_valid = true;
   gop_frame.coding_idx = coding_idx;
   gop_frame.order_idx = order_idx;
+  gop_frame.display_idx = display_idx;
   gop_frame.global_coding_idx = global_coding_idx_offset + coding_idx;
   gop_frame.global_order_idx = global_order_idx_offset + order_idx;
   SetGopFrameByType(gop_frame_type, &gop_frame);
@@ -108,7 +121,6 @@ GopFrame GopFrameBasic(int global_coding_idx_offset,
 void ConstructGopMultiLayer(GopStruct *gop_struct,
                             RefFrameManager *ref_frame_manager, int max_depth,
                             int depth, int order_start, int order_end) {
-  int coding_idx = static_cast<int>(gop_struct->gop_frame_list.size());
   GopFrame gop_frame;
   int num_frames = order_end - order_start;
   const int global_coding_idx_offset = gop_struct->global_coding_idx_offset;
@@ -117,30 +129,35 @@ void ConstructGopMultiLayer(GopStruct *gop_struct,
   if (depth < max_depth && num_frames >= kMinIntervalToAddArf) {
     int order_mid = (order_start + order_end) / 2;
     // intermediate ARF
-    gop_frame = GopFrameBasic(global_coding_idx_offset, global_order_idx_offset,
-                              coding_idx, order_mid, depth,
-                              GopFrameType::kIntermediateArf);
+    gop_frame = GopFrameBasic(
+        global_coding_idx_offset, global_order_idx_offset,
+        static_cast<int>(gop_struct->gop_frame_list.size()), order_mid, depth,
+        gop_struct->display_tracker, GopFrameType::kIntermediateArf);
     ref_frame_manager->UpdateRefFrameTable(&gop_frame);
     gop_struct->gop_frame_list.push_back(gop_frame);
     ConstructGopMultiLayer(gop_struct, ref_frame_manager, max_depth, depth + 1,
                            order_start, order_mid);
     // show existing intermediate ARF
-    gop_frame = GopFrameBasic(global_coding_idx_offset, global_order_idx_offset,
-                              coding_idx, order_mid, max_depth,
-                              GopFrameType::kShowExisting);
+    gop_frame =
+        GopFrameBasic(global_coding_idx_offset, global_order_idx_offset,
+                      static_cast<int>(gop_struct->gop_frame_list.size()),
+                      order_mid, max_depth, gop_struct->display_tracker,
+                      GopFrameType::kIntermediateOverlay);
     ref_frame_manager->UpdateRefFrameTable(&gop_frame);
     gop_struct->gop_frame_list.push_back(gop_frame);
+    ++gop_struct->display_tracker;
     ConstructGopMultiLayer(gop_struct, ref_frame_manager, max_depth, depth + 1,
                            order_mid + 1, order_end);
   } else {
     // regular frame
     for (int i = order_start; i < order_end; ++i) {
-      coding_idx = static_cast<int>(gop_struct->gop_frame_list.size());
-      gop_frame =
-          GopFrameBasic(global_coding_idx_offset, global_order_idx_offset,
-                        coding_idx, i, max_depth, GopFrameType::kRegularLeaf);
+      gop_frame = GopFrameBasic(
+          global_coding_idx_offset, global_order_idx_offset,
+          static_cast<int>(gop_struct->gop_frame_list.size()), i, max_depth,
+          gop_struct->display_tracker, GopFrameType::kRegularLeaf);
       ref_frame_manager->UpdateRefFrameTable(&gop_frame);
       gop_struct->gop_frame_list.push_back(gop_frame);
+      ++gop_struct->display_tracker;
     }
   }
 }
@@ -153,43 +170,104 @@ GopStruct ConstructGop(RefFrameManager *ref_frame_manager, int show_frame_count,
   gop_struct.global_coding_idx_offset = global_coding_idx_offset;
   gop_struct.global_order_idx_offset = global_order_idx_offset;
   int order_start = 0;
-  int order_arf = show_frame_count - 1;
-  int coding_idx;
+  int order_end = show_frame_count - 1;
+
+  // TODO(jingning): Re-enable the use of pyramid coding structure.
+  bool has_arf_frame = show_frame_count > kMinIntervalToAddArf;
+
+  gop_struct.display_tracker = 0;
+
   GopFrame gop_frame;
   if (has_key_frame) {
     const int key_frame_depth = -1;
     ref_frame_manager->Reset();
-    coding_idx = static_cast<int>(gop_struct.gop_frame_list.size());
-    gop_frame = GopFrameBasic(global_coding_idx_offset, global_order_idx_offset,
-                              coding_idx, order_start, key_frame_depth,
-                              GopFrameType::kRegularKey);
+    gop_frame = GopFrameBasic(
+        global_coding_idx_offset, global_order_idx_offset,
+        static_cast<int>(gop_struct.gop_frame_list.size()), order_start,
+        key_frame_depth, gop_struct.display_tracker, GopFrameType::kRegularKey);
     ref_frame_manager->UpdateRefFrameTable(&gop_frame);
     gop_struct.gop_frame_list.push_back(gop_frame);
     order_start++;
+    ++gop_struct.display_tracker;
   }
-  // ARF
+
   const int arf_depth = 0;
-  coding_idx = static_cast<int>(gop_struct.gop_frame_list.size());
-  gop_frame = GopFrameBasic(global_coding_idx_offset, global_order_idx_offset,
-                            coding_idx, order_arf, arf_depth,
-                            GopFrameType::kRegularArf);
-  ref_frame_manager->UpdateRefFrameTable(&gop_frame);
-  gop_struct.gop_frame_list.push_back(gop_frame);
-  ConstructGopMultiLayer(&gop_struct, ref_frame_manager,
-                         ref_frame_manager->ForwardMaxSize(), arf_depth + 1,
-                         order_start, order_arf);
-  // Overlay
-  coding_idx = static_cast<int>(gop_struct.gop_frame_list.size());
-  gop_frame = GopFrameBasic(
-      global_coding_idx_offset, global_order_idx_offset, coding_idx, order_arf,
-      ref_frame_manager->ForwardMaxSize(), GopFrameType::kOverlay);
-  ref_frame_manager->UpdateRefFrameTable(&gop_frame);
-  gop_struct.gop_frame_list.push_back(gop_frame);
+  if (has_arf_frame) {
+    // Use multi-layer pyrmaid coding structure.
+    gop_frame = GopFrameBasic(
+        global_coding_idx_offset, global_order_idx_offset,
+        static_cast<int>(gop_struct.gop_frame_list.size()), order_end,
+        arf_depth, gop_struct.display_tracker, GopFrameType::kRegularArf);
+    ref_frame_manager->UpdateRefFrameTable(&gop_frame);
+    gop_struct.gop_frame_list.push_back(gop_frame);
+    ConstructGopMultiLayer(&gop_struct, ref_frame_manager,
+                           ref_frame_manager->ForwardMaxSize(), arf_depth + 1,
+                           order_start, order_end);
+    // Overlay
+    gop_frame =
+        GopFrameBasic(global_coding_idx_offset, global_order_idx_offset,
+                      static_cast<int>(gop_struct.gop_frame_list.size()),
+                      order_end, ref_frame_manager->ForwardMaxSize(),
+                      gop_struct.display_tracker, GopFrameType::kOverlay);
+    ref_frame_manager->UpdateRefFrameTable(&gop_frame);
+    gop_struct.gop_frame_list.push_back(gop_frame);
+    ++gop_struct.display_tracker;
+  } else {
+    // Use IPPP format.
+    for (int i = order_start; i <= order_end; ++i) {
+      gop_frame = GopFrameBasic(
+          global_coding_idx_offset, global_order_idx_offset,
+          static_cast<int>(gop_struct.gop_frame_list.size()), i, arf_depth + 1,
+          gop_struct.display_tracker, GopFrameType::kRegularLeaf);
+      ref_frame_manager->UpdateRefFrameTable(&gop_frame);
+      gop_struct.gop_frame_list.push_back(gop_frame);
+      ++gop_struct.display_tracker;
+    }
+  }
+
   return gop_struct;
 }
 
-void AV1RateControlQMode::SetRcParam(const RateControlParam &rc_param) {
+Status AV1RateControlQMode::SetRcParam(const RateControlParam &rc_param) {
+  std::ostringstream error_message;
+  if (rc_param.max_gop_show_frame_count <
+      std::max(4, rc_param.min_gop_show_frame_count)) {
+    error_message << "max_gop_show_frame_count ("
+                  << rc_param.max_gop_show_frame_count
+                  << ") must be at least 4 and may not be less than "
+                     "min_gop_show_frame_count ("
+                  << rc_param.min_gop_show_frame_count << ")";
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  if (rc_param.ref_frame_table_size < 1 || rc_param.ref_frame_table_size > 8) {
+    error_message << "ref_frame_table_size (" << rc_param.ref_frame_table_size
+                  << ") must be in the range [1, 8].";
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  if (rc_param.max_ref_frames < 1 || rc_param.max_ref_frames > 7) {
+    error_message << "max_ref_frames (" << rc_param.max_ref_frames
+                  << ") must be in the range [1, 7].";
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  if (rc_param.max_depth < 1 || rc_param.max_depth > 5) {
+    error_message << "max_depth (" << rc_param.max_depth
+                  << ") must be in the range [1, 5].";
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  if (rc_param.base_q_index < 0 || rc_param.base_q_index > 255) {
+    error_message << "base_q_index (" << rc_param.base_q_index
+                  << ") must be in the range [0, 255].";
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  if (rc_param.frame_width < 16 || rc_param.frame_width > 16384 ||
+      rc_param.frame_height < 16 || rc_param.frame_height > 16384) {
+    error_message << "frame_width (" << rc_param.frame_width
+                  << ") and frame_height (" << rc_param.frame_height
+                  << ") must be in the range [16, 16384].";
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
   rc_param_ = rc_param;
+  return { AOM_CODEC_OK, "" };
 }
 
 // Threshold for use of the lagging second reference frame. High second ref
@@ -482,8 +560,9 @@ int FindBetterGopCut(const std::vector<FIRSTPASS_STATS> &stats_list,
   }
 
   // if the found scenecut is very close to the end, ignore it.
-  if (regions_list[num_regions - 1].last - regions_list[scenecut_idx].last <
-      4) {
+  if (scenecut_idx >= 0 &&
+      regions_list[num_regions - 1].last - regions_list[scenecut_idx].last <
+          4) {
     scenecut_idx = -1;
   }
 
@@ -561,7 +640,7 @@ int FindBetterGopCut(const std::vector<FIRSTPASS_STATS> &stats_list,
         // preceding frames
         temp_accu_coeff = 1.0;
         for (int n = j; n > j - 3 * 2 + count_f && n > first_frame; n--) {
-          if (order_index + n < num_stats) break;
+          if (order_index + n < 0) break;
           temp_accu_coeff *= stats_list[order_index + n].cor_coeff;
           this_score +=
               temp_accu_coeff *
@@ -689,7 +768,7 @@ static std::vector<int> PartitionGopIntervals(
     const std::vector<FIRSTPASS_STATS> &stats_list,
     const std::vector<REGIONS> &regions_list, int order_index,
     int frames_since_key, int frames_to_key) {
-  int i = (frames_since_key == 0) ? 1 : 0;
+  int i = 0;
   // If cpi->gf_state.arf_gf_boost_lst is 0, we are starting with a KF or GF.
   int cur_start = 0;
   // Each element is the last frame of the previous GOP. If there are n GOPs,
@@ -700,14 +779,15 @@ static std::vector<int> PartitionGopIntervals(
   GF_GROUP_STATS gf_stats;
   InitGFStats(&gf_stats);
   int num_stats = static_cast<int>(stats_list.size());
+
   while (i + order_index < num_stats) {
     // reaches next key frame, break here
-    if (i >= frames_to_key) {
+    if (i >= frames_to_key - 1) {
       cut_here = 2;
     } else if (i - cur_start >= rc_param.max_gop_show_frame_count) {
       // reached maximum len, but nothing special yet (almost static)
       // let's look at the next interval
-      cut_here = 1;
+      cut_here = 2;
     } else {
       // Test for the case where there is a brief flash but the prediction
       // quality back to an earlier frame is then restored.
@@ -737,7 +817,9 @@ static std::vector<int> PartitionGopIntervals(
       ++i;
       continue;
     }
-    int original_last = i - 1;  // the current last frame in the gf group
+
+    // the current last frame in the gf group
+    int original_last = cut_here > 1 ? i : i - 1;
     int cur_last = FindBetterGopCut(
         stats_list, regions_list, rc_param.min_gop_show_frame_count,
         rc_param.max_gop_show_frame_count, order_index, cur_start,
@@ -752,12 +834,13 @@ static std::vector<int> PartitionGopIntervals(
     if (cur_region_idx >= 0)
       if (regions_list[cur_region_idx].type == SCENECUT_REGION) cur_start++;
 
-    // TODO(angiebird): Why do we need to break here?
-    if (cut_here > 1 && cur_last == original_last) break;
     // reset accumulators
     InitGFStats(&gf_stats);
     i = cur_last + 1;
+
+    if (cut_here == 2 && i >= frames_to_key) break;
   }
+
   std::vector<int> gf_intervals;
   // save intervals
   for (size_t n = 1; n < cut_pos.size(); n++) {
@@ -767,12 +850,12 @@ static std::vector<int> PartitionGopIntervals(
   return gf_intervals;
 }
 
-// TODO(angiebird): Add unit test to this function.
-GopStructList AV1RateControlQMode::DetermineGopInfo(
+StatusOr<GopStructList> AV1RateControlQMode::DetermineGopInfo(
     const FirstpassInfo &firstpass_info) {
   const int stats_size = static_cast<int>(firstpass_info.stats_list.size());
   GopStructList gop_list;
-  RefFrameManager ref_frame_manager(rc_param_.max_ref_frames);
+  RefFrameManager ref_frame_manager(rc_param_.ref_frame_table_size);
+
   int global_coding_idx_offset = 0;
   int global_order_idx_offset = 0;
   std::vector<int> key_frame_list = GetKeyFrameList(firstpass_info);
@@ -782,12 +865,6 @@ GopStructList AV1RateControlQMode::DetermineGopInfo(
     int key_order_index = key_frame_list[ki];  // The key frame's display order
 
     std::vector<REGIONS> regions_list(MAX_FIRSTPASS_ANALYSIS_FRAMES);
-    // TODO(angiebird): Assume frames_to_key <= MAX_FIRSTPASS_ANALYSIS_FRAMES
-    // for now.
-    // Handle the situation that frames_to_key > MAX_FIRSTPASS_ANALYSIS_FRAMES
-    // here or refactor av1_identify_regions() to make it support
-    // frames_to_key > MAX_FIRSTPASS_ANALYSIS_FRAMES
-    assert(frames_to_key <= MAX_FIRSTPASS_ANALYSIS_FRAMES);
     int total_regions = 0;
     av1_identify_regions(firstpass_info.stats_list.data() + key_order_index,
                          frames_to_key, 0, regions_list.data(), &total_regions);
@@ -812,14 +889,14 @@ GopStructList AV1RateControlQMode::DetermineGopInfo(
 
 TplFrameDepStats CreateTplFrameDepStats(int frame_height, int frame_width,
                                         int min_block_size) {
-  const int unit_rows =
-      frame_height / min_block_size + !!(frame_height % min_block_size);
-  const int unit_cols =
-      frame_width / min_block_size + !!(frame_width % min_block_size);
+  const int unit_rows = (frame_height + min_block_size - 1) / min_block_size;
+  const int unit_cols = (frame_width + min_block_size - 1) / min_block_size;
   TplFrameDepStats frame_dep_stats;
   frame_dep_stats.unit_size = min_block_size;
-  frame_dep_stats.unit_stats = std::vector<std::vector<TplUnitDepStats>>(
-      unit_rows, std::vector<TplUnitDepStats>(unit_cols));
+  frame_dep_stats.unit_stats.resize(unit_rows);
+  for (auto &row : frame_dep_stats.unit_stats) {
+    row.resize(unit_cols);
+  }
   return frame_dep_stats;
 }
 
@@ -837,17 +914,94 @@ TplUnitDepStats TplBlockStatsToDepStats(const TplBlockStats &block_stats,
   return dep_stats;
 }
 
-TplFrameDepStats CreateTplFrameDepStatsWithoutPropagation(
+namespace {
+Status ValidateBlockStats(const TplFrameStats &frame_stats,
+                          const TplBlockStats &block_stats,
+                          int min_block_size) {
+  if (block_stats.col >= frame_stats.frame_width ||
+      block_stats.row >= frame_stats.frame_height) {
+    std::ostringstream error_message;
+    error_message << "Block position (" << block_stats.col << ", "
+                  << block_stats.row
+                  << ") is out of range; frame dimensions are "
+                  << frame_stats.frame_width << " x "
+                  << frame_stats.frame_height;
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  if (block_stats.col % min_block_size != 0 ||
+      block_stats.row % min_block_size != 0 ||
+      block_stats.width % min_block_size != 0 ||
+      block_stats.height % min_block_size != 0) {
+    std::ostringstream error_message;
+    error_message
+        << "Invalid block position or dimension, must be a multiple of "
+        << min_block_size << "; col = " << block_stats.col
+        << ", row = " << block_stats.row << ", width = " << block_stats.width
+        << ", height = " << block_stats.height;
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  return { AOM_CODEC_OK, "" };
+}
+
+Status ValidateTplStats(const GopStruct &gop_struct,
+                        const TplGopStats &tpl_gop_stats) {
+  constexpr char kAdvice[] =
+      "Do the current RateControlParam settings match those used to generate "
+      "the TPL stats?";
+  if (gop_struct.gop_frame_list.size() !=
+      tpl_gop_stats.frame_stats_list.size()) {
+    std::ostringstream error_message;
+    error_message << "Frame count of GopStruct ("
+                  << gop_struct.gop_frame_list.size()
+                  << ") doesn't match frame count of TPL stats ("
+                  << tpl_gop_stats.frame_stats_list.size() << "). " << kAdvice;
+    return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+  }
+  for (int i = 0; i < static_cast<int>(gop_struct.gop_frame_list.size()); ++i) {
+    const bool is_ref_frame = gop_struct.gop_frame_list[i].update_ref_idx >= 0;
+    const bool has_tpl_stats =
+        !tpl_gop_stats.frame_stats_list[i].block_stats_list.empty();
+    if (is_ref_frame && !has_tpl_stats) {
+      std::ostringstream error_message;
+      error_message << "The frame with global_coding_idx "
+                    << gop_struct.gop_frame_list[i].global_coding_idx
+                    << " is a reference frame, but has no TPL stats. "
+                    << kAdvice;
+      return { AOM_CODEC_INVALID_PARAM, error_message.str() };
+    }
+  }
+  return { AOM_CODEC_OK, "" };
+}
+}  // namespace
+
+StatusOr<TplFrameDepStats> CreateTplFrameDepStatsWithoutPropagation(
     const TplFrameStats &frame_stats) {
+  if (frame_stats.block_stats_list.empty()) {
+    return TplFrameDepStats();
+  }
   const int min_block_size = frame_stats.min_block_size;
+  const int unit_rows =
+      (frame_stats.frame_height + min_block_size - 1) / min_block_size;
+  const int unit_cols =
+      (frame_stats.frame_width + min_block_size - 1) / min_block_size;
   TplFrameDepStats frame_dep_stats = CreateTplFrameDepStats(
       frame_stats.frame_height, frame_stats.frame_width, min_block_size);
   for (const TplBlockStats &block_stats : frame_stats.block_stats_list) {
-    const int block_unit_rows = block_stats.height / min_block_size;
-    const int block_unit_cols = block_stats.width / min_block_size;
-    const int unit_count = block_unit_rows * block_unit_cols;
+    Status status =
+        ValidateBlockStats(frame_stats, block_stats, min_block_size);
+    if (!status.ok()) {
+      return status;
+    }
     const int block_unit_row = block_stats.row / min_block_size;
     const int block_unit_col = block_stats.col / min_block_size;
+    // The block must start within the frame boundaries, but it may extend past
+    // the right edge or bottom of the frame. Find the number of unit rows and
+    // columns in the block which are fully within the frame.
+    const int block_unit_rows = std::min(block_stats.height / min_block_size,
+                                         unit_rows - block_unit_row);
+    const int block_unit_cols = std::min(block_stats.width / min_block_size,
+                                         unit_cols - block_unit_col);
+    const int unit_count = block_unit_rows * block_unit_cols;
     TplUnitDepStats unit_stats =
         TplBlockStatsToDepStats(block_stats, unit_count);
     for (int r = 0; r < block_unit_rows; r++) {
@@ -868,6 +1022,7 @@ int GetRefCodingIdxList(const TplUnitDepStats &unit_dep_stats,
     ref_coding_idx_list[i] = -1;
     int ref_frame_index = unit_dep_stats.ref_frame_index[i];
     if (ref_frame_index != -1) {
+      assert(ref_frame_index < static_cast<int>(ref_frame_table.size()));
       ref_coding_idx_list[i] = ref_frame_table[ref_frame_index].coding_idx;
       ref_frame_count++;
     }
@@ -935,6 +1090,8 @@ void TplFrameDepStatsPropagate(int coding_idx,
   TplFrameDepStats *frame_dep_stats =
       &tpl_gop_dep_stats->frame_dep_stats_list[coding_idx];
 
+  if (frame_dep_stats->unit_stats.empty()) return;
+
   const int unit_size = frame_dep_stats->unit_size;
   const int frame_unit_rows =
       static_cast<int>(frame_dep_stats->unit_stats.size());
@@ -950,8 +1107,12 @@ void TplFrameDepStatsPropagate(int coding_idx,
       if (ref_frame_count == 0) continue;
       for (int i = 0; i < kBlockRefCount; ++i) {
         if (ref_coding_idx_list[i] == -1) continue;
+        assert(
+            ref_coding_idx_list[i] <
+            static_cast<int>(tpl_gop_dep_stats->frame_dep_stats_list.size()));
         TplFrameDepStats &ref_frame_dep_stats =
             tpl_gop_dep_stats->frame_dep_stats_list[ref_coding_idx_list[i]];
+        assert(!ref_frame_dep_stats.unit_stats.empty());
         const auto &mv = unit_dep_stats.mv[i];
         const int mv_row = GetFullpelValue(mv.row, mv.subpel_bits);
         const int mv_col = GetFullpelValue(mv.col, mv.subpel_bits);
@@ -961,6 +1122,7 @@ void TplFrameDepStatsPropagate(int coding_idx,
             (unit_row * unit_size + mv_row) / unit_size;
         const int ref_unit_col_low =
             (unit_col * unit_size + mv_col) / unit_size;
+
         for (int j = 0; j < 2; ++j) {
           for (int k = 0; k < 2; ++k) {
             const int ref_unit_row = ref_unit_row_low + j;
@@ -990,15 +1152,30 @@ void TplFrameDepStatsPropagate(int coding_idx,
   }
 }
 
-// TODO(angiebird): Add unit test for this function
-std::vector<RefFrameTable> GetRefFrameTableList(const GopStruct &gop_struct,
-                                                RefFrameTable ref_frame_table) {
-  const int frame_count = static_cast<int>(gop_struct.gop_frame_list.size());
+std::vector<RefFrameTable> AV1RateControlQMode::GetRefFrameTableList(
+    const GopStruct &gop_struct, RefFrameTable ref_frame_table) {
+  if (gop_struct.global_coding_idx_offset == 0) {
+    // For the first GOP, ref_frame_table need not be initialized. This is fine,
+    // because the first frame (a key frame) will fully initialize it.
+    ref_frame_table.assign(rc_param_.ref_frame_table_size, GopFrameInvalid());
+  } else {
+    // It's not the first GOP, so ref_frame_table must be valid.
+    assert(static_cast<int>(ref_frame_table.size()) ==
+           rc_param_.ref_frame_table_size);
+    assert(std::all_of(ref_frame_table.begin(), ref_frame_table.end(),
+                       std::mem_fn(&GopFrame::is_valid)));
+    // Reset the frame processing order of the initial ref_frame_table.
+    for (GopFrame &gop_frame : ref_frame_table) gop_frame.coding_idx = -1;
+  }
+
   std::vector<RefFrameTable> ref_frame_table_list;
   ref_frame_table_list.push_back(ref_frame_table);
-  for (int coding_idx = 0; coding_idx < frame_count; coding_idx++) {
-    const auto &gop_frame = gop_struct.gop_frame_list[coding_idx];
-    if (gop_frame.update_ref_idx != -1) {
+  for (const GopFrame &gop_frame : gop_struct.gop_frame_list) {
+    if (gop_frame.is_key_frame) {
+      ref_frame_table.assign(rc_param_.ref_frame_table_size, gop_frame);
+    } else if (gop_frame.update_ref_idx != -1) {
+      assert(gop_frame.update_ref_idx <
+             static_cast<int>(ref_frame_table.size()));
       ref_frame_table[gop_frame.update_ref_idx] = gop_frame;
     }
     ref_frame_table_list.push_back(ref_frame_table);
@@ -1006,17 +1183,24 @@ std::vector<RefFrameTable> GetRefFrameTableList(const GopStruct &gop_struct,
   return ref_frame_table_list;
 }
 
-TplGopDepStats ComputeTplGopDepStats(
+StatusOr<TplGopDepStats> ComputeTplGopDepStats(
     const TplGopStats &tpl_gop_stats,
     const std::vector<RefFrameTable> &ref_frame_table_list) {
-  const int frame_count = static_cast<int>(ref_frame_table_list.size());
-
+  const int frame_count =
+      static_cast<int>(tpl_gop_stats.frame_stats_list.size());
   // Create the struct to store TPL dependency stats
   TplGopDepStats tpl_gop_dep_stats;
+
+  tpl_gop_dep_stats.frame_dep_stats_list.reserve(frame_count);
   for (int coding_idx = 0; coding_idx < frame_count; coding_idx++) {
-    tpl_gop_dep_stats.frame_dep_stats_list.push_back(
+    const StatusOr<TplFrameDepStats> tpl_frame_dep_stats =
         CreateTplFrameDepStatsWithoutPropagation(
-            tpl_gop_stats.frame_stats_list[coding_idx]));
+            tpl_gop_stats.frame_stats_list[coding_idx]);
+    if (!tpl_frame_dep_stats.ok()) {
+      return tpl_frame_dep_stats.status();
+    }
+    tpl_gop_dep_stats.frame_dep_stats_list.push_back(
+        std::move(*tpl_frame_dep_stats));
   }
 
   // Back propagation
@@ -1045,33 +1229,48 @@ static int GetRDMult(const GopFrame &gop_frame, int qindex) {
   }
 }
 
-GopEncodeInfo AV1RateControlQMode::GetGopEncodeInfo(
+StatusOr<GopEncodeInfo> AV1RateControlQMode::GetGopEncodeInfo(
     const GopStruct &gop_struct, const TplGopStats &tpl_gop_stats,
     const RefFrameTable &ref_frame_table_snapshot_init) {
+  Status status = ValidateTplStats(gop_struct, tpl_gop_stats);
+  if (!status.ok()) {
+    return status;
+  }
+
   const std::vector<RefFrameTable> ref_frame_table_list =
       GetRefFrameTableList(gop_struct, ref_frame_table_snapshot_init);
 
   GopEncodeInfo gop_encode_info;
   gop_encode_info.final_snapshot = ref_frame_table_list.back();
-  TplGopDepStats gop_dep_stats =
+  StatusOr<TplGopDepStats> gop_dep_stats =
       ComputeTplGopDepStats(tpl_gop_stats, ref_frame_table_list);
+  if (!gop_dep_stats.ok()) {
+    return gop_dep_stats.status();
+  }
   const int frame_count =
       static_cast<int>(tpl_gop_stats.frame_stats_list.size());
   for (int i = 0; i < frame_count; i++) {
-    const TplFrameDepStats &frame_dep_stats =
-        gop_dep_stats.frame_dep_stats_list[i];
-    const double cost_without_propagation =
-        TplFrameDepStatsAccumulateIntraCost(frame_dep_stats);
-    const double cost_with_propagation =
-        TplFrameDepStatsAccumulate(frame_dep_stats);
-    const double frame_importance =
-        cost_with_propagation / cost_without_propagation;
-    // Imitate the behavior of av1_tpl_get_qstep_ratio()
-    const double qstep_ratio = sqrt(1 / frame_importance);
     FrameEncodeParameters param;
-    param.q_index = av1_get_q_index_from_qstep_ratio(rc_param_.base_q_index,
-                                                     qstep_ratio, AOM_BITS_8);
     const GopFrame &gop_frame = gop_struct.gop_frame_list[i];
+
+    if (gop_frame.update_type == GopFrameType::kOverlay ||
+        gop_frame.update_type == GopFrameType::kIntermediateOverlay) {
+      param.q_index = rc_param_.base_q_index;
+    } else {
+      const TplFrameDepStats &frame_dep_stats =
+          gop_dep_stats->frame_dep_stats_list[i];
+      const double cost_without_propagation =
+          TplFrameDepStatsAccumulateIntraCost(frame_dep_stats);
+      const double cost_with_propagation =
+          TplFrameDepStatsAccumulate(frame_dep_stats);
+      const double frame_importance =
+          cost_with_propagation / cost_without_propagation;
+      // Imitate the behavior of av1_tpl_get_qstep_ratio()
+      const double qstep_ratio = sqrt(1 / frame_importance);
+      param.q_index = av1_get_q_index_from_qstep_ratio(rc_param_.base_q_index,
+                                                       qstep_ratio, AOM_BITS_8);
+      if (rc_param_.base_q_index) param.q_index = AOMMAX(param.q_index, 1);
+    }
     param.rdmult = GetRDMult(gop_frame, param.q_index);
     gop_encode_info.param_list.push_back(param);
   }

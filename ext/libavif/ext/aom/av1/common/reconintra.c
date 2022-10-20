@@ -615,7 +615,7 @@ void av1_dr_prediction_z3_c(uint8_t *dst, ptrdiff_t stride, int bw, int bh,
     for (r = 0; r < bh; ++r, base += base_inc) {
       if (base < max_base_y) {
         val = left[base] * (32 - shift) + left[base + 1] * shift;
-        dst[r * stride + c] = val = ROUND_POWER_OF_TWO(val, 5);
+        dst[r * stride + c] = ROUND_POWER_OF_TWO(val, 5);
       } else {
         for (; r < bh; ++r) dst[r * stride + c] = left[max_base_y];
         break;

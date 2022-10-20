@@ -51,9 +51,9 @@ endif()
 # passed to libtool.
 #
 # We set SO_FILE_VERSION = [c-a].a.r
-set(LT_CURRENT 7)
+set(LT_CURRENT 8)
 set(LT_REVISION 0)
-set(LT_AGE 4)
+set(LT_AGE 5)
 math(EXPR SO_VERSION "${LT_CURRENT} - ${LT_AGE}")
 set(SO_FILE_VERSION "${SO_VERSION}.${LT_AGE}.${LT_REVISION}")
 unset(LT_CURRENT)
@@ -315,14 +315,15 @@ if(CONFIG_AV1_RC_RTC AND CONFIG_AV1_ENCODER AND NOT BUILD_SHARED_LIBS)
 endif()
 
 if(CONFIG_AV1_ENCODER AND NOT CONFIG_REALTIME_ONLY AND NOT BUILD_SHARED_LIBS)
-  list(APPEND AOM_AV1_RC_QMODE_SOURCES
-              "${AOM_ROOT}/av1/ratectrl_qmode_interface.h"
-              "${AOM_ROOT}/av1/ratectrl_qmode_interface.cc"
-              "${AOM_ROOT}/av1/reference_manager.h"
-              "${AOM_ROOT}/av1/reference_manager.cc"
-              "${AOM_ROOT}/av1/ratectrl_qmode.h"
-              "${AOM_ROOT}/av1/ratectrl_qmode.cc")
-  add_library(av1_rc_qmode ${AOM_AV1_RC_QMODE_SOURCES})
+  list(
+    APPEND AOM_AV1_RC_QMODE_SOURCES "${AOM_ROOT}/av1/ratectrl_qmode_interface.h"
+           "${AOM_ROOT}/av1/ratectrl_qmode_interface.cc"
+           "${AOM_ROOT}/av1/reference_manager.h"
+           "${AOM_ROOT}/av1/reference_manager.cc"
+           "${AOM_ROOT}/av1/ratectrl_qmode.h"
+           "${AOM_ROOT}/av1/ratectrl_qmode.cc" "${AOM_ROOT}/av1/ducky_encode.h"
+           "${AOM_ROOT}/av1/ducky_encode.cc")
+  add_library(av1_rc_qmode OBJECT ${AOM_AV1_RC_QMODE_SOURCES})
   target_link_libraries(av1_rc_qmode ${AOM_LIB_LINK_TYPE} aom)
   if(NOT MSVC AND NOT APPLE)
     target_link_libraries(av1_rc_qmode ${AOM_LIB_LINK_TYPE} m)

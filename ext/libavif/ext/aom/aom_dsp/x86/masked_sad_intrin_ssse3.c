@@ -132,8 +132,8 @@ static INLINE unsigned int masked_sad_ssse3(const uint8_t *src_ptr,
     m_ptr += m_stride;
   }
   // At this point, we have two 32-bit partial SADs in lanes 0 and 2 of 'res'.
-  int32_t sad =
-      _mm_cvtsi128_si32(res) + _mm_cvtsi128_si32(_mm_srli_si128(res, 8));
+  unsigned int sad = (unsigned int)(_mm_cvtsi128_si32(res) +
+                                    _mm_cvtsi128_si32(_mm_srli_si128(res, 8)));
   return sad;
 }
 
@@ -177,8 +177,8 @@ unsigned int aom_masked_sad8xh_ssse3(const uint8_t *src_ptr, int src_stride,
     b_ptr += b_stride * 2;
     m_ptr += m_stride * 2;
   }
-  int32_t sad =
-      _mm_cvtsi128_si32(res) + _mm_cvtsi128_si32(_mm_srli_si128(res, 8));
+  unsigned int sad = (unsigned int)(_mm_cvtsi128_si32(res) +
+                                    _mm_cvtsi128_si32(_mm_srli_si128(res, 8)));
   return sad;
 }
 
@@ -222,8 +222,7 @@ unsigned int aom_masked_sad4xh_ssse3(const uint8_t *src_ptr, int src_stride,
     m_ptr += m_stride * 2;
   }
   // At this point, the SAD is stored in lane 0 of 'res'
-  int32_t sad = _mm_cvtsi128_si32(res);
-  return sad;
+  return (unsigned int)_mm_cvtsi128_si32(res);
 }
 
 // For width a multiple of 8

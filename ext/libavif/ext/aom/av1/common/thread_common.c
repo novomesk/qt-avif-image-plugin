@@ -19,6 +19,7 @@
 #include "av1/common/entropymode.h"
 #include "av1/common/thread_common.h"
 #include "av1/common/reconinter.h"
+#include "av1/common/reconintra.h"
 
 // Set up nsync by width.
 static INLINE int get_sync_range(int width) {
@@ -1124,4 +1125,15 @@ void av1_cdef_frame_mt(AV1_COMMON *const cm, MACROBLOCKD *const xd,
                              cdef_init_fb_row_fn);
   launch_cdef_workers(workers, num_workers);
   sync_cdef_workers(workers, cm, num_workers);
+}
+
+int av1_get_intrabc_extra_top_right_sb_delay(const AV1_COMMON *cm) {
+  // No additional top-right delay when intraBC tool is not enabled.
+  if (!av1_allow_intrabc(cm)) return 0;
+  // Due to the hardware constraints on processing the intraBC tool with row
+  // multithreading, a top-right delay of 3 superblocks of size 128x128 or 5
+  // superblocks of size 64x64 is mandated. However, a minimum top-right delay
+  // of 1 superblock is assured with 'sync_range'. Hence return only the
+  // additional superblock delay when the intraBC tool is enabled.
+  return cm->seq_params->sb_size == BLOCK_128X128 ? 2 : 4;
 }

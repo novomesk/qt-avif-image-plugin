@@ -56,7 +56,7 @@ void aom_paeth_predictor_4x4_ssse3(uint8_t *dst, ptrdiff_t stride,
     const __m128i l16 = _mm_shuffle_epi8(l, rep);
     const __m128i row = paeth_8x1_pred(&l16, &t16, &tl16);
 
-    *(uint32_t *)dst = _mm_cvtsi128_si32(_mm_packus_epi16(row, row));
+    *(int *)dst = _mm_cvtsi128_si32(_mm_packus_epi16(row, row));
     dst += stride;
     rep = _mm_add_epi16(rep, one);
   }
@@ -77,7 +77,7 @@ void aom_paeth_predictor_4x8_ssse3(uint8_t *dst, ptrdiff_t stride,
     const __m128i l16 = _mm_shuffle_epi8(l, rep);
     const __m128i row = paeth_8x1_pred(&l16, &t16, &tl16);
 
-    *(uint32_t *)dst = _mm_cvtsi128_si32(_mm_packus_epi16(row, row));
+    *(int *)dst = _mm_cvtsi128_si32(_mm_packus_epi16(row, row));
     dst += stride;
     rep = _mm_add_epi16(rep, one);
   }
@@ -97,7 +97,7 @@ void aom_paeth_predictor_4x16_ssse3(uint8_t *dst, ptrdiff_t stride,
     const __m128i l16 = _mm_shuffle_epi8(l, rep);
     const __m128i row = paeth_8x1_pred(&l16, &t16, &tl16);
 
-    *(uint32_t *)dst = _mm_cvtsi128_si32(_mm_packus_epi16(row, row));
+    *(int *)dst = _mm_cvtsi128_si32(_mm_packus_epi16(row, row));
     dst += stride;
     rep = _mm_add_epi16(rep, one);
   }
@@ -656,7 +656,7 @@ static INLINE void smooth_pred_4xh(const __m128i *pixel, const __m128i *wh,
     sum = _mm_srai_epi32(sum, 1 + SMOOTH_WEIGHT_LOG2_SCALE);
 
     sum = _mm_shuffle_epi8(sum, gat);
-    *(uint32_t *)dst = _mm_cvtsi128_si32(sum);
+    *(int *)dst = _mm_cvtsi128_si32(sum);
     dst += stride;
 
     rep = _mm_add_epi16(rep, one);
@@ -1071,7 +1071,7 @@ static INLINE void smooth_v_pred_4xh(const __m128i *pixel,
     sum = _mm_add_epi32(sum, pred_round);
     sum = _mm_srai_epi32(sum, SMOOTH_WEIGHT_LOG2_SCALE);
     sum = _mm_shuffle_epi8(sum, gat);
-    *(uint32_t *)dst = _mm_cvtsi128_si32(sum);
+    *(int *)dst = _mm_cvtsi128_si32(sum);
     dst += stride;
     d = _mm_add_epi16(d, inc);
   }
@@ -1417,7 +1417,7 @@ static INLINE void smooth_h_pred_4xh(const __m128i *pixel,
     sum = _mm_srai_epi32(sum, SMOOTH_WEIGHT_LOG2_SCALE);
 
     sum = _mm_shuffle_epi8(sum, gat);
-    *(uint32_t *)dst = _mm_cvtsi128_si32(sum);
+    *(int *)dst = _mm_cvtsi128_si32(sum);
     dst += stride;
 
     rep = _mm_add_epi16(rep, one);

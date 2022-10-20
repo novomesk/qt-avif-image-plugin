@@ -90,9 +90,7 @@ class AV1ExtTileTest
       // size of 64 x 64 pixels(i.e. 1 SB) for <= 4k resolution.
       encoder->Control(AV1E_SET_TILE_COLUMNS, 6);
       encoder->Control(AV1E_SET_TILE_ROWS, 6);
-    }
-
-    if (video->frame() == 1) {
+    } else if (video->frame() == 1) {
       frame_flags_ =
           AOM_EFLAG_NO_UPD_LAST | AOM_EFLAG_NO_UPD_GF | AOM_EFLAG_NO_UPD_ARF;
     }

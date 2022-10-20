@@ -375,7 +375,6 @@ void av1_set_mb_wiener_variance(AV1_COMP *cpi) {
   memset(&mbmi, 0, sizeof(mbmi));
   MB_MODE_INFO *mbmi_ptr = &mbmi;
   xd->mi = &mbmi_ptr;
-  xd->cur_buf = cpi->source;
 
   const SequenceHeader *const seq_params = cm->seq_params;
   if (aom_realloc_frame_buffer(
@@ -783,9 +782,7 @@ void av1_set_mb_ur_variance(AV1_COMP *cpi) {
 void av1_set_mb_ur_variance(AV1_COMP *cpi) {
   const AV1_COMMON *cm = &cpi->common;
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
-  ThreadData *td = &cpi->td;
-  MACROBLOCK *x = &td->mb;
-  MACROBLOCKD *xd = &x->e_mbd;
+  const MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   uint8_t *y_buffer = cpi->source->y_buffer;
   const int y_stride = cpi->source->y_stride;
   const int block_size = cpi->common.seq_params->sb_size;
@@ -794,7 +791,6 @@ void av1_set_mb_ur_variance(AV1_COMP *cpi) {
   const int num_mi_h = mi_size_high[block_size];
   const int num_cols = (mi_params->mi_cols + num_mi_w - 1) / num_mi_w;
   const int num_rows = (mi_params->mi_rows + num_mi_h - 1) / num_mi_h;
-  const int use_hbd = cpi->source->flags & YV12_FLAG_HIGHBITDEPTH;
 
   int *mb_delta_q[2];
   CHECK_MEM_ERROR(cm, mb_delta_q[0],
@@ -832,13 +828,8 @@ void av1_set_mb_ur_variance(AV1_COMP *cpi) {
           buf.stride = y_stride;
 
           unsigned int block_variance;
-          if (use_hbd) {
-            block_variance = av1_high_get_sby_perpixel_variance(
-                cpi, &buf, BLOCK_8X8, xd->bd);
-          } else {
-            block_variance =
-                av1_get_sby_perpixel_variance(cpi, &buf, BLOCK_8X8);
-          }
+          block_variance = av1_get_perpixel_variance_facade(
+              cpi, xd, &buf, BLOCK_8X8, AOM_PLANE_Y);
 
           block_variance = AOMMAX(block_variance, 1);
           var += log((double)block_variance);

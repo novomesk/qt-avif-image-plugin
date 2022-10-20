@@ -889,13 +889,8 @@ static void pick_sb_modes(AV1_COMP *const cpi, TileDataEnc *tile_data,
   // Reset skip mode flag.
   mbmi->skip_mode = 0;
 
-  if (is_cur_buf_hbd(xd)) {
-    x->source_variance = av1_high_get_sby_perpixel_variance(
-        cpi, &x->plane[0].src, bsize, xd->bd);
-  } else {
-    x->source_variance =
-        av1_get_sby_perpixel_variance(cpi, &x->plane[0].src, bsize);
-  }
+  x->source_variance = av1_get_perpixel_variance_facade(
+      cpi, xd, &x->plane[0].src, bsize, AOM_PLANE_Y);
 
   // Initialize default mode evaluation params
   set_mode_eval_params(cpi, x, DEFAULT_EVAL);
@@ -1579,9 +1574,11 @@ static void encode_sb(const AV1_COMP *const cpi, ThreadData *td,
                       : -1;
   const PARTITION_TYPE partition = pc_tree->partitioning;
   const BLOCK_SIZE subsize = get_partition_subsize(bsize, partition);
+#if !CONFIG_REALTIME_ONLY
   int quarter_step = mi_size_wide[bsize] / 4;
   int i;
   BLOCK_SIZE bsize2 = get_partition_subsize(bsize, PARTITION_SPLIT);
+#endif
 
   if (mi_row >= mi_params->mi_rows || mi_col >= mi_params->mi_cols) return;
   if (subsize == BLOCK_INVALID) return;
@@ -1635,6 +1632,7 @@ static void encode_sb(const AV1_COMP *const cpi, ThreadData *td,
                 subsize, pc_tree->split[3], rate);
       break;
 
+#if !CONFIG_REALTIME_ONLY
     case PARTITION_HORZ_A:
       encode_b(cpi, tile_data, td, tp, mi_row, mi_col, dry_run, bsize2,
                partition, pc_tree->horizontala[0], rate);
@@ -1685,6 +1683,7 @@ static void encode_sb(const AV1_COMP *const cpi, ThreadData *td,
                  partition, pc_tree->vertical4[i], rate);
       }
       break;
+#endif
     default: assert(0 && "Invalid partition type."); break;
   }
 
@@ -2127,7 +2126,7 @@ static void encode_b_nonrd(const AV1_COMP *const cpi, TileDataEnc *tile_data,
     if (tile_data->allow_update_cdf) update_stats(&cpi->common, td);
   }
   if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ && mbmi->skip_txfm &&
-      !cpi->rc.rtc_external_ratectrl)
+      !cpi->rc.rtc_external_ratectrl && cm->seg.enabled)
     av1_cyclic_reset_segment_skip(cpi, x, mi_row, mi_col, bsize);
   // TODO(Ravi/Remya): Move this copy function to a better logical place
   // This function will copy the best mode information from block
@@ -2216,12 +2215,9 @@ static void pick_sb_modes_nonrd(AV1_COMP *const cpi, TileDataEnc *tile_data,
     p[i].txb_entropy_ctx = ctx->txb_entropy_ctx[i];
   }
   for (i = 0; i < 2; ++i) pd[i].color_index_map = ctx->color_index_map[i];
-  if (is_cur_buf_hbd(xd)) {
-    x->source_variance = av1_high_get_sby_perpixel_variance(
-        cpi, &x->plane[0].src, bsize, xd->bd);
-  } else {
-    x->source_variance =
-        av1_get_sby_perpixel_variance(cpi, &x->plane[0].src, bsize);
+  if (!x->force_zeromv_skip) {
+    x->source_variance = av1_get_perpixel_variance_facade(
+        cpi, xd, &x->plane[0].src, bsize, AOM_PLANE_Y);
   }
   // Save rdmult before it might be changed, so it can be restored later.
   const int orig_rdmult = x->rdmult;
@@ -2368,7 +2364,7 @@ static void direct_partition_merging(AV1_COMP *cpi, ThreadData *td,
   this_mi[0]->partition = PARTITION_NONE;
   this_mi[0]->skip_txfm = 1;
 
-  // TODO(yunqing): functions called below can be optimized with
+  // TODO(yunqing): functions called below can be optimized by
   // removing unrelated operations.
   av1_set_offsets_without_segment_id(cpi, &tile_data->tile_info, x, mi_row,
                                      mi_col, bsize);
@@ -4088,7 +4084,13 @@ static void split_partition_search(
           !(partition_none_valid && partition_none_better);
     }
   }
-  av1_restore_context(x, x_ctx, mi_row, mi_col, bsize, av1_num_planes(cm));
+  // Restore the context for the following cases:
+  // 1) Current block size not more than maximum partition size as dry run
+  // encode happens for these cases
+  // 2) Current block size same as superblock size as the final encode
+  // happens for this case
+  if (bsize <= x->sb_enc.max_partition_size || bsize == cm->seq_params->sb_size)
+    av1_restore_context(x, x_ctx, mi_row, mi_col, bsize, av1_num_planes(cm));
 }
 
 // The max number of nodes in the partition tree.
@@ -4897,6 +4899,22 @@ bool av1_rd_partition_search(AV1_COMP *const cpi, ThreadData *td,
   return true;
 }
 
+static AOM_INLINE bool should_do_dry_run_encode_for_current_block(
+    BLOCK_SIZE sb_size, BLOCK_SIZE max_partition_size, int curr_block_index,
+    BLOCK_SIZE bsize) {
+  if (bsize > max_partition_size) return false;
+
+  // Enable the reconstruction with dry-run for the 4th sub-block only if its
+  // parent block's reconstruction with dry-run is skipped. If
+  // max_partition_size is the same as immediate split of superblock, then avoid
+  // reconstruction of the 4th sub-block, as this data is not consumed.
+  if (curr_block_index != 3) return true;
+
+  const BLOCK_SIZE sub_sb_size =
+      get_partition_subsize(sb_size, PARTITION_SPLIT);
+  return bsize == max_partition_size && sub_sb_size != max_partition_size;
+}
+
 static void log_sub_block_var(const AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bs,
                               double *var_min, double *var_max) {
   // This functions returns a the minimum and maximum log variances for 4x4
@@ -5203,13 +5221,8 @@ BEGIN_PARTITION_SEARCH:
 
   if (pb_source_variance == UINT_MAX) {
     av1_setup_src_planes(x, cpi->source, mi_row, mi_col, num_planes, bsize);
-    if (is_cur_buf_hbd(xd)) {
-      pb_source_variance = av1_high_get_sby_perpixel_variance(
-          cpi, &x->plane[0].src, bsize, xd->bd);
-    } else {
-      pb_source_variance =
-          av1_get_sby_perpixel_variance(cpi, &x->plane[0].src, bsize);
-    }
+    pb_source_variance = av1_get_perpixel_variance_facade(
+        cpi, xd, &x->plane[0].src, bsize, AOM_PLANE_Y);
   }
 
   assert(IMPLIES(!cpi->oxcf.part_cfg.enable_rect_partitions,
@@ -5325,9 +5338,7 @@ BEGIN_PARTITION_SEARCH:
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, encode_sb_time);
 #endif
-  // If a valid partition is found and reconstruction is required for future
-  // sub-blocks in the same group.
-  if (part_search_state.found_best_partition && pc_tree->index != 3) {
+  if (part_search_state.found_best_partition) {
     if (bsize == cm->seq_params->sb_size) {
       // Encode the superblock.
       const int emit_output = multi_pass_mode != SB_DRY_PASS;
@@ -5345,7 +5356,9 @@ BEGIN_PARTITION_SEARCH:
       // Dealloc the whole PC_TREE after a superblock is done.
       av1_free_pc_tree_recursive(pc_tree, num_planes, 0, 0);
       pc_tree_dealloc = 1;
-    } else {
+    } else if (should_do_dry_run_encode_for_current_block(
+                   cm->seq_params->sb_size, x->sb_enc.max_partition_size,
+                   pc_tree->index, bsize)) {
       // Encode the smaller blocks in DRY_RUN mode.
       encode_sb(cpi, td, tile_data, tp, mi_row, mi_col, DRY_RUN_NORMAL, bsize,
                 pc_tree, NULL);

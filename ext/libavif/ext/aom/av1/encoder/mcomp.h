@@ -22,40 +22,6 @@
 extern "C" {
 #endif
 
-// The maximum number of steps in a step search given the largest
-// allowed initial step
-#define MAX_MVSEARCH_STEPS 11
-// Max full pel mv specified in the unit of full pixel
-// Enable the use of motion vector in range [-1023, 1023].
-#define MAX_FULL_PEL_VAL ((1 << (MAX_MVSEARCH_STEPS - 1)) - 1)
-// Maximum size of the first step in full pel units
-#define MAX_FIRST_STEP (1 << (MAX_MVSEARCH_STEPS - 1))
-
-#define SEARCH_RANGE_8P 3
-#define SEARCH_GRID_STRIDE_8P (2 * SEARCH_RANGE_8P + 1)
-#define SEARCH_GRID_CENTER_8P \
-  (SEARCH_RANGE_8P * SEARCH_GRID_STRIDE_8P + SEARCH_RANGE_8P)
-
-// motion search site
-typedef struct search_site {
-  FULLPEL_MV mv;
-  int offset;
-} search_site;
-
-typedef struct search_site_config {
-  search_site site[MAX_MVSEARCH_STEPS * 2][16 + 1];
-  // Number of search steps.
-  int num_search_steps;
-  int searches_per_step[MAX_MVSEARCH_STEPS * 2];
-  int radius[MAX_MVSEARCH_STEPS * 2];
-  int stride;
-} search_site_config;
-
-typedef struct {
-  FULLPEL_MV coord;
-  int coord_offset;
-} search_neighbors;
-
 struct AV1_COMP;
 struct SPEED_FEATURES;
 
@@ -130,39 +96,6 @@ static INLINE void av1_set_ms_compound_refs(MSBuffers *ms_buffers,
 // =============================================================================
 //  Fullpixel Motion Search
 // =============================================================================
-enum {
-  // Search 8-points in the radius grid around center, up to 11 search stages.
-  DIAMOND = 0,
-  // Search 12-points in the radius/tan_radius grid around center,
-  // up to 15 search stages.
-  NSTEP = 1,
-  // Search 8-points in the radius grid around center, up to 16 search stages.
-  NSTEP_8PT = 2,
-  // Search 8-points in the radius grid around center, upto 11 search stages
-  // with clamping of search radius.
-  CLAMPED_DIAMOND = 3,
-  // Search maximum 8-points in the radius grid around center,
-  // up to 11 search stages. First stage consists of 8 search points
-  // and the rest with 6 search points each in hex shape.
-  HEX = 4,
-  // Search maximum 8-points in the radius grid around center,
-  // up to 11 search stages. First stage consists of 4 search
-  // points and the rest with 8 search points each.
-  BIGDIA = 5,
-  // Search 8-points in the square grid around center, up to 11 search stages.
-  SQUARE = 6,
-  // HEX search with up to 2 stages.
-  FAST_HEX = 7,
-  // BIGDIA search with up to 2 stages.
-  FAST_DIAMOND = 8,
-  // BIGDIA search with up to 3 stages.
-  FAST_BIGDIA = 9,
-  // Total number of search methods.
-  NUM_SEARCH_METHODS,
-  // Number of distinct search methods.
-  NUM_DISTINCT_SEARCH_METHODS = SQUARE + 1,
-} UENUM1BYTE(SEARCH_METHODS);
-
 // This struct holds fullpixel motion search parameters that should be constant
 // during the search
 typedef struct {
@@ -237,26 +170,40 @@ void av1_init_motion_compensation_hex(search_site_config *cfg, int stride,
 void av1_init_motion_compensation_square(search_site_config *cfg, int stride,
                                          int level);
 
+/*! Function pointer to search site config initialization of different search
+ * method functions. */
+typedef void (*av1_init_search_site_config)(search_site_config *cfg, int stride,
+                                            int level);
+
+/*! Array of function pointer used to set the motion search config. */
+static const av1_init_search_site_config
+    av1_init_motion_compensation[NUM_DISTINCT_SEARCH_METHODS] = {
+      av1_init_dsmotion_compensation,     av1_init_motion_compensation_nstep,
+      av1_init_motion_compensation_nstep, av1_init_dsmotion_compensation,
+      av1_init_motion_compensation_hex,   av1_init_motion_compensation_bigdia,
+      av1_init_motion_compensation_square
+    };
+
+// Array to inform which all search methods are having
+// same candidates and different in number of search steps.
+static const SEARCH_METHODS search_method_lookup[NUM_SEARCH_METHODS] = {
+  DIAMOND,          // DIAMOND
+  NSTEP,            // NSTEP
+  NSTEP_8PT,        // NSTEP_8PT
+  CLAMPED_DIAMOND,  // CLAMPED_DIAMOND
+  HEX,              // HEX
+  BIGDIA,           // BIGDIA
+  SQUARE,           // SQUARE
+  HEX,              // FAST_HEX
+  BIGDIA,           // FAST_DIAMOND
+  BIGDIA            // FAST_BIGDIA
+};
+
 // Mv beyond the range do not produce new/different prediction block.
 static INLINE void av1_set_mv_search_method(
     FULLPEL_MOTION_SEARCH_PARAMS *ms_params,
     const search_site_config search_sites[NUM_DISTINCT_SEARCH_METHODS],
     SEARCH_METHODS search_method) {
-  // Array to inform which all search methods are having
-  // same candidates and different in number of search steps.
-  static const SEARCH_METHODS search_method_lookup[NUM_SEARCH_METHODS] = {
-    DIAMOND,          // DIAMOND
-    NSTEP,            // NSTEP
-    NSTEP_8PT,        // NSTEP_8PT
-    CLAMPED_DIAMOND,  // CLAMPED_DIAMOND
-    HEX,              // HEX
-    BIGDIA,           // BIGDIA
-    SQUARE,           // SQUARE
-    HEX,              // FAST_HEX
-    BIGDIA,           // FAST_DIAMOND
-    BIGDIA            // FAST_BIGDIA
-  };
-
   ms_params->search_method = search_method;
   ms_params->search_sites =
       &search_sites[search_method_lookup[ms_params->search_method]];

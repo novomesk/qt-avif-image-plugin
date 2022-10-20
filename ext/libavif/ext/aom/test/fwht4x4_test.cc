@@ -192,10 +192,11 @@ using std::make_tuple;
 INSTANTIATE_TEST_SUITE_P(
     C, Trans4x4WHT,
     ::testing::Values(make_tuple(&av1_highbd_fwht4x4_c, &iwht4x4_10_c, DCT_DCT,
-                                 AOM_BITS_10, 16, static_cast<FdctFunc>(NULL)),
+                                 AOM_BITS_10, 16,
+                                 static_cast<FdctFunc>(nullptr)),
                       make_tuple(&av1_highbd_fwht4x4_c, &iwht4x4_12_c, DCT_DCT,
                                  AOM_BITS_12, 16,
-                                 static_cast<FdctFunc>(NULL))));
+                                 static_cast<FdctFunc>(nullptr))));
 
 #if HAVE_SSE4_1
 
@@ -203,10 +204,10 @@ INSTANTIATE_TEST_SUITE_P(
     SSE4_1, Trans4x4WHT,
     ::testing::Values(make_tuple(&av1_highbd_fwht4x4_sse4_1, &iwht4x4_10_sse4_1,
                                  DCT_DCT, AOM_BITS_10, 16,
-                                 static_cast<FdctFunc>(NULL)),
+                                 static_cast<FdctFunc>(nullptr)),
                       make_tuple(&av1_highbd_fwht4x4_sse4_1, &iwht4x4_12_sse4_1,
                                  DCT_DCT, AOM_BITS_12, 16,
-                                 static_cast<FdctFunc>(NULL))));
+                                 static_cast<FdctFunc>(nullptr))));
 
 #endif  // HAVE_SSE4_1
 

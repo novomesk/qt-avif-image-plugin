@@ -934,14 +934,18 @@ static void update_firstpass_stats(AV1_COMP *cpi,
   if (cpi->ppi->twopass.stats_buf_ctx->total_stats != NULL) {
     av1_accumulate_stats(cpi->ppi->twopass.stats_buf_ctx->total_stats, &fps);
   }
-  /*In the case of two pass, first pass uses it as a circular buffer,
-   * when LAP is enabled it is used as a linear buffer*/
   twopass->stats_buf_ctx->stats_in_end++;
-  if ((cpi->oxcf.pass == AOM_RC_FIRST_PASS) &&
-      (twopass->stats_buf_ctx->stats_in_end >=
-       twopass->stats_buf_ctx->stats_in_buf_end)) {
-    twopass->stats_buf_ctx->stats_in_end =
-        twopass->stats_buf_ctx->stats_in_start;
+  // When ducky encode is on, we always use linear buffer for stats_buf_ctx.
+  if (cpi->use_ducky_encode == 0) {
+    // TODO(angiebird): Figure out why first pass uses circular buffer.
+    /* In the case of two pass, first pass uses it as a circular buffer,
+     * when LAP is enabled it is used as a linear buffer*/
+    if ((cpi->oxcf.pass == AOM_RC_FIRST_PASS) &&
+        (twopass->stats_buf_ctx->stats_in_end >=
+         twopass->stats_buf_ctx->stats_in_buf_end)) {
+      twopass->stats_buf_ctx->stats_in_end =
+          twopass->stats_buf_ctx->stats_in_start;
+    }
   }
 }
 
@@ -1232,6 +1236,8 @@ void av1_first_pass(AV1_COMP *cpi, const int64_t ts_duration) {
   // Detect if the key frame is screen content type.
   if (frame_is_intra_only(cm)) {
     FeatureFlags *const features = &cm->features;
+    assert(cpi->source != NULL);
+    xd->cur_buf = cpi->source;
     av1_set_screen_content_options(cpi, features);
   }
 

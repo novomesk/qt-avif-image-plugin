@@ -72,10 +72,6 @@ struct CYCLIC_REFRESH {
    */
   int rdmult;
   /*!
-   * Count of zero motion vectors
-   */
-  int cnt_zeromv;
-  /*!
    * Cyclic refresh map.
    */
   int8_t *map;
@@ -109,6 +105,7 @@ struct CYCLIC_REFRESH {
   int apply_cyclic_refresh;
   int skip_over4x4;
   int counter_encode_maxq_scene_change;
+  int use_block_sad_scene_det;
   /*!\endcond */
 };
 
@@ -247,21 +244,6 @@ void av1_init_cyclic_refresh_counters(MACROBLOCK *const x);
  */
 void av1_accumulate_cyclic_refresh_counters(
     CYCLIC_REFRESH *const cyclic_refresh, const MACROBLOCK *const x);
-
-/*!\brief Update stats after encoding frame.
- *
- * Update the number of block encoded with segment 1 and 2,
- * and update the number of blocks encoded with small/zero motion.
- *
- * \ingroup cyclic_refresh
- * \callgraph
- * \callergraph
- *
- * \param[in]   cpi       Top level encoder structure
- *
- * \return Updates the \c cpi->cyclic_refresh with the new stats.
- */
-void av1_cyclic_refresh_postencode(struct AV1_COMP *const cpi);
 
 /*!\brief Set golden frame update interval nased on cyclic refresh.
  *

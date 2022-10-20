@@ -13,6 +13,7 @@
 #include "config/aom_config.h"
 #include "config/aom_dsp_rtcd.h"
 #include "aom/aom_integer.h"
+#include "aom_dsp/arm/sum_neon.h"
 
 unsigned int aom_sad8x16_neon(const uint8_t *src_ptr, int src_stride,
                               const uint8_t *ref_ptr, int ref_stride) {
@@ -107,26 +108,6 @@ unsigned int aom_sad16x8_neon(const uint8_t *src_ptr, int src_stride,
   return vget_lane_u32(d5, 0);
 }
 
-static INLINE unsigned int horizontal_long_add_16x8(const uint16x8_t vec_lo,
-                                                    const uint16x8_t vec_hi) {
-  const uint32x4_t vec_l_lo =
-      vaddl_u16(vget_low_u16(vec_lo), vget_high_u16(vec_lo));
-  const uint32x4_t vec_l_hi =
-      vaddl_u16(vget_low_u16(vec_hi), vget_high_u16(vec_hi));
-  const uint32x4_t a = vaddq_u32(vec_l_lo, vec_l_hi);
-  const uint64x2_t b = vpaddlq_u32(a);
-  const uint32x2_t c = vadd_u32(vreinterpret_u32_u64(vget_low_u64(b)),
-                                vreinterpret_u32_u64(vget_high_u64(b)));
-  return vget_lane_u32(c, 0);
-}
-static INLINE unsigned int horizontal_add_16x8(const uint16x8_t vec_16x8) {
-  const uint32x4_t a = vpaddlq_u16(vec_16x8);
-  const uint64x2_t b = vpaddlq_u32(a);
-  const uint32x2_t c = vadd_u32(vreinterpret_u32_u64(vget_low_u64(b)),
-                                vreinterpret_u32_u64(vget_high_u64(b)));
-  return vget_lane_u32(c, 0);
-}
-
 unsigned int aom_sad64x64_neon(const uint8_t *src, int src_stride,
                                const uint8_t *ref, int ref_stride) {
   int i;
@@ -160,7 +141,7 @@ unsigned int aom_sad64x64_neon(const uint8_t *src, int src_stride,
     vec_accum_hi = vabal_u8(vec_accum_hi, vget_high_u8(vec_src_48),
                             vget_high_u8(vec_ref_48));
   }
-  return horizontal_long_add_16x8(vec_accum_lo, vec_accum_hi);
+  return horizontal_long_add_u16x8(vec_accum_lo, vec_accum_hi);
 }
 
 unsigned int aom_sad128x128_neon(const uint8_t *src, int src_stride,
@@ -256,7 +237,7 @@ unsigned int aom_sad32x32_neon(const uint8_t *src, int src_stride,
     vec_accum_hi = vabal_u8(vec_accum_hi, vget_high_u8(vec_src_16),
                             vget_high_u8(vec_ref_16));
   }
-  return horizontal_add_16x8(vaddq_u16(vec_accum_lo, vec_accum_hi));
+  return horizontal_add_u16x8(vaddq_u16(vec_accum_lo, vec_accum_hi));
 }
 
 unsigned int aom_sad16x16_neon(const uint8_t *src, int src_stride,
@@ -275,7 +256,7 @@ unsigned int aom_sad16x16_neon(const uint8_t *src, int src_stride,
     vec_accum_hi =
         vabal_u8(vec_accum_hi, vget_high_u8(vec_src), vget_high_u8(vec_ref));
   }
-  return horizontal_add_16x8(vaddq_u16(vec_accum_lo, vec_accum_hi));
+  return horizontal_add_u16x8(vaddq_u16(vec_accum_lo, vec_accum_hi));
 }
 
 unsigned int aom_sad8x8_neon(const uint8_t *src, int src_stride,
@@ -290,7 +271,7 @@ unsigned int aom_sad8x8_neon(const uint8_t *src, int src_stride,
     ref += ref_stride;
     vec_accum = vabal_u8(vec_accum, vec_src, vec_ref);
   }
-  return horizontal_add_16x8(vec_accum);
+  return horizontal_add_u16x8(vec_accum);
 }
 
 static INLINE unsigned int sad128xh_neon(const uint8_t *src_ptr, int src_stride,
@@ -343,7 +324,7 @@ static INLINE unsigned int sad128xh_neon(const uint8_t *src_ptr, int src_stride,
     src_ptr += src_stride;
     ref_ptr += ref_stride;
 
-    sum += horizontal_add_16x8(q3);
+    sum += horizontal_add_u16x8(q3);
   }
 
   return sum;
@@ -379,7 +360,7 @@ static INLINE unsigned int sad64xh_neon(const uint8_t *src_ptr, int src_stride,
     src_ptr += src_stride;
     ref_ptr += ref_stride;
 
-    sum += horizontal_add_16x8(q3);
+    sum += horizontal_add_u16x8(q3);
   }
 
   return sum;
@@ -402,7 +383,7 @@ static INLINE unsigned int sad32xh_neon(const uint8_t *src_ptr, int src_stride,
     q2 = vabdq_u8(q0, q1);
     q3 = vpadalq_u8(q3, q2);
 
-    sum += horizontal_add_16x8(q3);
+    sum += horizontal_add_u16x8(q3);
 
     src_ptr += src_stride;
     ref_ptr += ref_stride;
@@ -447,7 +428,7 @@ static INLINE unsigned int sad8xh_neon(const uint8_t *src_ptr, int src_stride,
     ref_ptr += ref_stride;
     q3 = vabal_u8(q3, q0, q1);
   }
-  return horizontal_add_16x8(q3);
+  return horizontal_add_u16x8(q3);
 }
 
 static INLINE unsigned int sad4xh_neon(const uint8_t *src_ptr, int src_stride,
@@ -474,7 +455,7 @@ static INLINE unsigned int sad4xh_neon(const uint8_t *src_ptr, int src_stride,
 
     q3 = vabal_u8(q3, vreinterpret_u8_u32(q0), vreinterpret_u8_u32(q1));
   }
-  return horizontal_add_16x8(q3);
+  return horizontal_add_u16x8(q3);
 }
 
 #define FSADS128_H(h)                                                    \

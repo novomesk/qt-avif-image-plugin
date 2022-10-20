@@ -23,6 +23,7 @@
 #include "av1/av1_iface_common.h"
 #include "av1/encoder/bitstream.h"
 #include "av1/encoder/encoder.h"
+#include "av1/encoder/encoder_utils.h"
 #include "av1/encoder/ethread.h"
 #include "av1/encoder/external_partition.h"
 #include "av1/encoder/firstpass.h"
@@ -38,9 +39,7 @@ struct av1_extracfg {
   unsigned int sharpness;
   unsigned int static_thresh;
   unsigned int row_mt;
-#if CONFIG_FRAME_PARALLEL_ENCODE
   unsigned int fp_mt;
-#endif
   unsigned int tile_columns;  // log2 number of tile columns
   unsigned int tile_rows;     // log2 number of tile rows
   unsigned int enable_tpl_model;
@@ -100,7 +99,7 @@ struct av1_extracfg {
   int film_grain_test_vector;
   const char *film_grain_table_filename;
   unsigned int motion_vector_unit_test;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   unsigned int fpmt_unit_test;
 #endif
   unsigned int cdf_update_mode;
@@ -206,16 +205,14 @@ struct av1_extracfg {
 // mv_cost_upd_freq: COST_UPD_OFF
 // dv_cost_upd_freq: COST_UPD_OFF
 static const struct av1_extracfg default_extra_cfg = {
-  7,  // cpu_used
-  1,  // enable_auto_alt_ref
-  0,  // enable_auto_bwd_ref
-  0,  // noise_sensitivity
-  0,  // sharpness
-  0,  // static_thresh
-  1,  // row_mt
-#if CONFIG_FRAME_PARALLEL_ENCODE
-  0,  // fp_mt
-#endif
+  7,              // cpu_used
+  1,              // enable_auto_alt_ref
+  0,              // enable_auto_bwd_ref
+  0,              // noise_sensitivity
+  0,              // sharpness
+  0,              // static_thresh
+  1,              // row_mt
+  0,              // fp_mt
   0,              // tile_columns
   0,              // tile_rows
   0,              // enable_tpl_model
@@ -273,7 +270,7 @@ static const struct av1_extracfg default_extra_cfg = {
   0,                            // film_grain_test_vector
   NULL,                         // film_grain_table_filename
   0,                            // motion_vector_unit_test
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   0,  // fpmt_unit_test
 #endif
   1,    // CDF update mode
@@ -361,9 +358,7 @@ static const struct av1_extracfg default_extra_cfg = {
   0,              // sharpness
   0,              // static_thresh
   1,              // row_mt
-#if CONFIG_FRAME_PARALLEL_ENCODE
   0,              // fp_mt
-#endif
   0,              // tile_columns
   0,              // tile_rows
   1,              // enable_tpl_model
@@ -421,7 +416,7 @@ static const struct av1_extracfg default_extra_cfg = {
   0,                            // film_grain_test_vector
   NULL,                         // film_grain_table_filename
   0,                            // motion_vector_unit_test
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   0,                            // fpmt_unit_test
 #endif
   1,                            // CDF update mode
@@ -540,7 +535,7 @@ static INLINE int gcd(int64_t a, int b) {
   return (int)a;
 }
 
-static INLINE void reduce_ratio(aom_rational64_t *ratio) {
+void av1_reduce_ratio(aom_rational64_t *ratio) {
   const int denom = gcd(ratio->num, ratio->den);
   ratio->num /= denom;
   ratio->den /= denom;
@@ -617,8 +612,8 @@ static aom_codec_err_t allocate_and_set_string(const char *src,
 static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
                                        const aom_codec_enc_cfg_t *cfg,
                                        const struct av1_extracfg *extra_cfg) {
-  RANGE_CHECK(cfg, g_w, 1, 65535);  // 16 bits available
-  RANGE_CHECK(cfg, g_h, 1, 65535);  // 16 bits available
+  RANGE_CHECK(cfg, g_w, 1, 65536);  // 16 bits available
+  RANGE_CHECK(cfg, g_h, 1, 65536);  // 16 bits available
   RANGE_CHECK(cfg, g_timebase.den, 1, 1000000000);
   RANGE_CHECK(cfg, g_timebase.num, 1, cfg->g_timebase.den);
   RANGE_CHECK_HI(cfg, g_profile, MAX_PROFILES - 1);
@@ -681,7 +676,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK_HI(extra_cfg, cdf_update_mode, 2);
 
   RANGE_CHECK_HI(extra_cfg, motion_vector_unit_test, 2);
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   RANGE_CHECK_HI(extra_cfg, fpmt_unit_test, 1);
 #endif
   RANGE_CHECK_HI(extra_cfg, sb_multipass_unit_test, 1);
@@ -697,9 +692,7 @@ static aom_codec_err_t validate_config(aom_codec_alg_priv_t *ctx,
   RANGE_CHECK_HI(extra_cfg, single_tile_decoding, 1);
 
   RANGE_CHECK_HI(extra_cfg, row_mt, 1);
-#if CONFIG_FRAME_PARALLEL_ENCODE
   RANGE_CHECK_HI(extra_cfg, fp_mt, 1);
-#endif
 
   RANGE_CHECK_HI(extra_cfg, tile_columns, 6);
   RANGE_CHECK_HI(extra_cfg, tile_rows, 6);
@@ -898,7 +891,7 @@ static aom_codec_err_t validate_img(aom_codec_alg_priv_t *ctx,
   return AOM_CODEC_OK;
 }
 
-static int get_image_bps(const aom_image_t *img) {
+int av1_get_image_bps(const aom_image_t *img) {
   switch (img->fmt) {
     case AOM_IMG_FMT_YV12:
     case AOM_IMG_FMT_NV12:
@@ -1301,16 +1294,23 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->ref_frm_cfg.enable_onesided_comp = extra_cfg->enable_onesided_comp;
 
   oxcf->row_mt = extra_cfg->row_mt;
-#if CONFIG_FRAME_PARALLEL_ENCODE
   oxcf->fp_mt = extra_cfg->fp_mt;
-#endif
 
   // Set motion mode related configuration.
   oxcf->motion_mode_cfg.enable_obmc = extra_cfg->enable_obmc;
   oxcf->motion_mode_cfg.enable_warped_motion = extra_cfg->enable_warped_motion;
 #if !CONFIG_REALTIME_ONLY
-  oxcf->motion_mode_cfg.allow_warped_motion =
-      (extra_cfg->allow_warped_motion & extra_cfg->enable_warped_motion);
+  if (cfg->g_usage == AOM_USAGE_REALTIME && oxcf->speed >= 7 &&
+      oxcf->tune_cfg.content == AOM_CONTENT_SCREEN) {
+    // TODO(marpan): warped motion is causing a crash for RT mode with screen
+    // in nonrd (speed >= 7), for non-realtime build.
+    // Re-enable/allow when the issue is fixed.
+    oxcf->motion_mode_cfg.enable_warped_motion = 0;
+    oxcf->motion_mode_cfg.allow_warped_motion = 0;
+  } else {
+    oxcf->motion_mode_cfg.allow_warped_motion =
+        (extra_cfg->allow_warped_motion & extra_cfg->enable_warped_motion);
+  }
 #else
   oxcf->motion_mode_cfg.allow_warped_motion =
       (cfg->g_usage == AOM_USAGE_REALTIME && oxcf->speed >= 7)
@@ -1407,14 +1407,9 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->unit_test_cfg.sb_multipass_unit_test =
       extra_cfg->sb_multipass_unit_test;
 
-  // For allintra encoding mode, inter-frame motion search is not applicable and
-  // the intraBC motion vectors are restricted within the tile boundaries. Hence
-  // a smaller frame border size (AOM_ENC_ALLINTRA_BORDER) is used in this case.
   oxcf->border_in_pixels =
-      (resize_cfg->resize_mode || superres_cfg->superres_mode)
-          ? AOM_BORDER_IN_PIXELS
-          : (oxcf->kf_cfg.key_freq_max == 0) ? AOM_ENC_ALLINTRA_BORDER
-                                             : AOM_ENC_NO_SCALE_BORDER;
+      av1_get_enc_border_size(av1_is_resize_needed(oxcf),
+                              (oxcf->kf_cfg.key_freq_max == 0), BLOCK_128X128);
   memcpy(oxcf->target_seq_level_idx, extra_cfg->target_seq_level_idx,
          sizeof(oxcf->target_seq_level_idx));
   oxcf->tier_mask = extra_cfg->tier_mask;
@@ -1424,6 +1419,13 @@ static aom_codec_err_t set_encoder_config(AV1EncoderConfig *oxcf,
   oxcf->strict_level_conformance = extra_cfg->strict_level_conformance;
 
   return AOM_CODEC_OK;
+}
+
+AV1EncoderConfig av1_get_encoder_config(const aom_codec_enc_cfg_t *cfg) {
+  AV1EncoderConfig oxcf;
+  struct av1_extracfg extra_cfg = default_extra_cfg;
+  set_encoder_config(&oxcf, cfg, &extra_cfg);
+  return oxcf;
 }
 
 static aom_codec_err_t encoder_set_config(aom_codec_alg_priv_t *ctx,
@@ -1464,15 +1466,10 @@ static aom_codec_err_t encoder_set_config(aom_codec_alg_priv_t *ctx,
     force_key |= ctx->ppi->seq_params.profile != ctx->oxcf.profile;
     bool is_sb_size_changed = false;
     av1_change_config_seq(ctx->ppi, &ctx->oxcf, &is_sb_size_changed);
-#if CONFIG_FRAME_PARALLEL_ENCODE
-    int i;
-    for (i = 0; i < ctx->ppi->num_fp_contexts; i++) {
+    for (int i = 0; i < ctx->ppi->num_fp_contexts; i++) {
       av1_change_config(ctx->ppi->parallel_cpi[i], &ctx->oxcf,
                         is_sb_size_changed);
     }
-#else
-    av1_change_config(ctx->ppi->cpi, &ctx->oxcf, is_sb_size_changed);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
     if (ctx->ppi->cpi_lap != NULL) {
       av1_change_config(ctx->ppi->cpi_lap, &ctx->oxcf, is_sb_size_changed);
     }
@@ -1525,20 +1522,13 @@ static aom_codec_err_t update_extra_cfg(aom_codec_alg_priv_t *ctx,
   if (res == AOM_CODEC_OK) {
     ctx->extra_cfg = *extra_cfg;
     set_encoder_config(&ctx->oxcf, &ctx->cfg, &ctx->extra_cfg);
-#if CONFIG_FRAME_PARALLEL_ENCODE
     av1_check_fpmt_config(ctx->ppi, &ctx->oxcf);
-#endif
     bool is_sb_size_changed = false;
     av1_change_config_seq(ctx->ppi, &ctx->oxcf, &is_sb_size_changed);
-#if CONFIG_FRAME_PARALLEL_ENCODE
-    int i;
-    for (i = 0; i < ctx->ppi->num_fp_contexts; i++) {
+    for (int i = 0; i < ctx->ppi->num_fp_contexts; i++) {
       av1_change_config(ctx->ppi->parallel_cpi[i], &ctx->oxcf,
                         is_sb_size_changed);
     }
-#else
-    av1_change_config(ctx->ppi->cpi, &ctx->oxcf, is_sb_size_changed);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
     if (ctx->ppi->cpi_lap != NULL) {
       av1_change_config(ctx->ppi->cpi_lap, &ctx->oxcf, is_sb_size_changed);
     }
@@ -2150,9 +2140,15 @@ static aom_codec_err_t ctrl_set_enable_tx_size_search(aom_codec_alg_priv_t *ctx,
 
 static aom_codec_err_t ctrl_set_quant_b_adapt(aom_codec_alg_priv_t *ctx,
                                               va_list args) {
+#if CONFIG_REALTIME_ONLY
+  (void)ctx;
+  (void)args;
+  return AOM_CODEC_INCAPABLE;
+#else
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.quant_b_adapt = CAST(AV1E_SET_QUANT_B_ADAPT, args);
   return update_extra_cfg(ctx, &extra_cfg);
+#endif
 }
 
 static aom_codec_err_t ctrl_set_vbr_corpus_complexity_lap(
@@ -2348,7 +2344,7 @@ static aom_codec_err_t ctrl_enable_motion_vector_unit_test(
 
 static aom_codec_err_t ctrl_enable_fpmt_unit_test(aom_codec_alg_priv_t *ctx,
                                                   va_list args) {
-#if !(CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST)
+#if !CONFIG_FPMT_TEST
   (void)args;
   (void)ctx;
   return AOM_CODEC_INCAPABLE;
@@ -2431,9 +2427,9 @@ static aom_codec_err_t ctrl_set_rtc_external_rc(aom_codec_alg_priv_t *ctx,
 }
 
 #if !CONFIG_REALTIME_ONLY
-static aom_codec_err_t create_stats_buffer(FIRSTPASS_STATS **frame_stats_buffer,
-                                           STATS_BUFFER_CTX *stats_buf_context,
-                                           int num_lap_buffers) {
+aom_codec_err_t av1_create_stats_buffer(FIRSTPASS_STATS **frame_stats_buffer,
+                                        STATS_BUFFER_CTX *stats_buf_context,
+                                        int num_lap_buffers) {
   aom_codec_err_t res = AOM_CODEC_OK;
 
   int size = get_stats_buf_size(num_lap_buffers, MAX_LAG_BUFFERS);
@@ -2456,9 +2452,12 @@ static aom_codec_err_t create_stats_buffer(FIRSTPASS_STATS **frame_stats_buffer,
 }
 #endif
 
-static aom_codec_err_t create_context_and_bufferpool(
-    AV1_PRIMARY *ppi, AV1_COMP **p_cpi, BufferPool **p_buffer_pool,
-    AV1EncoderConfig *oxcf, COMPRESSOR_STAGE stage, int lap_lag_in_frames) {
+aom_codec_err_t av1_create_context_and_bufferpool(AV1_PRIMARY *ppi,
+                                                  AV1_COMP **p_cpi,
+                                                  BufferPool **p_buffer_pool,
+                                                  const AV1EncoderConfig *oxcf,
+                                                  COMPRESSOR_STAGE stage,
+                                                  int lap_lag_in_frames) {
   aom_codec_err_t res = AOM_CODEC_OK;
 
   if (*p_buffer_pool == NULL) {
@@ -2479,11 +2478,6 @@ static aom_codec_err_t create_context_and_bufferpool(
 }
 
 static aom_codec_err_t ctrl_set_fp_mt(aom_codec_alg_priv_t *ctx, va_list args) {
-#if !CONFIG_FRAME_PARALLEL_ENCODE
-  (void)args;
-  (void)ctx;
-  return AOM_CODEC_INCAPABLE;
-#else
   struct av1_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.fp_mt = CAST(AV1E_SET_FP_MT, args);
   const aom_codec_err_t result = update_extra_cfg(ctx, &extra_cfg);
@@ -2494,7 +2488,7 @@ static aom_codec_err_t ctrl_set_fp_mt(aom_codec_alg_priv_t *ctx, va_list args) {
     if (num_fp_contexts > 1) {
       int i;
       for (i = 1; i < num_fp_contexts; i++) {
-        int res = create_context_and_bufferpool(
+        int res = av1_create_context_and_bufferpool(
             ctx->ppi, &ctx->ppi->parallel_cpi[i], &ctx->buffer_pool, &ctx->oxcf,
             ENCODE_STAGE, -1);
         if (res != AOM_CODEC_OK) {
@@ -2509,7 +2503,6 @@ static aom_codec_err_t ctrl_set_fp_mt(aom_codec_alg_priv_t *ctx, va_list args) {
   }
   ctx->ppi->num_fp_contexts = num_fp_contexts;
   return result;
-#endif
 }
 
 static aom_codec_err_t ctrl_set_auto_intra_tools_off(aom_codec_alg_priv_t *ctx,
@@ -2554,7 +2547,7 @@ static aom_codec_err_t encoder_init(aom_codec_ctx_t *ctx) {
       priv->timestamp_ratio.den = priv->cfg.g_timebase.den;
       priv->timestamp_ratio.num =
           (int64_t)priv->cfg.g_timebase.num * TICKS_PER_SEC;
-      reduce_ratio(&priv->timestamp_ratio);
+      av1_reduce_ratio(&priv->timestamp_ratio);
 
       set_encoder_config(&priv->oxcf, &priv->cfg, &priv->extra_cfg);
       if (priv->oxcf.rc_cfg.mode != AOM_CBR &&
@@ -2577,8 +2570,8 @@ static aom_codec_err_t encoder_init(aom_codec_ctx_t *ctx) {
       if (!priv->ppi) return AOM_CODEC_MEM_ERROR;
 
 #if !CONFIG_REALTIME_ONLY
-      res = create_stats_buffer(&priv->frame_stats_buffer,
-                                &priv->stats_buf_context, *num_lap_buffers);
+      res = av1_create_stats_buffer(&priv->frame_stats_buffer,
+                                    &priv->stats_buf_context, *num_lap_buffers);
       if (res != AOM_CODEC_OK) return AOM_CODEC_MEM_ERROR;
 
       assert(MAX_LAP_BUFFERS >= MAX_LAG_BUFFERS);
@@ -2589,9 +2582,8 @@ static aom_codec_err_t encoder_init(aom_codec_ctx_t *ctx) {
       priv->ppi->twopass.stats_buf_ctx = &priv->stats_buf_context;
 #endif
 
-#if CONFIG_FRAME_PARALLEL_ENCODE
       assert(priv->ppi->num_fp_contexts >= 1);
-      res = create_context_and_bufferpool(
+      res = av1_create_context_and_bufferpool(
           priv->ppi, &priv->ppi->parallel_cpi[0], &priv->buffer_pool,
           &priv->oxcf, ENCODE_STAGE, -1);
       if (res != AOM_CODEC_OK) {
@@ -2602,19 +2594,10 @@ static aom_codec_err_t encoder_init(aom_codec_ctx_t *ctx) {
           priv->ppi->twopass.stats_buf_ctx->stats_in_start;
 #endif
       priv->ppi->cpi = priv->ppi->parallel_cpi[0];
-#else
-      res = create_context_and_bufferpool(priv->ppi, &priv->ppi->cpi,
-                                          &priv->buffer_pool, &priv->oxcf,
-                                          ENCODE_STAGE, -1);
-#if !CONFIG_REALTIME_ONLY
-      priv->ppi->cpi->twopass_frame.stats_in =
-          priv->ppi->twopass.stats_buf_ctx->stats_in_start;
-#endif
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
       // Create another compressor if look ahead is enabled
       if (res == AOM_CODEC_OK && *num_lap_buffers) {
-        res = create_context_and_bufferpool(
+        res = av1_create_context_and_bufferpool(
             priv->ppi, &priv->ppi->cpi_lap, &priv->buffer_pool_lap, &priv->oxcf,
             LAP_STAGE, clamp(lap_lag_in_frames, 0, MAX_LAG_BUFFERS));
       }
@@ -2624,8 +2607,8 @@ static aom_codec_err_t encoder_init(aom_codec_ctx_t *ctx) {
   return res;
 }
 
-static void destroy_context_and_bufferpool(AV1_COMP *cpi,
-                                           BufferPool **p_buffer_pool) {
+void av1_destroy_context_and_bufferpool(AV1_COMP *cpi,
+                                        BufferPool **p_buffer_pool) {
   av1_remove_compressor(cpi);
   if (*p_buffer_pool) {
     av1_free_ref_frame_buffers(*p_buffer_pool);
@@ -2637,8 +2620,8 @@ static void destroy_context_and_bufferpool(AV1_COMP *cpi,
   }
 }
 
-static void destroy_stats_buffer(STATS_BUFFER_CTX *stats_buf_context,
-                                 FIRSTPASS_STATS *frame_stats_buffer) {
+void av1_destroy_stats_buffer(STATS_BUFFER_CTX *stats_buf_context,
+                              FIRSTPASS_STATS *frame_stats_buffer) {
   aom_free(stats_buf_context->total_left_stats);
   aom_free(stats_buf_context->total_stats);
   aom_free(frame_stats_buffer);
@@ -2674,34 +2657,30 @@ static aom_codec_err_t encoder_destroy(aom_codec_alg_priv_t *ctx) {
 
   if (ctx->ppi) {
     AV1_PRIMARY *ppi = ctx->ppi;
-#if CONFIG_FRAME_PARALLEL_ENCODE
     for (int i = 0; i < MAX_PARALLEL_FRAMES - 1; i++) {
       if (ppi->parallel_frames_data[i].cx_data) {
         free(ppi->parallel_frames_data[i].cx_data);
       }
     }
-#endif
 #if CONFIG_ENTROPY_STATS
     print_entropy_stats(ppi);
 #endif
 #if CONFIG_INTERNAL_STATS
     print_internal_stats(ppi);
 #endif
-#if CONFIG_FRAME_PARALLEL_ENCODE
-    int i;
-    for (i = 0; i < MAX_PARALLEL_FRAMES; i++) {
-      destroy_context_and_bufferpool(ppi->parallel_cpi[i], &ctx->buffer_pool);
+
+    for (int i = 0; i < MAX_PARALLEL_FRAMES; i++) {
+      av1_destroy_context_and_bufferpool(ppi->parallel_cpi[i],
+                                         &ctx->buffer_pool);
     }
     ppi->cpi = NULL;
-#else
-    destroy_context_and_bufferpool(ppi->cpi, &ctx->buffer_pool);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
+
     if (ppi->cpi_lap) {
-      destroy_context_and_bufferpool(ppi->cpi_lap, &ctx->buffer_pool_lap);
+      av1_destroy_context_and_bufferpool(ppi->cpi_lap, &ctx->buffer_pool_lap);
     }
     av1_remove_primary_compressor(ppi);
   }
-  destroy_stats_buffer(&ctx->stats_buf_context, ctx->frame_stats_buffer);
+  av1_destroy_stats_buffer(&ctx->stats_buf_context, ctx->frame_stats_buffer);
   aom_free(ctx);
   return AOM_CODEC_OK;
 }
@@ -2747,7 +2726,7 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
     if (res == AOM_CODEC_OK) {
       const size_t uncompressed_frame_sz = ALIGN_POWER_OF_TWO(ctx->cfg.g_w, 5) *
                                            ALIGN_POWER_OF_TWO(ctx->cfg.g_h, 5) *
-                                           get_image_bps(img) / 8;
+                                           av1_get_image_bps(img) / 8;
 
       // Due to the presence of no-show frames, the ctx->cx_data buffer holds
       // compressed data corresponding to multiple frames. As no-show frames are
@@ -2773,7 +2752,6 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
           return AOM_CODEC_MEM_ERROR;
         }
       }
-#if CONFIG_FRAME_PARALLEL_ENCODE
       for (int i = 0; i < ppi->num_fp_contexts - 1; i++) {
         if (ppi->parallel_frames_data[i].cx_data == NULL) {
           ppi->parallel_frames_data[i].cx_data_sz = uncompressed_frame_sz;
@@ -2787,7 +2765,6 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
           }
         }
       }
-#endif
     }
   }
 
@@ -2837,11 +2814,7 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
   }
 
   if (res == AOM_CODEC_OK) {
-#if CONFIG_FRAME_PARALLEL_ENCODE
     AV1_COMP *cpi = ppi->cpi;
-#else
-    AV1_COMP *const cpi = ppi->cpi;
-#endif
 
     // Set up internal flags
     if (ctx->base.init_flags & AOM_CODEC_USE_PSNR) ppi->b_calculate_psnr = 1;
@@ -2872,6 +2845,16 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
       if (!ppi->lookahead) {
         int lag_in_frames = cpi_lap != NULL ? cpi_lap->oxcf.gf_cfg.lag_in_frames
                                             : cpi->oxcf.gf_cfg.lag_in_frames;
+        AV1EncoderConfig *oxcf = &cpi->oxcf;
+        const BLOCK_SIZE sb_size = av1_select_sb_size(
+            oxcf, oxcf->frm_dim_cfg.width, oxcf->frm_dim_cfg.height,
+            cpi->svc.number_spatial_layers);
+        oxcf->border_in_pixels =
+            av1_get_enc_border_size(av1_is_resize_needed(oxcf),
+                                    oxcf->kf_cfg.key_freq_max == 0, sb_size);
+        for (int i = 0; i < ppi->num_fp_contexts; i++) {
+          ppi->parallel_cpi[i]->oxcf.border_in_pixels = oxcf->border_in_pixels;
+        }
 
         ppi->lookahead = av1_lookahead_init(
             cpi->oxcf.frm_dim_cfg.width, cpi->oxcf.frm_dim_cfg.height,
@@ -2883,16 +2866,10 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
       if (!ppi->lookahead)
         aom_internal_error(&ppi->error, AOM_CODEC_MEM_ERROR,
                            "Failed to allocate lag buffers");
-#if CONFIG_FRAME_PARALLEL_ENCODE
-      int i;
-      for (i = 0; i < ppi->num_fp_contexts; i++) {
+      for (int i = 0; i < ppi->num_fp_contexts; i++) {
         av1_check_initial_width(ppi->parallel_cpi[i], use_highbitdepth,
                                 subsampling_x, subsampling_y);
       }
-#else
-      av1_check_initial_width(cpi, use_highbitdepth, subsampling_x,
-                              subsampling_y);
-#endif
       if (cpi_lap != NULL) {
         av1_check_initial_width(cpi_lap, use_highbitdepth, subsampling_x,
                                 subsampling_y);
@@ -2938,36 +2915,26 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
       num_workers = av1_get_max_num_workers(cpi);
     }
     if ((num_workers > 1) && (ppi->p_mt_info.num_workers == 0)) {
-#if CONFIG_FRAME_PARALLEL_ENCODE
       // Obtain the maximum no. of frames that can be supported in a parallel
       // encode set.
       if (is_stat_consumption_stage(cpi)) {
         ppi->num_fp_contexts = av1_compute_num_fp_contexts(ppi, &cpi->oxcf);
       }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
       av1_create_workers(ppi, num_workers);
       av1_init_tile_thread_data(ppi, cpi->oxcf.pass == AOM_RC_FIRST_PASS);
 #if CONFIG_MULTITHREAD
-#if CONFIG_FRAME_PARALLEL_ENCODE
       for (int i = 0; i < ppi->num_fp_contexts; i++) {
         av1_init_mt_sync(ppi->parallel_cpi[i],
                          ppi->parallel_cpi[i]->oxcf.pass == AOM_RC_FIRST_PASS);
       }
-#else
-      av1_init_mt_sync(cpi, cpi->oxcf.pass == 1);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
       if (cpi_lap != NULL) {
         av1_init_mt_sync(cpi_lap, 1);
       }
 #endif  // CONFIG_MULTITHREAD
     }
-#if CONFIG_FRAME_PARALLEL_ENCODE
     for (int i = 0; i < ppi->num_fp_contexts; i++) {
       av1_init_frame_mt(ppi, ppi->parallel_cpi[i]);
     }
-#else
-    av1_init_frame_mt(ppi, cpi);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
     if (cpi_lap != NULL) {
       av1_init_frame_mt(ppi, cpi_lap);
     }
@@ -2986,27 +2953,28 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
       av1_post_encode_updates(cpi_lap, &cpi_lap_data);
     }
 
-#if CONFIG_FRAME_PARALLEL_ENCODE
     // Recalculate the maximum number of frames that can be encoded in
     // parallel at the beginning of sub gop.
     if (is_stat_consumption_stage(cpi) && ppi->gf_group.size > 0 &&
         cpi->gf_frame_index == ppi->gf_group.size) {
       ppi->num_fp_contexts = av1_compute_num_fp_contexts(ppi, &cpi->oxcf);
     }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
+
+    // Reset gf_frame_index in case it reaches MAX_STATIC_GF_GROUP_LENGTH for
+    // real time encoding.
+    if (is_one_pass_rt_params(cpi) &&
+        cpi->gf_frame_index == MAX_STATIC_GF_GROUP_LENGTH)
+      cpi->gf_frame_index = 0;
 
     // Get the next visible frame. Invisible frames get packed with the next
     // visible frame.
     while (cpi_data.cx_data_sz >= ctx->cx_data_sz / 2 && !is_frame_visible) {
-#if CONFIG_FRAME_PARALLEL_ENCODE
       int simulate_parallel_frame = 0;
       int status = -1;
       cpi->do_frame_data_update = true;
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
       cpi->ref_idx_to_skip = INVALID_IDX;
       cpi->ref_refresh_index = INVALID_IDX;
       cpi->refresh_idx_available = false;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
 
 #if CONFIG_FPMT_TEST
       simulate_parallel_frame =
@@ -3021,7 +2989,7 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
         status = av1_get_compressed_data(cpi, &cpi_data);
       }
 
-#endif
+#endif  // CONFIG_FPMT_TEST
       if (!simulate_parallel_frame) {
         if (ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] == 0) {
           status = av1_get_compressed_data(cpi, &cpi_data);
@@ -3033,18 +3001,13 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
           status = AOM_CODEC_OK;
         }
       }
-#else
-      const int status = av1_get_compressed_data(cpi, &cpi_data);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
       if (status == -1) break;
       if (status != AOM_CODEC_OK) {
         aom_internal_error(&ppi->error, AOM_CODEC_ERROR, NULL);
       }
-#if CONFIG_FRAME_PARALLEL_ENCODE
       if (ppi->num_fp_contexts > 0 && frame_is_intra_only(&cpi->common)) {
         av1_init_sc_decisions(ppi);
       }
-#endif
 
       ppi->seq_params_locked = 1;
       av1_post_encode_updates(cpi, &cpi_data);
@@ -3324,9 +3287,7 @@ static aom_codec_err_t ctrl_set_scale_mode(aom_codec_alg_priv_t *ctx,
     const int res = av1_set_internal_size(
         &ctx->ppi->cpi->oxcf, &ctx->ppi->cpi->resize_pending_params,
         (AOM_SCALING)mode->h_scaling_mode, (AOM_SCALING)mode->v_scaling_mode);
-#if CONFIG_FRAME_PARALLEL_ENCODE
     av1_check_fpmt_config(ctx->ppi, &ctx->ppi->cpi->oxcf);
-#endif
     return (res == 0) ? AOM_CODEC_OK : AOM_CODEC_INVALID_PARAM;
   } else {
     return AOM_CODEC_INVALID_PARAM;
@@ -3400,9 +3361,7 @@ static aom_codec_err_t ctrl_set_svc_params(aom_codec_alg_priv_t *ctx,
     }
     av1_update_layer_context_change_config(cpi, target_bandwidth);
   }
-#if CONFIG_FRAME_PARALLEL_ENCODE
   av1_check_fpmt_config(ctx->ppi, &ctx->ppi->cpi->oxcf);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   return AOM_CODEC_OK;
 }
 
@@ -3577,15 +3536,11 @@ static aom_codec_err_t encoder_set_option(aom_codec_alg_priv_t *ctx,
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.rowmtarg, argv,
                               err_string)) {
     extra_cfg.row_mt = arg_parse_uint_helper(&arg, err_string);
-  }
-#if CONFIG_FRAME_PARALLEL_ENCODE
-  else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.fpmtarg, argv,
-                            err_string)) {
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.fpmtarg, argv,
+                              err_string)) {
     extra_cfg.fp_mt = arg_parse_uint_helper(&arg, err_string);
-  }
-#endif
-  else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tile_cols, argv,
-                            err_string)) {
+  } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tile_cols, argv,
+                              err_string)) {
     extra_cfg.tile_columns = arg_parse_uint_helper(&arg, err_string);
   } else if (arg_match_helper(&arg, &g_av1_codec_arg_defs.tile_rows, argv,
                               err_string)) {
@@ -3982,6 +3937,14 @@ static aom_codec_err_t ctrl_get_target_seq_level_idx(aom_codec_alg_priv_t *ctx,
                                       &ctx->ppi->level_params, arg);
 }
 
+static aom_codec_err_t ctrl_get_num_operating_points(aom_codec_alg_priv_t *ctx,
+                                                     va_list args) {
+  int *const arg = va_arg(args, int *);
+  if (arg == NULL) return AOM_CODEC_INVALID_PARAM;
+  *arg = ctx->ppi->seq_params.operating_points_cnt_minus_1 + 1;
+  return AOM_CODEC_OK;
+}
+
 static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AV1_COPY_REFERENCE, ctrl_copy_reference },
   { AOME_USE_REFERENCE, ctrl_use_reference },
@@ -4134,6 +4097,7 @@ static aom_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { AV1E_GET_SEQ_LEVEL_IDX, ctrl_get_seq_level_idx },
   { AV1E_GET_BASELINE_GF_INTERVAL, ctrl_get_baseline_gf_interval },
   { AV1E_GET_TARGET_SEQ_LEVEL_IDX, ctrl_get_target_seq_level_idx },
+  { AV1E_GET_NUM_OPERATING_POINTS, ctrl_get_num_operating_points },
 
   CTRL_MAP_END,
 };

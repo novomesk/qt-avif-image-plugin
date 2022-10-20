@@ -34,7 +34,7 @@ static unsigned int sad32x32(const uint8_t *src_ptr, int src_stride,
   sum = _mm256_add_epi32(sum, _mm256_srli_si256(sum, 8));
   sum_i128 = _mm_add_epi32(_mm256_extracti128_si256(sum, 1),
                            _mm256_castsi256_si128(sum));
-  return _mm_cvtsi128_si32(sum_i128);
+  return (unsigned int)_mm_cvtsi128_si32(sum_i128);
 }
 
 static unsigned int sad64x32(const uint8_t *src_ptr, int src_stride,
@@ -112,7 +112,7 @@ static unsigned int sad_w64_avg_avx2(const uint8_t *src_ptr, int src_stride,
                                      const uint8_t *ref_ptr, int ref_stride,
                                      const int h, const uint8_t *second_pred,
                                      const int second_pred_stride) {
-  int i, res;
+  int i;
   __m256i sad1_reg, sad2_reg, ref1_reg, ref2_reg;
   __m256i sum_sad = _mm256_setzero_si256();
   __m256i sum_sad_h;
@@ -137,9 +137,7 @@ static unsigned int sad_w64_avg_avx2(const uint8_t *src_ptr, int src_stride,
   sum_sad = _mm256_add_epi32(sum_sad, sum_sad_h);
   sum_sad128 = _mm256_extracti128_si256(sum_sad, 1);
   sum_sad128 = _mm_add_epi32(_mm256_castsi256_si128(sum_sad), sum_sad128);
-  res = _mm_cvtsi128_si32(sum_sad128);
-
-  return res;
+  return (unsigned int)_mm_cvtsi128_si32(sum_sad128);
 }
 
 unsigned int aom_sad64x128_avg_avx2(const uint8_t *src_ptr, int src_stride,

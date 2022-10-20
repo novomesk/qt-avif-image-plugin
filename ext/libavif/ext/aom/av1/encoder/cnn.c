@@ -154,9 +154,9 @@ int check_tensor_equal_size(TENSOR *t1, TENSOR *t2) {
 void av1_find_cnn_layer_output_size(int in_width, int in_height,
                                     const CNN_LAYER_CONFIG *layer_config,
                                     int *out_width, int *out_height) {
+  assert(layer_config->skip_width > 0);
+  assert(layer_config->skip_height > 0);
   if (!layer_config->deconvolve) {
-    assert(layer_config->skip_width > 0);
-    assert(layer_config->skip_height > 0);
     switch (layer_config->pad) {
       case PADDING_SAME_ZERO:
       case PADDING_SAME_REPLICATE:

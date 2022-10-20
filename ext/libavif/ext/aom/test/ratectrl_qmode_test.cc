@@ -9,8 +9,10 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#include <array>
+#include "av1/ratectrl_qmode.h"
+
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <fstream>
@@ -19,13 +21,26 @@
 #include <string>
 #include <vector>
 
-#include "av1/ratectrl_qmode.h"
 #include "av1/reference_manager.h"
+#include "av1/ducky_encode.h"
 #include "test/mock_ratectrl_qmode.h"
 #include "test/video_source.h"
+#include "third_party/googletest/src/googlemock/include/gmock/gmock.h"
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
 namespace {
+
+using ::testing::HasSubstr;
+
+constexpr int kRefFrameTableSize = 7;
+constexpr int kFrameWidth = 352;
+constexpr int kFrameHeight = 288;
+
+MATCHER(IsOkStatus, "") {
+  *result_listener << "with code " << arg.code
+                   << " and message: " << arg.message;
+  return arg.ok();
+}
 
 // Reads a whitespace-delimited string from stream, and parses it as a double.
 // Returns an empty string if the entire string was successfully parsed as a
@@ -62,7 +77,8 @@ void ReadFirstpassInfo(const std::string &filename,
   std::ifstream firstpass_stats_file(path);
   ASSERT_TRUE(firstpass_stats_file.good())
       << "Error opening " << path << ": " << std::strerror(errno);
-  firstpass_info->num_mbs_16x16 = (352 / 16 + 1) * (288 / 16 + 1);
+  firstpass_info->num_mbs_16x16 =
+      (kFrameWidth / 16 + 1) * (kFrameHeight / 16 + 1);
   std::string newline;
   while (std::getline(firstpass_stats_file, newline)) {
     std::istringstream iss(newline);
@@ -101,7 +117,6 @@ void ReadFirstpassInfo(const std::string &filename,
     firstpass_info->stats_list.push_back(firstpass_stats_input);
   }
 }
-
 }  // namespace
 
 namespace aom {
@@ -204,7 +219,23 @@ void TestArfInterval(const GopStruct &gop_struct) {
   }
 }
 
-TEST(RateControlQModeTest, ConstructGopARF) {
+class RateControlQModeTest : public ::testing::Test {
+ protected:
+  RateControlQModeTest() {
+    rc_param_.max_gop_show_frame_count = 32;
+    rc_param_.min_gop_show_frame_count = 4;
+    rc_param_.ref_frame_table_size = 7;
+    rc_param_.max_ref_frames = 7;
+    rc_param_.max_depth = 5;
+    rc_param_.base_q_index = 128;
+    rc_param_.frame_height = kFrameHeight;
+    rc_param_.frame_width = kFrameWidth;
+  }
+
+  RateControlParam rc_param_;
+};
+
+TEST_F(RateControlQModeTest, ConstructGopARF) {
   int show_frame_count = 16;
   const bool has_key_frame = false;
   const int global_coding_idx_offset = 5;
@@ -224,9 +255,9 @@ TEST(RateControlQModeTest, ConstructGopARF) {
   TestArfInterval(gop_struct);
 }
 
-TEST(RateControlQModeTest, ConstructGopKey) {
+TEST_F(RateControlQModeTest, ConstructGopKey) {
   const int show_frame_count = 16;
-  const int has_key_frame = 1;
+  const bool has_key_frame = true;
   const int global_coding_idx_offset = 10;
   const int global_order_idx_offset = 8;
   RefFrameManager ref_frame_manager(kRefFrameTableSize);
@@ -240,6 +271,25 @@ TEST(RateControlQModeTest, ConstructGopKey) {
   TestColocatedShowFrame(gop_struct);
   const int max_layer_depth =
       ref_frame_manager.ForwardMaxSize() + kLayerDepthOffset;
+  TestLayerDepth(gop_struct, max_layer_depth);
+  TestArfInterval(gop_struct);
+}
+
+TEST_F(RateControlQModeTest, ConstructShortGop) {
+  int show_frame_count = 2;
+  const bool has_key_frame = false;
+  const int global_coding_idx_offset = 5;
+  const int global_order_idx_offset = 20;
+  RefFrameManager ref_frame_manager(kRefFrameTableSize);
+  GopStruct gop_struct =
+      ConstructGop(&ref_frame_manager, show_frame_count, has_key_frame,
+                   global_coding_idx_offset, global_order_idx_offset);
+  EXPECT_EQ(gop_struct.show_frame_count, show_frame_count);
+  TestGopDisplayOrder(gop_struct);
+  TestGopGlobalOrderIdx(gop_struct, global_order_idx_offset);
+  TestGopGlobalCodingIdx(gop_struct, global_coding_idx_offset);
+  TestColocatedShowFrame(gop_struct);
+  const int max_layer_depth = 1 + kLayerDepthOffset;
   TestLayerDepth(gop_struct, max_layer_depth);
   TestArfInterval(gop_struct);
 }
@@ -301,14 +351,13 @@ static void AugmentTplFrameStatsWithMotionVector(
 }
 
 static RefFrameTable CreateToyRefFrameTable(int frame_count) {
-  RefFrameTable ref_frame_table;
-  const int ref_frame_table_size = static_cast<int>(ref_frame_table.size());
-  EXPECT_LE(frame_count, ref_frame_table_size);
+  RefFrameTable ref_frame_table(kRefFrameTableSize);
+  EXPECT_LE(frame_count, kRefFrameTableSize);
   for (int i = 0; i < frame_count; ++i) {
     ref_frame_table[i] =
-        GopFrameBasic(0, 0, i, i, 0, GopFrameType::kRegularLeaf);
+        GopFrameBasic(0, 0, i, i, 0, 0, GopFrameType::kRegularLeaf);
   }
-  for (int i = frame_count; i < ref_frame_table_size; ++i) {
+  for (int i = frame_count; i < kRefFrameTableSize; ++i) {
     ref_frame_table[i] = GopFrameInvalid();
   }
   return ref_frame_table;
@@ -326,24 +375,41 @@ double TplFrameStatsAccumulateIntraCost(const TplFrameStats &frame_stats) {
   return sum;
 }
 
-TEST(RateControlQModeTest, CreateTplFrameDepStats) {
+TEST_F(RateControlQModeTest, CreateTplFrameDepStats) {
   TplFrameStats frame_stats = CreateToyTplFrameStatsWithDiffSizes(8, 16);
-  TplFrameDepStats frame_dep_stats =
+  StatusOr<TplFrameDepStats> frame_dep_stats =
       CreateTplFrameDepStatsWithoutPropagation(frame_stats);
-  EXPECT_EQ(frame_stats.min_block_size, frame_dep_stats.unit_size);
-  const int unit_rows = static_cast<int>(frame_dep_stats.unit_stats.size());
-  const int unit_cols = static_cast<int>(frame_dep_stats.unit_stats[0].size());
-  EXPECT_EQ(frame_stats.frame_height, unit_rows * frame_dep_stats.unit_size);
-  EXPECT_EQ(frame_stats.frame_width, unit_cols * frame_dep_stats.unit_size);
+  ASSERT_THAT(frame_dep_stats.status(), IsOkStatus());
+  EXPECT_EQ(frame_stats.min_block_size, frame_dep_stats->unit_size);
+  const int unit_rows = static_cast<int>(frame_dep_stats->unit_stats.size());
+  const int unit_cols = static_cast<int>(frame_dep_stats->unit_stats[0].size());
+  EXPECT_EQ(frame_stats.frame_height, unit_rows * frame_dep_stats->unit_size);
+  EXPECT_EQ(frame_stats.frame_width, unit_cols * frame_dep_stats->unit_size);
   const double intra_cost_sum =
-      TplFrameDepStatsAccumulateIntraCost(frame_dep_stats);
+      TplFrameDepStatsAccumulateIntraCost(*frame_dep_stats);
 
   const double expected_intra_cost_sum =
       TplFrameStatsAccumulateIntraCost(frame_stats);
   EXPECT_NEAR(intra_cost_sum, expected_intra_cost_sum, kErrorEpsilon);
 }
 
-TEST(RateControlQModeTest, GetBlockOverlapArea) {
+TEST_F(RateControlQModeTest, BlockRowNotAMultipleOfMinBlockSizeError) {
+  TplFrameStats frame_stats = CreateToyTplFrameStatsWithDiffSizes(8, 16);
+  frame_stats.block_stats_list.back().row = 1;
+  auto result = CreateTplFrameDepStatsWithoutPropagation(frame_stats);
+  EXPECT_FALSE(result.ok());
+  EXPECT_THAT(result.status().message, HasSubstr("must be a multiple of 8"));
+}
+
+TEST_F(RateControlQModeTest, BlockPositionOutOfRangeError) {
+  TplFrameStats frame_stats = CreateToyTplFrameStatsWithDiffSizes(8, 16);
+  frame_stats.block_stats_list.back().row += 8;
+  auto result = CreateTplFrameDepStatsWithoutPropagation(frame_stats);
+  EXPECT_FALSE(result.ok());
+  EXPECT_THAT(result.status().message, HasSubstr("out of range"));
+}
+
+TEST_F(RateControlQModeTest, GetBlockOverlapArea) {
   const int size = 8;
   const int r0 = 8;
   const int c0 = 9;
@@ -358,7 +424,7 @@ TEST(RateControlQModeTest, GetBlockOverlapArea) {
   }
 }
 
-TEST(RateControlQModeTest, TplBlockStatsToDepStats) {
+TEST_F(RateControlQModeTest, TplBlockStatsToDepStats) {
   const int intra_cost = 100;
   const int inter_cost = 120;
   const int unit_count = 2;
@@ -372,7 +438,7 @@ TEST(RateControlQModeTest, TplBlockStatsToDepStats) {
   EXPECT_LE(unit_stats.inter_cost, unit_stats.intra_cost);
 }
 
-TEST(RateControlQModeTest, TplFrameDepStatsPropagateSingleZeroMotion) {
+TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateSingleZeroMotion) {
   // cur frame with coding_idx 1 use ref frame with coding_idx 0
   const std::array<int, kBlockRefCount> ref_frame_index = { 0, -1 };
   TplFrameStats frame_stats = CreateToyTplFrameStatsWithDiffSizes(8, 16);
@@ -387,9 +453,10 @@ TEST(RateControlQModeTest, TplFrameDepStatsPropagateSingleZeroMotion) {
   gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats0);
 
   // cur frame with coding_idx 1
-  const TplFrameDepStats frame_dep_stats1 =
+  const StatusOr<TplFrameDepStats> frame_dep_stats1 =
       CreateTplFrameDepStatsWithoutPropagation(frame_stats);
-  gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats1);
+  ASSERT_THAT(frame_dep_stats1.status(), IsOkStatus());
+  gop_dep_stats.frame_dep_stats_list.push_back(std::move(*frame_dep_stats1));
 
   const RefFrameTable ref_frame_table = CreateToyRefFrameTable(frame_count);
   TplFrameDepStatsPropagate(/*coding_idx=*/1, ref_frame_table, &gop_dep_stats);
@@ -408,7 +475,7 @@ TEST(RateControlQModeTest, TplFrameDepStatsPropagateSingleZeroMotion) {
   EXPECT_NEAR(propagation_sum, expected_propagation_sum, kErrorEpsilon);
 }
 
-TEST(RateControlQModeTest, TplFrameDepStatsPropagateCompoundZeroMotion) {
+TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateCompoundZeroMotion) {
   // cur frame with coding_idx 2 use two ref frames with coding_idx 0 and 1
   const std::array<int, kBlockRefCount> ref_frame_index = { 0, 1 };
   TplFrameStats frame_stats = CreateToyTplFrameStatsWithDiffSizes(8, 16);
@@ -429,9 +496,10 @@ TEST(RateControlQModeTest, TplFrameDepStatsPropagateCompoundZeroMotion) {
   gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats1);
 
   // cur frame with coding_idx 2
-  const TplFrameDepStats frame_dep_stats2 =
+  const StatusOr<TplFrameDepStats> frame_dep_stats2 =
       CreateTplFrameDepStatsWithoutPropagation(frame_stats);
-  gop_dep_stats.frame_dep_stats_list.push_back(frame_dep_stats2);
+  ASSERT_THAT(frame_dep_stats2.status(), IsOkStatus());
+  gop_dep_stats.frame_dep_stats_list.push_back(std::move(*frame_dep_stats2));
 
   const RefFrameTable ref_frame_table = CreateToyRefFrameTable(frame_count);
   TplFrameDepStatsPropagate(/*coding_idx=*/2, ref_frame_table, &gop_dep_stats);
@@ -450,7 +518,7 @@ TEST(RateControlQModeTest, TplFrameDepStatsPropagateCompoundZeroMotion) {
   EXPECT_NEAR(cost_sum1, expected_ref_sum * 0.5, kErrorEpsilon);
 }
 
-TEST(RateControlQModeTest, TplFrameDepStatsPropagateSingleWithMotion) {
+TEST_F(RateControlQModeTest, TplFrameDepStatsPropagateSingleWithMotion) {
   // cur frame with coding_idx 1 use ref frame with coding_idx 0
   const std::array<int, kBlockRefCount> ref_frame_index = { 0, -1 };
   const int min_block_size = 8;
@@ -475,8 +543,10 @@ TEST(RateControlQModeTest, TplFrameDepStatsPropagateSingleWithMotion) {
                              frame_stats.min_block_size));
 
   // cur frame with coding_idx 1
-  gop_dep_stats.frame_dep_stats_list.push_back(
-      CreateTplFrameDepStatsWithoutPropagation(frame_stats));
+  const StatusOr<TplFrameDepStats> frame_dep_stats =
+      CreateTplFrameDepStatsWithoutPropagation(frame_stats);
+  ASSERT_THAT(frame_dep_stats.status(), IsOkStatus());
+  gop_dep_stats.frame_dep_stats_list.push_back(std::move(*frame_dep_stats));
 
   const RefFrameTable ref_frame_table = CreateToyRefFrameTable(frame_count);
   TplFrameDepStatsPropagate(/*coding_idx=*/1, ref_frame_table, &gop_dep_stats);
@@ -508,9 +578,11 @@ TEST(RateControlQModeTest, TplFrameDepStatsPropagateSingleWithMotion) {
   }
 }
 
-TEST(RateControlQModeTest, ComputeTplGopDepStats) {
+TEST_F(RateControlQModeTest, ComputeTplGopDepStats) {
   TplGopStats tpl_gop_stats;
   std::vector<RefFrameTable> ref_frame_table_list;
+  GopStruct gop_struct;
+  gop_struct.show_frame_count = 3;
   for (int i = 0; i < 3; i++) {
     // Use the previous frame as reference
     const std::array<int, kBlockRefCount> ref_frame_index = { i - 1, -1 };
@@ -522,8 +594,9 @@ TEST(RateControlQModeTest, ComputeTplGopDepStats) {
 
     ref_frame_table_list.push_back(CreateToyRefFrameTable(i));
   }
-  const TplGopDepStats &gop_dep_stats =
+  const StatusOr<TplGopDepStats> gop_dep_stats =
       ComputeTplGopDepStats(tpl_gop_stats, ref_frame_table_list);
+  ASSERT_THAT(gop_dep_stats.status(), IsOkStatus());
 
   double expected_sum = 0;
   for (int i = 2; i >= 0; i--) {
@@ -532,7 +605,7 @@ TEST(RateControlQModeTest, ComputeTplGopDepStats) {
     expected_sum +=
         TplFrameStatsAccumulateIntraCost(tpl_gop_stats.frame_stats_list[i]);
     const double sum =
-        TplFrameDepStatsAccumulate(gop_dep_stats.frame_dep_stats_list[i]);
+        TplFrameDepStatsAccumulate(gop_dep_stats->frame_dep_stats_list[i]);
     EXPECT_NEAR(sum, expected_sum, kErrorEpsilon);
     break;
   }
@@ -541,9 +614,12 @@ TEST(RateControlQModeTest, ComputeTplGopDepStats) {
 TEST(RefFrameManagerTest, GetRefFrameCount) {
   const std::vector<int> order_idx_list = { 0, 4, 2, 1, 2, 3, 4 };
   const std::vector<GopFrameType> type_list = {
-    GopFrameType::kRegularKey,      GopFrameType::kRegularArf,
-    GopFrameType::kIntermediateArf, GopFrameType::kRegularLeaf,
-    GopFrameType::kShowExisting,    GopFrameType::kRegularLeaf,
+    GopFrameType::kRegularKey,
+    GopFrameType::kRegularArf,
+    GopFrameType::kIntermediateArf,
+    GopFrameType::kRegularLeaf,
+    GopFrameType::kIntermediateOverlay,
+    GopFrameType::kRegularLeaf,
     GopFrameType::kOverlay
   };
   RefFrameManager ref_manager(kRefFrameTableSize);
@@ -552,8 +628,9 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   EXPECT_EQ(type_list[first_leaf_idx], GopFrameType::kRegularLeaf);
   // update reference frame until we see the first kRegularLeaf frame
   for (; coding_idx <= first_leaf_idx; ++coding_idx) {
-    GopFrame gop_frame = GopFrameBasic(
-        0, 0, coding_idx, order_idx_list[coding_idx], 0, type_list[coding_idx]);
+    GopFrame gop_frame =
+        GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx], 0, 0,
+                      type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
   EXPECT_EQ(ref_manager.GetRefFrameCount(), 4);
@@ -564,10 +641,12 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
 
   // update reference frame until we see the first kShowExisting frame
   const int first_show_existing_idx = 4;
-  EXPECT_EQ(type_list[first_show_existing_idx], GopFrameType::kShowExisting);
+  EXPECT_EQ(type_list[first_show_existing_idx],
+            GopFrameType::kIntermediateOverlay);
   for (; coding_idx <= first_show_existing_idx; ++coding_idx) {
-    GopFrame gop_frame = GopFrameBasic(
-        0, 0, coding_idx, order_idx_list[coding_idx], 0, type_list[coding_idx]);
+    GopFrame gop_frame =
+        GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx], 0, 0,
+                      type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
   EXPECT_EQ(ref_manager.GetRefFrameCount(), 4);
@@ -581,8 +660,9 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   const int second_leaf_idx = 5;
   EXPECT_EQ(type_list[second_leaf_idx], GopFrameType::kRegularLeaf);
   for (; coding_idx <= second_leaf_idx; ++coding_idx) {
-    GopFrame gop_frame = GopFrameBasic(
-        0, 0, coding_idx, order_idx_list[coding_idx], 0, type_list[coding_idx]);
+    GopFrame gop_frame =
+        GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx], 0, 0,
+                      type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
   EXPECT_EQ(ref_manager.GetRefFrameCount(), 5);
@@ -595,8 +675,9 @@ TEST(RefFrameManagerTest, GetRefFrameCount) {
   const int first_overlay_idx = 6;
   EXPECT_EQ(type_list[first_overlay_idx], GopFrameType::kOverlay);
   for (; coding_idx <= first_overlay_idx; ++coding_idx) {
-    GopFrame gop_frame = GopFrameBasic(
-        0, 0, coding_idx, order_idx_list[coding_idx], 0, type_list[coding_idx]);
+    GopFrame gop_frame =
+        GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx], 0, 0,
+                      type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
 
@@ -614,11 +695,12 @@ void TestRefFrameManagerPriority(const RefFrameManager &ref_manager,
   int ref_count = ref_manager.GetRefFrameCountByType(type);
   int prev_global_order_idx = ref_manager.CurGlobalOrderIdx();
   // The lower the priority is, the closer the gop_frame.global_order_idx should
-  // be with cur_global_order_idx_
+  // be with cur_global_order_idx_, with exception of a base layer ARF.
   for (int priority = 0; priority < ref_count; ++priority) {
     GopFrame gop_frame = ref_manager.GetRefFrameByPriority(type, priority);
     EXPECT_EQ(gop_frame.is_valid, true);
     if (type == RefUpdateType::kForward) {
+      if (priority == 0) continue;
       EXPECT_GE(gop_frame.global_order_idx, prev_global_order_idx);
     } else {
       EXPECT_LE(gop_frame.global_order_idx, prev_global_order_idx);
@@ -633,9 +715,12 @@ void TestRefFrameManagerPriority(const RefFrameManager &ref_manager,
 TEST(RefFrameManagerTest, GetRefFrameByPriority) {
   const std::vector<int> order_idx_list = { 0, 4, 2, 1, 2, 3, 4 };
   const std::vector<GopFrameType> type_list = {
-    GopFrameType::kRegularKey,      GopFrameType::kRegularArf,
-    GopFrameType::kIntermediateArf, GopFrameType::kRegularLeaf,
-    GopFrameType::kShowExisting,    GopFrameType::kRegularLeaf,
+    GopFrameType::kRegularKey,
+    GopFrameType::kRegularArf,
+    GopFrameType::kIntermediateArf,
+    GopFrameType::kRegularLeaf,
+    GopFrameType::kIntermediateOverlay,
+    GopFrameType::kRegularLeaf,
     GopFrameType::kOverlay
   };
   RefFrameManager ref_manager(kRefFrameTableSize);
@@ -644,8 +729,9 @@ TEST(RefFrameManagerTest, GetRefFrameByPriority) {
   EXPECT_EQ(type_list[first_leaf_idx], GopFrameType::kRegularLeaf);
   // update reference frame until we see the first kRegularLeaf frame
   for (; coding_idx <= first_leaf_idx; ++coding_idx) {
-    GopFrame gop_frame = GopFrameBasic(
-        0, 0, coding_idx, order_idx_list[coding_idx], 0, type_list[coding_idx]);
+    GopFrame gop_frame =
+        GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx], 0, 0,
+                      type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
   EXPECT_EQ(ref_manager.GetRefFrameCountByType(RefUpdateType::kForward), 2);
@@ -654,8 +740,9 @@ TEST(RefFrameManagerTest, GetRefFrameByPriority) {
   const int first_overlay_idx = 6;
   EXPECT_EQ(type_list[first_overlay_idx], GopFrameType::kOverlay);
   for (; coding_idx <= first_overlay_idx; ++coding_idx) {
-    GopFrame gop_frame = GopFrameBasic(
-        0, 0, coding_idx, order_idx_list[coding_idx], 0, type_list[coding_idx]);
+    GopFrame gop_frame =
+        GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx], 0, 0,
+                      type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
 
@@ -674,8 +761,9 @@ TEST(RefFrameManagerTest, GetRefFrameListByPriority) {
                                                 GopFrameType::kRegularLeaf };
   RefFrameManager ref_manager(kRefFrameTableSize);
   for (int coding_idx = 0; coding_idx < frame_count; ++coding_idx) {
-    GopFrame gop_frame = GopFrameBasic(
-        0, 0, coding_idx, order_idx_list[coding_idx], 0, type_list[coding_idx]);
+    GopFrame gop_frame =
+        GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx], 0, 0,
+                      type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
   EXPECT_EQ(ref_manager.GetRefFrameCount(), frame_count);
@@ -685,11 +773,11 @@ TEST(RefFrameManagerTest, GetRefFrameListByPriority) {
   std::vector<ReferenceFrame> ref_frame_list =
       ref_manager.GetRefFrameListByPriority();
   EXPECT_EQ(ref_frame_list.size(), order_idx_list.size());
-  std::vector<int> expected_global_order_idx = { 2, 0, 1, 4 };
-  std::vector<ReferenceName> expected_names = { ReferenceName::kBwdrefFrame,
+  std::vector<int> expected_global_order_idx = { 4, 0, 1, 2 };
+  std::vector<ReferenceName> expected_names = { ReferenceName::kAltrefFrame,
                                                 ReferenceName::kGoldenFrame,
                                                 ReferenceName::kLastFrame,
-                                                ReferenceName::kAltref2Frame };
+                                                ReferenceName::kBwdrefFrame };
   for (size_t i = 0; i < ref_frame_list.size(); ++i) {
     ReferenceFrame &ref_frame = ref_frame_list[i];
     GopFrame gop_frame = ref_manager.GetRefFrameByIndex(ref_frame.index);
@@ -710,7 +798,7 @@ TEST(RefFrameManagerTest, GetPrimaryRefFrame) {
   for (int coding_idx = 0; coding_idx < frame_count; ++coding_idx) {
     GopFrame gop_frame =
         GopFrameBasic(0, 0, coding_idx, order_idx_list[coding_idx],
-                      layer_depth_list[coding_idx], type_list[coding_idx]);
+                      layer_depth_list[coding_idx], 0, type_list[coding_idx]);
     ref_manager.UpdateRefFrameTable(&gop_frame);
   }
 
@@ -719,7 +807,7 @@ TEST(RefFrameManagerTest, GetPrimaryRefFrame) {
     int layer_depth = layer_depth_list[i];
     // Set different frame type
     GopFrameType type = type_list[(i + 1) % frame_count];
-    GopFrame gop_frame = GopFrameBasic(0, 0, 0, 0, layer_depth, type);
+    GopFrame gop_frame = GopFrameBasic(0, 0, 0, 0, layer_depth, 0, type);
     ReferenceFrame ref_frame = ref_manager.GetPrimaryRefFrame(gop_frame);
     GopFrame primary_ref_frame =
         ref_manager.GetRefFrameByIndex(ref_frame.index);
@@ -734,7 +822,7 @@ TEST(RefFrameManagerTest, GetPrimaryRefFrame) {
     GopFrameType type = type_list[i];
     // Let the frame layer_depth sit in the middle of two reference frames
     int layer_depth = mid_layer_depth_list[i];
-    GopFrame gop_frame = GopFrameBasic(0, 0, 0, 0, layer_depth, type);
+    GopFrame gop_frame = GopFrameBasic(0, 0, 0, 0, layer_depth, 0, type);
     ReferenceFrame ref_frame = ref_manager.GetPrimaryRefFrame(gop_frame);
     GopFrame primary_ref_frame =
         ref_manager.GetRefFrameByIndex(ref_frame.index);
@@ -744,7 +832,7 @@ TEST(RefFrameManagerTest, GetPrimaryRefFrame) {
   }
 }
 
-TEST(RateControlQModeTest, TestKeyframeDetection) {
+TEST_F(RateControlQModeTest, TestKeyframeDetection) {
   FirstpassInfo firstpass_info;
   const std::string kFirstpassStatsFile = "firstpass_stats";
   ASSERT_NO_FATAL_FAILURE(
@@ -753,40 +841,272 @@ TEST(RateControlQModeTest, TestKeyframeDetection) {
               ElementsAre(0, 30, 60, 90, 120, 150, 180, 210, 240));
 }
 
-TEST(RateControlQModeTest, DISABLED_TestGopIntervals) {
+MATCHER_P(GopFrameMatches, expected, "") {
+#define COMPARE_FIELD(FIELD)                                   \
+  do {                                                         \
+    if (arg.FIELD != expected.FIELD) {                         \
+      *result_listener << "where " #FIELD " is " << arg.FIELD  \
+                       << " but should be " << expected.FIELD; \
+      return false;                                            \
+    }                                                          \
+  } while (0)
+  COMPARE_FIELD(is_valid);
+  COMPARE_FIELD(order_idx);
+  COMPARE_FIELD(coding_idx);
+  COMPARE_FIELD(global_order_idx);
+  COMPARE_FIELD(global_coding_idx);
+  COMPARE_FIELD(is_key_frame);
+  COMPARE_FIELD(is_arf_frame);
+  COMPARE_FIELD(is_show_frame);
+  COMPARE_FIELD(is_golden_frame);
+  COMPARE_FIELD(colocated_ref_idx);
+  COMPARE_FIELD(update_ref_idx);
+  COMPARE_FIELD(layer_depth);
+#undef COMPARE_FIELD
+
+  return true;
+}
+
+// Helper for tests which need to set update_ref_idx, but for which the indices
+// and depth don't matter (other than to allow creating multiple GopFrames which
+// are distinguishable).
+GopFrame GopFrameUpdateRefIdx(int index, GopFrameType gop_frame_type,
+                              int update_ref_idx) {
+  GopFrame frame =
+      GopFrameBasic(0, 0, index, index, /*depth=*/0, 0, gop_frame_type);
+  frame.update_ref_idx = update_ref_idx;
+  return frame;
+}
+
+TEST_F(RateControlQModeTest, TestInvalidRateControlParam) {
+  // Default constructed RateControlParam should not be valid.
+  RateControlParam rc_param = {};
+  EXPECT_NE(AV1RateControlQMode().SetRcParam(rc_param).code, AOM_CODEC_OK);
+}
+
+TEST_F(RateControlQModeTest, TestInvalidMaxGopShowFrameCount) {
+  rc_param_.min_gop_show_frame_count = 2;
+  rc_param_.max_gop_show_frame_count = 3;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("max_gop_show_frame_count (3) must be at least 4"));
+}
+
+TEST_F(RateControlQModeTest, TestInvalidMinGopShowFrameCount) {
+  rc_param_.min_gop_show_frame_count = 9;
+  rc_param_.max_gop_show_frame_count = 8;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("may not be less than min_gop_show_frame_count (9)"));
+}
+
+TEST_F(RateControlQModeTest, TestInvalidRefFrameTableSize) {
+  rc_param_.ref_frame_table_size = 9;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("ref_frame_table_size (9) must be in the range"));
+}
+
+TEST_F(RateControlQModeTest, TestInvalidMaxRefFrames) {
+  rc_param_.max_ref_frames = 8;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("max_ref_frames (8) must be in the range"));
+}
+
+TEST_F(RateControlQModeTest, TestInvalidMaxDepth) {
+  rc_param_.max_depth = 6;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message, HasSubstr("max_depth (6) must be in the range"));
+}
+
+TEST_F(RateControlQModeTest, TestInvalidBaseQIndex) {
+  rc_param_.base_q_index = 256;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("base_q_index (256) must be in the range"));
+}
+
+TEST_F(RateControlQModeTest, TestInvalidFrameHeight) {
+  rc_param_.frame_height = 15;
+  Status status = AV1RateControlQMode().SetRcParam(rc_param_);
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("frame_height (15) must be in the range"));
+}
+
+TEST_F(RateControlQModeTest, TestGetRefFrameTableListFirstGop) {
+  AV1RateControlQMode rc;
+  rc_param_.ref_frame_table_size = 3;
+  ASSERT_THAT(rc.SetRcParam(rc_param_), IsOkStatus());
+
+  const auto invalid = GopFrameInvalid();
+  const auto frame0 = GopFrameUpdateRefIdx(0, GopFrameType::kRegularKey, -1);
+  const auto frame1 = GopFrameUpdateRefIdx(1, GopFrameType::kRegularLeaf, 2);
+  const auto frame2 = GopFrameUpdateRefIdx(2, GopFrameType::kRegularLeaf, 0);
+
+  const auto matches_invalid = GopFrameMatches(invalid);
+  const auto matches_frame0 = GopFrameMatches(frame0);
+  const auto matches_frame1 = GopFrameMatches(frame1);
+  const auto matches_frame2 = GopFrameMatches(frame2);
+
+  GopStruct gop_struct;
+  gop_struct.global_coding_idx_offset = 0;  // This is the first GOP.
+  gop_struct.gop_frame_list = { frame0, frame1, frame2 };
+  ASSERT_THAT(
+      // For the first GOP only, GetRefFrameTableList can be passed a
+      // default-constructed RefFrameTable (because it's all going to be
+      // replaced by the key frame anyway).
+      rc.GetRefFrameTableList(gop_struct, RefFrameTable()),
+      ElementsAre(
+          ElementsAre(matches_invalid, matches_invalid, matches_invalid),
+          ElementsAre(matches_frame0, matches_frame0, matches_frame0),
+          ElementsAre(matches_frame0, matches_frame0, matches_frame1),
+          ElementsAre(matches_frame2, matches_frame0, matches_frame1)));
+}
+
+TEST_F(RateControlQModeTest, TestGetRefFrameTableListNotFirstGop) {
+  AV1RateControlQMode rc;
+  rc_param_.ref_frame_table_size = 3;
+  ASSERT_THAT(rc.SetRcParam(rc_param_), IsOkStatus());
+
+  const auto previous = GopFrameUpdateRefIdx(0, GopFrameType::kRegularKey, -1);
+  const auto frame0 = GopFrameUpdateRefIdx(5, GopFrameType::kRegularLeaf, 2);
+  const auto frame1 = GopFrameUpdateRefIdx(6, GopFrameType::kRegularLeaf, -1);
+  const auto frame2 = GopFrameUpdateRefIdx(7, GopFrameType::kRegularLeaf, 0);
+
+  // Frames in the initial table should have coding_idx of -1
+  // to prevent propagating TPL stats to already coded frames.
+  auto previous_modified = previous;
+  previous_modified.coding_idx = -1;
+  const auto matches_previous = GopFrameMatches(previous_modified);
+  const auto matches_frame0 = GopFrameMatches(frame0);
+  const auto matches_frame2 = GopFrameMatches(frame2);
+
+  GopStruct gop_struct;
+  gop_struct.global_coding_idx_offset = 5;  // This is not the first GOP.
+  gop_struct.gop_frame_list = { frame0, frame1, frame2 };
+  ASSERT_THAT(
+      rc.GetRefFrameTableList(gop_struct, RefFrameTable(3, previous)),
+      ElementsAre(
+          ElementsAre(matches_previous, matches_previous, matches_previous),
+          ElementsAre(matches_previous, matches_previous, matches_frame0),
+          ElementsAre(matches_previous, matches_previous, matches_frame0),
+          ElementsAre(matches_frame2, matches_previous, matches_frame0)));
+}
+
+TEST_F(RateControlQModeTest, TestGopIntervals) {
   FirstpassInfo firstpass_info;
   ASSERT_NO_FATAL_FAILURE(
       ReadFirstpassInfo("firstpass_stats", &firstpass_info));
   AV1RateControlQMode rc;
-  RateControlParam rc_param;
-  rc_param.frame_height = 288;
-  rc_param.frame_width = 352;
-  rc_param.max_gop_show_frame_count = 32;
-  rc_param.min_gop_show_frame_count = 4;
-  rc.SetRcParam(rc_param);
-  GopStructList gop_list = rc.DetermineGopInfo(firstpass_info);
+  ASSERT_THAT(rc.SetRcParam(rc_param_), IsOkStatus());
+
+  const auto gop_info = rc.DetermineGopInfo(firstpass_info);
+  ASSERT_THAT(gop_info.status(), IsOkStatus());
   std::vector<int> gop_interval_list;
-  std::transform(gop_list.begin(), gop_list.end(),
+  std::transform(gop_info->begin(), gop_info->end(),
                  std::back_inserter(gop_interval_list),
                  [](GopStruct const &x) { return x.show_frame_count; });
   EXPECT_THAT(gop_interval_list,
-              ElementsAre(21, 9, 30, 30, 30, 21, 9, 30, 12, 16, 2, 30, 10));
+              ElementsAre(21, 9, 30, 30, 16, 14, 21, 9, 30, 12, 16, 2, 30, 10));
+}
+
+TEST_F(RateControlQModeTest, TestGetGopEncodeInfo) {
+  FirstpassInfo firstpass_info;
+  ASSERT_NO_FATAL_FAILURE(
+      ReadFirstpassInfo("firstpass_stats", &firstpass_info));
+  AV1RateControlQMode rc;
+  rc_param_.max_gop_show_frame_count = 16;
+  ASSERT_THAT(rc.SetRcParam(rc_param_), IsOkStatus());
+  const auto gop_info = rc.DetermineGopInfo(firstpass_info);
+  ASSERT_THAT(gop_info.status(), IsOkStatus());
+  const GopStructList &gop_list = *gop_info;
+  const aom_rational_t frame_rate = { 30, 1 };
+  const aom::VideoInfo input_video = {
+    kFrameWidth, kFrameHeight,
+    frame_rate,  AOM_IMG_FMT_I420,
+    250,         libaom_test::GetDataPath() + "/hantro_collage_w352h288.yuv"
+  };
+  DuckyEncode ducky_encode(input_video, 3, 3);
+  ducky_encode.StartEncode(firstpass_info.stats_list);
+  // Read TPL stats
+  std::vector<TplGopStats> tpl_gop_list =
+      ducky_encode.ComputeTplStats(gop_list);
+  ducky_encode.EndEncode();
+  RefFrameTable ref_frame_table;
+  int num_gop_skipped = 0;
+  for (size_t gop_idx = 0; gop_idx < gop_list.size(); gop_idx++) {
+    size_t tpl_gop_idx = gop_idx - num_gop_skipped;
+    const auto gop_encode_info = rc.GetGopEncodeInfo(
+        gop_list[gop_idx], tpl_gop_list[tpl_gop_idx], ref_frame_table);
+    ASSERT_THAT(gop_encode_info.status(), IsOkStatus());
+    for (auto &frame_param : gop_encode_info->param_list) {
+      std::cout << frame_param.q_index << std::endl;
+    }
+    ref_frame_table = gop_encode_info->final_snapshot;
+  }
+}
+
+TEST_F(RateControlQModeTest, GetGopEncodeInfoWrongGopSize) {
+  GopStruct gop_struct;
+  gop_struct.gop_frame_list.assign(7, GopFrameInvalid());
+  TplGopStats tpl_gop_stats;
+  tpl_gop_stats.frame_stats_list.assign(
+      5, CreateToyTplFrameStatsWithDiffSizes(8, 8));
+  AV1RateControlQMode rc;
+  const Status status =
+      rc.GetGopEncodeInfo(gop_struct, tpl_gop_stats, RefFrameTable()).status();
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("Frame count of GopStruct (7) doesn't match frame "
+                        "count of TPL stats (5)"));
+}
+
+TEST_F(RateControlQModeTest, GetGopEncodeInfoRefFrameMissingBlockStats) {
+  GopStruct gop_struct;
+  // Frames 0 and 2 are reference frames.
+  gop_struct.gop_frame_list = {
+    GopFrameUpdateRefIdx(0, GopFrameType::kRegularKey, 1),
+    GopFrameUpdateRefIdx(1, GopFrameType::kRegularLeaf, -1),
+    GopFrameUpdateRefIdx(2, GopFrameType::kRegularLeaf, 2),
+  };
+  gop_struct.show_frame_count = 3;
+
+  // Only frame 0 has TPL block stats.
+  TplGopStats tpl_gop_stats;
+  tpl_gop_stats.frame_stats_list.assign(3, { 8, 176, 144, {} });
+  tpl_gop_stats.frame_stats_list[0] = CreateToyTplFrameStatsWithDiffSizes(8, 8);
+
+  AV1RateControlQMode rc;
+  const Status status =
+      rc.GetGopEncodeInfo(gop_struct, tpl_gop_stats, RefFrameTable()).status();
+  EXPECT_EQ(status.code, AOM_CODEC_INVALID_PARAM);
+  EXPECT_THAT(status.message,
+              HasSubstr("The frame with global_coding_idx 2 is a reference "
+                        "frame, but has no TPL stats"));
 }
 
 // MockRateControlQMode is provided for the use of clients of libaom, but it's
 // not expected that it will be used in any real libaom tests.
 // This simple "toy" test exists solely to verify the integration of gmock into
 // the aom build.
-TEST(RateControlQModeTest, TestMock) {
+TEST_F(RateControlQModeTest, TestMock) {
   MockRateControlQMode mock_rc;
   EXPECT_CALL(mock_rc,
               DetermineGopInfo(Field(&FirstpassInfo::num_mbs_16x16, 1000)))
-      .WillOnce(Return(GopStructList{ { 6, 0, 0, {} }, { 4, 0, 0, {} } }));
+      .WillOnce(Return(aom::Status{ AOM_CODEC_ERROR, "message" }));
   FirstpassInfo firstpass_info = {};
   firstpass_info.num_mbs_16x16 = 1000;
-  EXPECT_THAT(mock_rc.DetermineGopInfo(firstpass_info),
-              ElementsAre(Field(&GopStruct::show_frame_count, 6),
-                          Field(&GopStruct::show_frame_count, 4)));
+  const auto result = mock_rc.DetermineGopInfo(firstpass_info);
+  EXPECT_EQ(result.status().code, AOM_CODEC_ERROR);
+  EXPECT_EQ(result.status().message, "message");
 }
 
 }  // namespace aom

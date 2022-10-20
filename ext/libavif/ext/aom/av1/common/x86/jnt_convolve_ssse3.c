@@ -220,8 +220,7 @@ void av1_dist_wtd_convolve_2d_ssse3(
           if (w > 4)
             _mm_storel_epi64((__m128i *)(&dst0[i * dst_stride0 + j]), res_8);
           else
-            *(uint32_t *)(&dst0[i * dst_stride0 + j]) =
-                _mm_cvtsi128_si32(res_8);
+            *(int *)(&dst0[i * dst_stride0 + j]) = _mm_cvtsi128_si32(res_8);
         } else {
           _mm_store_si128((__m128i *)(&dst[i * dst_stride + j]), res_unsigned);
         }

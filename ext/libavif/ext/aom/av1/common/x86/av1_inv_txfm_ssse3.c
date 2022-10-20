@@ -2249,7 +2249,7 @@ static INLINE void lowbd_write_buffer_4xn_sse2(__m128i *in, uint8_t *output,
     const __m128i v = _mm_cvtsi32_si128(*((uint32_t *)(output + i * stride)));
     __m128i u = _mm_adds_epi16(in[j], _mm_unpacklo_epi8(v, zero));
     u = _mm_packus_epi16(u, zero);
-    *((uint32_t *)(output + i * stride)) = _mm_cvtsi128_si32(u);
+    *((int *)(output + i * stride)) = _mm_cvtsi128_si32(u);
   }
 }
 

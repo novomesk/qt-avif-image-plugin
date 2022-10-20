@@ -24,13 +24,13 @@ namespace {
 struct DecodeParam {
   int threads;
   const char *filename;
-  const char *res_filename;  // If NULL, the result filename is
+  const char *res_filename;  // If nullptr, the result filename is
                              // filename + ".res".
 };
 
 // Constructs result file name.
 std::string GetResFilename(const DecodeParam &param) {
-  if (param.res_filename != NULL) return param.res_filename;
+  if (param.res_filename != nullptr) return param.res_filename;
   const std::string filename = param.filename;
   return filename + ".res";
 }
@@ -43,10 +43,10 @@ std::ostream &operator<<(std::ostream &os, const DecodeParam &dp) {
 class InvalidFileTest : public ::libaom_test::DecoderTest,
                         public ::libaom_test::CodecTestWithParam<DecodeParam> {
  protected:
-  InvalidFileTest() : DecoderTest(GET_PARAM(0)), res_file_(NULL) {}
+  InvalidFileTest() : DecoderTest(GET_PARAM(0)), res_file_(nullptr) {}
 
   virtual ~InvalidFileTest() {
-    if (res_file_ != NULL) fclose(res_file_);
+    if (res_file_ != nullptr) fclose(res_file_);
   }
 
   void OpenResFile(const std::string &res_file_name) {
@@ -121,36 +121,36 @@ class InvalidFileTest : public ::libaom_test::DecoderTest,
 
 TEST_P(InvalidFileTest, ReturnCode) { RunTest(); }
 
-// If res_filename (the third field) is NULL, then the result filename is
+// If res_filename (the third field) is nullptr, then the result filename is
 // filename + ".res" by default. Set res_filename to a string if the result
 // filename differs from the default.
 const DecodeParam kAV1InvalidFileTests[] = {
   // { threads, filename, res_filename }
-  { 1, "invalid-bug-1814.ivf", NULL },
-  { 1, "invalid-chromium-906381.ivf", NULL },
-  { 1, "invalid-google-142530197.ivf", NULL },
-  { 1, "invalid-google-142530197-1.ivf", NULL },
+  { 1, "invalid-bug-1814.ivf", nullptr },
+  { 1, "invalid-chromium-906381.ivf", nullptr },
+  { 1, "invalid-google-142530197.ivf", nullptr },
+  { 1, "invalid-google-142530197-1.ivf", nullptr },
   { 4, "invalid-oss-fuzz-9463.ivf", "invalid-oss-fuzz-9463.ivf.res.2" },
-  { 1, "invalid-oss-fuzz-9720.ivf", NULL },
+  { 1, "invalid-oss-fuzz-9720.ivf", nullptr },
   { 1, "invalid-oss-fuzz-10389.ivf", "invalid-oss-fuzz-10389.ivf.res.4" },
   { 1, "invalid-oss-fuzz-11523.ivf", "invalid-oss-fuzz-11523.ivf.res.2" },
-  { 4, "invalid-oss-fuzz-15363.ivf", NULL },
+  { 4, "invalid-oss-fuzz-15363.ivf", nullptr },
   { 1, "invalid-oss-fuzz-16437.ivf", "invalid-oss-fuzz-16437.ivf.res.2" },
-  { 1, "invalid-oss-fuzz-24706.ivf", NULL },
+  { 1, "invalid-oss-fuzz-24706.ivf", nullptr },
 #if CONFIG_AV1_HIGHBITDEPTH
   // These test vectors contain 10-bit or 12-bit video.
-  { 1, "invalid-oss-fuzz-9288.ivf", NULL },
-  { 1, "invalid-oss-fuzz-9482.ivf", NULL },
-  { 1, "invalid-oss-fuzz-10061.ivf", NULL },
-  { 1, "invalid-oss-fuzz-10117-mc-buf-use-highbd.ivf", NULL },
-  { 1, "invalid-oss-fuzz-10227.ivf", NULL },
-  { 4, "invalid-oss-fuzz-10555.ivf", NULL },
-  { 1, "invalid-oss-fuzz-10705.ivf", NULL },
+  { 1, "invalid-oss-fuzz-9288.ivf", nullptr },
+  { 1, "invalid-oss-fuzz-9482.ivf", nullptr },
+  { 1, "invalid-oss-fuzz-10061.ivf", nullptr },
+  { 1, "invalid-oss-fuzz-10117-mc-buf-use-highbd.ivf", nullptr },
+  { 1, "invalid-oss-fuzz-10227.ivf", nullptr },
+  { 4, "invalid-oss-fuzz-10555.ivf", nullptr },
+  { 1, "invalid-oss-fuzz-10705.ivf", nullptr },
   { 1, "invalid-oss-fuzz-10723.ivf", "invalid-oss-fuzz-10723.ivf.res.2" },
-  { 1, "invalid-oss-fuzz-10779.ivf", NULL },
-  { 1, "invalid-oss-fuzz-11477.ivf", NULL },
+  { 1, "invalid-oss-fuzz-10779.ivf", nullptr },
+  { 1, "invalid-oss-fuzz-11477.ivf", nullptr },
   { 1, "invalid-oss-fuzz-11479.ivf", "invalid-oss-fuzz-11479.ivf.res.2" },
-  { 1, "invalid-oss-fuzz-33030.ivf", NULL },
+  { 1, "invalid-oss-fuzz-33030.ivf", nullptr },
 #endif
 };
 

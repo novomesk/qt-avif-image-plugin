@@ -15,19 +15,7 @@
 #include "config/aom_dsp_rtcd.h"
 
 #include "aom/aom_integer.h"
-
-static INLINE unsigned int horizontal_long_add_16x8(const uint16x8_t vec_lo,
-                                                    const uint16x8_t vec_hi) {
-  const uint32x4_t vec_l_lo =
-      vaddl_u16(vget_low_u16(vec_lo), vget_high_u16(vec_lo));
-  const uint32x4_t vec_l_hi =
-      vaddl_u16(vget_low_u16(vec_hi), vget_high_u16(vec_hi));
-  const uint32x4_t a = vaddq_u32(vec_l_lo, vec_l_hi);
-  const uint64x2_t b = vpaddlq_u32(a);
-  const uint32x2_t c = vadd_u32(vreinterpret_u32_u64(vget_low_u64(b)),
-                                vreinterpret_u32_u64(vget_high_u64(b)));
-  return vget_lane_u32(c, 0);
-}
+#include "aom_dsp/arm/sum_neon.h"
 
 // Calculate the absolute difference of 64 bytes from vec_src_00, vec_src_16,
 // vec_src_32, vec_src_48 and ref. Accumulate partial sums in vec_sum_ref_lo
@@ -120,10 +108,10 @@ void aom_sad64x64x4d_neon(const uint8_t *src, int src_stride,
     ref3 += ref_stride;
   }
 
-  res[0] = horizontal_long_add_16x8(vec_sum_ref0_lo, vec_sum_ref0_hi);
-  res[1] = horizontal_long_add_16x8(vec_sum_ref1_lo, vec_sum_ref1_hi);
-  res[2] = horizontal_long_add_16x8(vec_sum_ref2_lo, vec_sum_ref2_hi);
-  res[3] = horizontal_long_add_16x8(vec_sum_ref3_lo, vec_sum_ref3_hi);
+  res[0] = horizontal_long_add_u16x8(vec_sum_ref0_lo, vec_sum_ref0_hi);
+  res[1] = horizontal_long_add_u16x8(vec_sum_ref1_lo, vec_sum_ref1_hi);
+  res[2] = horizontal_long_add_u16x8(vec_sum_ref2_lo, vec_sum_ref2_hi);
+  res[3] = horizontal_long_add_u16x8(vec_sum_ref3_lo, vec_sum_ref3_hi);
 }
 
 void aom_sad32x32x4d_neon(const uint8_t *src, int src_stride,
@@ -164,10 +152,10 @@ void aom_sad32x32x4d_neon(const uint8_t *src, int src_stride,
     ref3 += ref_stride;
   }
 
-  res[0] = horizontal_long_add_16x8(vec_sum_ref0_lo, vec_sum_ref0_hi);
-  res[1] = horizontal_long_add_16x8(vec_sum_ref1_lo, vec_sum_ref1_hi);
-  res[2] = horizontal_long_add_16x8(vec_sum_ref2_lo, vec_sum_ref2_hi);
-  res[3] = horizontal_long_add_16x8(vec_sum_ref3_lo, vec_sum_ref3_hi);
+  res[0] = horizontal_long_add_u16x8(vec_sum_ref0_lo, vec_sum_ref0_hi);
+  res[1] = horizontal_long_add_u16x8(vec_sum_ref1_lo, vec_sum_ref1_hi);
+  res[2] = horizontal_long_add_u16x8(vec_sum_ref2_lo, vec_sum_ref2_hi);
+  res[3] = horizontal_long_add_u16x8(vec_sum_ref3_lo, vec_sum_ref3_hi);
 }
 
 void aom_sad16x16x4d_neon(const uint8_t *src, int src_stride,
@@ -219,24 +207,10 @@ void aom_sad16x16x4d_neon(const uint8_t *src, int src_stride,
     ref3 += ref_stride;
   }
 
-  res[0] = horizontal_long_add_16x8(vec_sum_ref0_lo, vec_sum_ref0_hi);
-  res[1] = horizontal_long_add_16x8(vec_sum_ref1_lo, vec_sum_ref1_hi);
-  res[2] = horizontal_long_add_16x8(vec_sum_ref2_lo, vec_sum_ref2_hi);
-  res[3] = horizontal_long_add_16x8(vec_sum_ref3_lo, vec_sum_ref3_hi);
-}
-
-static INLINE unsigned int horizontal_add_16x4(const uint16x4_t vec_16x4) {
-  const uint32x2_t a = vpaddl_u16(vec_16x4);
-  const uint64x1_t b = vpaddl_u32(a);
-  return vget_lane_u32(vreinterpret_u32_u64(b), 0);
-}
-
-static INLINE unsigned int horizontal_add_16x8(const uint16x8_t vec_16x8) {
-  const uint32x4_t a = vpaddlq_u16(vec_16x8);
-  const uint64x2_t b = vpaddlq_u32(a);
-  const uint32x2_t c = vadd_u32(vreinterpret_u32_u64(vget_low_u64(b)),
-                                vreinterpret_u32_u64(vget_high_u64(b)));
-  return vget_lane_u32(c, 0);
+  res[0] = horizontal_long_add_u16x8(vec_sum_ref0_lo, vec_sum_ref0_hi);
+  res[1] = horizontal_long_add_u16x8(vec_sum_ref1_lo, vec_sum_ref1_hi);
+  res[2] = horizontal_long_add_u16x8(vec_sum_ref2_lo, vec_sum_ref2_hi);
+  res[3] = horizontal_long_add_u16x8(vec_sum_ref3_lo, vec_sum_ref3_hi);
 }
 
 static void sad_row4_neon(uint16x4_t *vec_src, const uint8x8_t q0,
@@ -330,10 +304,10 @@ void aom_sadMxNx4d_neon(int width, int height, const uint8_t *src,
         sad_row4_neon(&q2, vreinterpret_u8_u32(q8), vreinterpret_u8_u32(q6));
         sad_row4_neon(&q3, vreinterpret_u8_u32(q8), vreinterpret_u8_u32(q7));
 
-        res[0] += horizontal_add_16x4(q0);
-        res[1] += horizontal_add_16x4(q1);
-        res[2] += horizontal_add_16x4(q2);
-        res[3] += horizontal_add_16x4(q3);
+        res[0] += horizontal_add_u16x4(q0);
+        res[1] += horizontal_add_u16x4(q1);
+        res[2] += horizontal_add_u16x4(q2);
+        res[3] += horizontal_add_u16x4(q3);
       }
       break;
     }
@@ -357,10 +331,10 @@ void aom_sadMxNx4d_neon(int width, int height, const uint8_t *src,
         ref2 += ref_stride;
         ref3 += ref_stride;
 
-        res[0] += horizontal_add_16x4(q0);
-        res[1] += horizontal_add_16x4(q1);
-        res[2] += horizontal_add_16x4(q2);
-        res[3] += horizontal_add_16x4(q3);
+        res[0] += horizontal_add_u16x4(q0);
+        res[1] += horizontal_add_u16x4(q1);
+        res[2] += horizontal_add_u16x4(q2);
+        res[3] += horizontal_add_u16x4(q3);
       }
       break;
     }
@@ -384,10 +358,10 @@ void aom_sadMxNx4d_neon(int width, int height, const uint8_t *src,
         ref2 += ref_stride;
         ref3 += ref_stride;
 
-        res[0] += horizontal_add_16x8(q0);
-        res[1] += horizontal_add_16x8(q1);
-        res[2] += horizontal_add_16x8(q2);
-        res[3] += horizontal_add_16x8(q3);
+        res[0] += horizontal_add_u16x8(q0);
+        res[1] += horizontal_add_u16x8(q1);
+        res[2] += horizontal_add_u16x8(q2);
+        res[3] += horizontal_add_u16x8(q3);
       }
       break;
     }
@@ -418,10 +392,10 @@ void aom_sadMxNx4d_neon(int width, int height, const uint8_t *src,
         ref2 += ref_stride;
         ref3 += ref_stride;
 
-        res[0] += horizontal_add_16x8(q0);
-        res[1] += horizontal_add_16x8(q1);
-        res[2] += horizontal_add_16x8(q2);
-        res[3] += horizontal_add_16x8(q3);
+        res[0] += horizontal_add_u16x8(q0);
+        res[1] += horizontal_add_u16x8(q1);
+        res[2] += horizontal_add_u16x8(q2);
+        res[3] += horizontal_add_u16x8(q3);
       }
       break;
     }
@@ -466,10 +440,10 @@ void aom_sadMxNx4d_neon(int width, int height, const uint8_t *src,
         ref2 += ref_stride;
         ref3 += ref_stride;
 
-        res[0] += horizontal_add_16x8(q0);
-        res[1] += horizontal_add_16x8(q1);
-        res[2] += horizontal_add_16x8(q2);
-        res[3] += horizontal_add_16x8(q3);
+        res[0] += horizontal_add_u16x8(q0);
+        res[1] += horizontal_add_u16x8(q1);
+        res[2] += horizontal_add_u16x8(q2);
+        res[3] += horizontal_add_u16x8(q3);
       }
       break;
     }
@@ -542,10 +516,10 @@ void aom_sadMxNx4d_neon(int width, int height, const uint8_t *src,
         ref2 += ref_stride;
         ref3 += ref_stride;
 
-        res[0] += horizontal_add_16x8(q0);
-        res[1] += horizontal_add_16x8(q1);
-        res[2] += horizontal_add_16x8(q2);
-        res[3] += horizontal_add_16x8(q3);
+        res[0] += horizontal_add_u16x8(q0);
+        res[1] += horizontal_add_u16x8(q1);
+        res[2] += horizontal_add_u16x8(q2);
+        res[3] += horizontal_add_u16x8(q3);
       }
     }
   }

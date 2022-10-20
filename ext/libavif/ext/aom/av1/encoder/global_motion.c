@@ -713,9 +713,18 @@ static INLINE void sobel_xy_image_gradient(const uint8_t *src, int src_stride,
   }
 }
 
+static void free_pyramid(ImagePyramid *pyr) {
+  aom_free(pyr->level_buffer);
+  if (pyr->has_gradient) {
+    aom_free(pyr->level_dx_buffer);
+    aom_free(pyr->level_dy_buffer);
+  }
+  aom_free(pyr);
+}
+
 static ImagePyramid *alloc_pyramid(int width, int height, int pad_size,
                                    int compute_gradient) {
-  ImagePyramid *pyr = aom_malloc(sizeof(*pyr));
+  ImagePyramid *pyr = aom_calloc(1, sizeof(*pyr));
   if (!pyr) return NULL;
   pyr->has_gradient = compute_gradient;
   // 2 * width * height is the upper bound for a buffer that fits
@@ -724,7 +733,7 @@ static ImagePyramid *alloc_pyramid(int width, int height, int pad_size,
                           (width + 2 * pad_size) * 2 * pad_size * N_LEVELS;
   pyr->level_buffer = aom_malloc(buffer_size);
   if (!pyr->level_buffer) {
-    aom_free(pyr);
+    free_pyramid(pyr);
     return NULL;
   }
   memset(pyr->level_buffer, 0, buffer_size);
@@ -733,21 +742,14 @@ static ImagePyramid *alloc_pyramid(int width, int height, int pad_size,
     const int gradient_size =
         sizeof(*pyr->level_dx_buffer) * 2 * width * height +
         (width + 2 * pad_size) * 2 * pad_size * N_LEVELS;
-    pyr->level_dx_buffer = aom_malloc(gradient_size);
-    pyr->level_dy_buffer = aom_malloc(gradient_size);
-    memset(pyr->level_dx_buffer, 0, gradient_size);
-    memset(pyr->level_dy_buffer, 0, gradient_size);
+    pyr->level_dx_buffer = aom_calloc(1, gradient_size);
+    pyr->level_dy_buffer = aom_calloc(1, gradient_size);
+    if (!(pyr->level_dx_buffer && pyr->level_dy_buffer)) {
+      free_pyramid(pyr);
+      return NULL;
+    }
   }
   return pyr;
-}
-
-static void free_pyramid(ImagePyramid *pyr) {
-  aom_free(pyr->level_buffer);
-  if (pyr->has_gradient) {
-    aom_free(pyr->level_dx_buffer);
-    aom_free(pyr->level_dy_buffer);
-  }
-  aom_free(pyr);
 }
 
 static INLINE void update_level_dims(ImagePyramid *frm_pyr, int level) {

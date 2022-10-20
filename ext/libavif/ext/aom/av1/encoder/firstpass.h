@@ -38,7 +38,7 @@ struct ThreadData;
  * normalized to each MB. MV related stats (MVc, MVr, etc.) are normalized to
  * the frame width and height. See function normalize_firstpass_stats.
  */
-typedef struct {
+typedef struct FIRSTPASS_STATS {
   /*!
    * Frame number in display order, if stats are for a single frame.
    * No real meaning for a collection of frames.
@@ -362,6 +362,23 @@ typedef struct GF_GROUP {
   REFBUF_STATE refbuf_state[MAX_STATIC_GF_GROUP_LENGTH];
   int arf_index;  // the index in the gf group of ARF, if no arf, then -1
   int size;       // The total length of a GOP
+
+  // The offset into lookahead_ctx for choosing
+  // source of frame parallel encodes.
+  int src_offset[MAX_STATIC_GF_GROUP_LENGTH];
+  // Stores the display order hint of each frame in the current GF_GROUP.
+  int display_idx[MAX_STATIC_GF_GROUP_LENGTH];
+
+  // The reference frame list maps the reference frame indexes to its
+  // buffer index in the decoded buffer. A value of -1 means the
+  // corresponding reference frame index doesn't point towards any
+  // previously decoded frame.
+  int8_t ref_frame_list[MAX_STATIC_GF_GROUP_LENGTH][REF_FRAMES];
+  // Update frame index
+  int update_ref_idx[MAX_STATIC_GF_GROUP_LENGTH];
+  // The map_idx of primary reference
+  int primary_ref_idx[MAX_STATIC_GF_GROUP_LENGTH];
+
   // Indicates the level of parallelism in frame parallel encodes.
   // 0 : frame is independently encoded (not part of parallel encodes).
   // 1 : frame is the first in encode order in a given parallel encode set.
@@ -372,21 +389,12 @@ typedef struct GF_GROUP {
   // 1 : frame is a non-reference frame.
   int is_frame_non_ref[MAX_STATIC_GF_GROUP_LENGTH];
 
-  // The offset into lookahead_ctx for choosing
-  // source of frame parallel encodes.
-  int src_offset[MAX_STATIC_GF_GROUP_LENGTH];
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
-  // Stores the display order hint of each frame in the current GF_GROUP.
-  int display_idx[MAX_STATIC_GF_GROUP_LENGTH];
   // Stores the display order hint of the frames not to be
   // refreshed by the current frame.
   int skip_frame_refresh[MAX_STATIC_GF_GROUP_LENGTH][REF_FRAMES];
   // Stores the display order hint of the frame to be excluded during reference
   // assignment.
   int skip_frame_as_ref[MAX_STATIC_GF_GROUP_LENGTH];
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   /*!\endcond */
 } GF_GROUP;
 /*!\cond */

@@ -508,7 +508,7 @@ static AOM_INLINE void cdef_params_init(const YV12_BUFFER_CONFIG *frame,
 }
 
 static void pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
-                              int frames_since_key) {
+                              int frames_since_key, int is_screen_content) {
   const int bd = cm->seq_params->bit_depth;
   const int q =
       av1_ac_quant_QTX(cm->quant_params.base_qindex, 0, bd) >> (bd - 8);
@@ -527,32 +527,47 @@ static void pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
   int predicted_y_f2 = 0;
   int predicted_uv_f1 = 0;
   int predicted_uv_f2 = 0;
-  if (!frame_is_intra_only(cm)) {
-    predicted_y_f1 = clamp((int)roundf(q * q * -0.0000023593946f +
-                                       q * 0.0068615186f + 0.02709886f),
-                           0, 15);
-    predicted_y_f2 = clamp((int)roundf(q * q * -0.00000057629734f +
-                                       q * 0.0013993345f + 0.03831067f),
-                           0, 3);
-    predicted_uv_f1 = clamp((int)roundf(q * q * -0.0000007095069f +
-                                        q * 0.0034628846f + 0.00887099f),
-                            0, 15);
-    predicted_uv_f2 = clamp((int)roundf(q * q * 0.00000023874085f +
-                                        q * 0.00028223585f + 0.05576307f),
-                            0, 3);
+  if (is_screen_content) {
+    predicted_y_f1 =
+        (int)(5.88217781e-06 * q * q + 6.10391455e-03 * q + 9.95043102e-02);
+    predicted_y_f2 =
+        (int)(-7.79934857e-06 * q * q + 6.58957830e-03 * q + 8.81045025e-01);
+    predicted_uv_f1 =
+        (int)(-6.79500136e-06 * q * q + 1.02695586e-02 * q + 1.36126802e-01);
+    predicted_uv_f2 =
+        (int)(-9.99613695e-08 * q * q - 1.79361339e-05 * q + 1.17022324e+0);
+    predicted_y_f1 = clamp(predicted_y_f1, 0, 15);
+    predicted_y_f2 = clamp(predicted_y_f2, 0, 3);
+    predicted_uv_f1 = clamp(predicted_uv_f1, 0, 15);
+    predicted_uv_f2 = clamp(predicted_uv_f2, 0, 3);
   } else {
-    predicted_y_f1 = clamp(
-        (int)roundf(q * q * 0.0000033731974f + q * 0.008070594f + 0.0187634f),
-        0, 15);
-    predicted_y_f2 = clamp(
-        (int)roundf(q * q * 0.0000029167343f + q * 0.0027798624f + 0.0079405f),
-        0, 3);
-    predicted_uv_f1 = clamp(
-        (int)roundf(q * q * -0.0000130790995f + q * 0.012892405f - 0.00748388f),
-        0, 15);
-    predicted_uv_f2 = clamp((int)roundf(q * q * 0.0000032651783f +
-                                        q * 0.00035520183f + 0.00228092f),
-                            0, 3);
+    if (!frame_is_intra_only(cm)) {
+      predicted_y_f1 = clamp((int)roundf(q * q * -0.0000023593946f +
+                                         q * 0.0068615186f + 0.02709886f),
+                             0, 15);
+      predicted_y_f2 = clamp((int)roundf(q * q * -0.00000057629734f +
+                                         q * 0.0013993345f + 0.03831067f),
+                             0, 3);
+      predicted_uv_f1 = clamp((int)roundf(q * q * -0.0000007095069f +
+                                          q * 0.0034628846f + 0.00887099f),
+                              0, 15);
+      predicted_uv_f2 = clamp((int)roundf(q * q * 0.00000023874085f +
+                                          q * 0.00028223585f + 0.05576307f),
+                              0, 3);
+    } else {
+      predicted_y_f1 = clamp(
+          (int)roundf(q * q * 0.0000033731974f + q * 0.008070594f + 0.0187634f),
+          0, 15);
+      predicted_y_f2 = clamp((int)roundf(q * q * 0.0000029167343f +
+                                         q * 0.0027798624f + 0.0079405f),
+                             0, 3);
+      predicted_uv_f1 = clamp((int)roundf(q * q * -0.0000130790995f +
+                                          q * 0.012892405f - 0.00748388f),
+                              0, 15);
+      predicted_uv_f2 = clamp((int)roundf(q * q * 0.0000032651783f +
+                                          q * 0.00035520183f + 0.00228092f),
+                              0, 3);
+    }
   }
   cdef_info->cdef_strengths[0] =
       predicted_y_f1 * CDEF_SEC_STRENGTHS + predicted_y_f2;
@@ -584,7 +599,8 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
                      const YV12_BUFFER_CONFIG *ref, AV1_COMMON *cm,
                      MACROBLOCKD *xd, CDEF_PICK_METHOD pick_method, int rdmult,
                      int skip_cdef_feature, int frames_since_key,
-                     CDEF_CONTROL cdef_control, int non_reference_frame) {
+                     CDEF_CONTROL cdef_control, const int is_screen_content,
+                     int non_reference_frame) {
   assert(cdef_control != CDEF_NONE);
   if (cdef_control == CDEF_REFERENCE && non_reference_frame) {
     CdefInfo *const cdef_info = &cm->cdef_info;
@@ -596,7 +612,8 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
   }
 
   if (pick_method == CDEF_PICK_FROM_Q) {
-    pick_cdef_from_qp(cm, skip_cdef_feature, frames_since_key);
+    pick_cdef_from_qp(cm, skip_cdef_feature, frames_since_key,
+                      is_screen_content);
     return;
   }
   const CommonModeInfoParams *const mi_params = &cm->mi_params;

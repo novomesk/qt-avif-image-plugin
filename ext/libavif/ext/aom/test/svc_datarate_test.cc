@@ -128,10 +128,10 @@ class DatarateTestSVC
     }
     // Set the reference/update flags, layer_id, and reference_map
     // buffer index.
-    frame_flags_ =
-        set_layer_pattern(video->frame(), &layer_id_, &ref_frame_config_,
-                          &ref_frame_comp_pred_, spatial_layer_id, multi_ref_,
-                          comp_pred_, (video->frame() % cfg_.kf_max_dist) == 0);
+    frame_flags_ = set_layer_pattern(
+        video->frame(), &layer_id_, &ref_frame_config_, &ref_frame_comp_pred_,
+        spatial_layer_id, multi_ref_, comp_pred_,
+        (video->frame() % cfg_.kf_max_dist) == 0, dynamic_enable_disable_mode_);
     if (intra_only_ == 1 && frame_sync_ > 0) {
       // Set an Intra-only frame on SL0 at frame_sync_.
       // In order to allow decoding to start on SL0 in mid-sequence we need to
@@ -192,6 +192,13 @@ class DatarateTestSVC
     DatarateTest::PreEncodeFrameHook(video, encoder);
   }
 
+  virtual void PostEncodeFrameHook(::libaom_test::Encoder *encoder) {
+    int num_operating_points;
+    encoder->Control(AV1E_GET_NUM_OPERATING_POINTS, &num_operating_points);
+    ASSERT_EQ(num_operating_points,
+              number_temporal_layers_ * number_spatial_layers_);
+  }
+
   virtual void FramePktHook(const aom_codec_cx_pkt_t *pkt) {
     const size_t frame_size_in_bits = pkt->data.frame.sz * 8;
     // Update the layer cumulative  bitrate.
@@ -247,7 +254,8 @@ class DatarateTestSVC
       int frame_cnt, aom_svc_layer_id_t *layer_id,
       aom_svc_ref_frame_config_t *ref_frame_config,
       aom_svc_ref_frame_comp_pred_t *ref_frame_comp_pred, int spatial_layer,
-      int multi_ref, int comp_pred, int is_key_frame) {
+      int multi_ref, int comp_pred, int is_key_frame,
+      int dynamic_enable_disable_mode) {
     int lag_index = 0;
     int base_count = frame_cnt >> 2;
     layer_id->spatial_layer_id = spatial_layer;
@@ -268,6 +276,9 @@ class DatarateTestSVC
     int layer_flags = 0;
     // Always reference LAST.
     ref_frame_config->reference[0] = 1;
+    if (number_temporal_layers_ == 1 && number_spatial_layers_ == 1) {
+      ref_frame_config->refresh[0] = 1;
+    }
     if (number_temporal_layers_ == 3 && number_spatial_layers_ == 1) {
       // 3-layer:
       //   1    3   5    7
@@ -482,11 +493,18 @@ class DatarateTestSVC
       // 10 TL0 frames here.
       if (multi_ref && layer_id->spatial_layer_id == 2) {
         ref_frame_config->ref_idx[6] = 7;
-        ref_frame_config->reference[6] = 1;
+        if (!is_key_frame) ref_frame_config->reference[6] = 1;
         if (base_count % 10 == 0 && layer_id->temporal_layer_id == 0)
           ref_frame_config->refresh[7] = 1;
       }
     }
+    // If the top spatial layer is first-time encoded in mid-sequence
+    // (i.e., dynamic_enable_disable_mode = 1), then don't predict from LAST,
+    // since it will have been last updated on first key frame (SL0) and so
+    // be different resolution from SL2.
+    if (dynamic_enable_disable_mode == 1 &&
+        layer_id->spatial_layer_id == number_spatial_layers_ - 1)
+      ref_frame_config->reference[0] = 0;
     return layer_flags;
   }
 
@@ -595,6 +613,36 @@ class DatarateTestSVC
     // encoder side, but is always applied on decoder.
     // This means 30 = #frames(60) - #TL2_frames(30).
     EXPECT_EQ((int)GetMismatchFrames(), 30);
+  }
+  virtual void BasicRateTargetingSVC1TL1SLScreenScCutsMotionTest() {
+    cfg_.rc_buf_initial_sz = 500;
+    cfg_.rc_buf_optimal_sz = 500;
+    cfg_.rc_buf_sz = 1000;
+    cfg_.rc_dropframe_thresh = 0;
+    cfg_.rc_min_quantizer = 0;
+    cfg_.rc_max_quantizer = 63;
+    cfg_.rc_end_usage = AOM_CBR;
+    cfg_.g_lag_in_frames = 0;
+    cfg_.g_error_resilient = 0;
+
+    ::libaom_test::I420VideoSource video("hantro_collage_w352h288.yuv", 352,
+                                         288, 30, 1, 0, 300);
+
+    const int bitrate_array[2] = { 200, 500 };
+    cfg_.rc_target_bitrate = bitrate_array[GET_PARAM(4)];
+    ResetModel();
+    screen_mode_ = 1;
+    number_temporal_layers_ = 1;
+    number_spatial_layers_ = 1;
+    target_layer_bitrate_[0] = cfg_.rc_target_bitrate;
+    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+    for (int i = 0; i < number_temporal_layers_ * number_spatial_layers_; i++) {
+      ASSERT_GE(effective_datarate_tl[i], target_layer_bitrate_[i] * 0.40)
+          << " The datarate for the file is lower than target by too much!";
+      ASSERT_LE(effective_datarate_tl[i], target_layer_bitrate_[i] * 1.7)
+          << " The datarate for the file is greater than target by too much!";
+    }
+    EXPECT_EQ((int)GetMismatchFrames(), 0);
   }
 
   virtual void BasicRateTargetingSVC3TL1SLResizeTest() {
@@ -714,7 +762,7 @@ class DatarateTestSVC
     // Only check datarate on SL0 - this is layer that is decoded starting at
     // frame_to_start_decoding_.
     for (int i = 0; i < number_temporal_layers_; i++) {
-      ASSERT_GE(effective_datarate_tl[i], target_layer_bitrate_[i] * 0.70)
+      ASSERT_GE(effective_datarate_tl[i], target_layer_bitrate_[i] * 0.50)
           << " The datarate for the file is lower than target by too much!";
       ASSERT_LE(effective_datarate_tl[i], target_layer_bitrate_[i] * 1.35)
           << " The datarate for the file is greater than target by too much!";
@@ -1405,7 +1453,7 @@ class DatarateTestSVC
     // Drop TL1 and TL2: for part of sequence. Start at first TL2 at
     // frame 101, and end at second T2 at frame 199. Frame 200 is TL0,
     // so we can continue decoding without mismatch (since LAST is the
-    // only reference and error_resil = 1 on TL1/TL2 frames).
+    // only reference and error_resilient = 1 on TL1/TL2 frames).
     int n = 0;
     int num_nonref = 300 / 2;
     for (int i = 101; i < 200; i++) {
@@ -1684,6 +1732,12 @@ TEST_P(DatarateTestSVC, BasicRateTargetingSVC3TL1SL) {
 // for screen mode.
 TEST_P(DatarateTestSVC, BasicRateTargetingSVC3TL1SLScreen) {
   BasicRateTargetingSVC3TL1SLScreenTest();
+}
+
+// Check basic rate targeting for CBR, for 1 temporal layer, 1 spatial
+// for screen mode, with source with many scene cuts and motion.
+TEST_P(DatarateTestSVC, BasicRateTargetingSVC1TL1SLScreenScCutsMotion) {
+  BasicRateTargetingSVC1TL1SLScreenScCutsMotionTest();
 }
 
 // Check basic rate targeting for CBR, for 3 temporal layers, 1 spatial,

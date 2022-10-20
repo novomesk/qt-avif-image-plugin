@@ -42,7 +42,7 @@ static void get_squared_error(const uint8_t *frame1, const unsigned int stride,
   for (int i = 0; i < block_height; i++) {
     for (int j = 0; j < block_width; j += 16) {
       // Set zero to uninitialized memory to avoid uninitialized loads later
-      *(uint32_t *)(dst) = _mm_cvtsi128_si32(_mm_setzero_si128());
+      *(int *)(dst) = _mm_cvtsi128_si32(_mm_setzero_si128());
 
       __m128i vsrc1 = _mm_loadu_si128((__m128i *)(src1 + j));
       __m128i vsrc2 = _mm_loadu_si128((__m128i *)(src2 + j));
@@ -63,8 +63,7 @@ static void get_squared_error(const uint8_t *frame1, const unsigned int stride,
     }
 
     // Set zero to uninitialized memory to avoid uninitialized loads later
-    *(uint32_t *)(dst + block_width + 2) =
-        _mm_cvtsi128_si32(_mm_setzero_si128());
+    *(int *)(dst + block_width + 2) = _mm_cvtsi128_si32(_mm_setzero_si128());
 
     src1 += stride;
     src2 += stride2;

@@ -166,8 +166,12 @@ void av1_cyclic_reset_segment_skip(const AV1_COMP *cpi, MACROBLOCK *const x,
   const int bh = mi_size_high[bsize];
   const int xmis = AOMMIN(cm->mi_params.mi_cols - mi_col, bw);
   const int ymis = AOMMIN(cm->mi_params.mi_rows - mi_row, bh);
+
+  assert(cm->seg.enabled);
+
   if (!cr->skip_over4x4) {
-    mbmi->segment_id = av1_get_spatial_seg_pred(cm, xd, &cdf_num);
+    mbmi->segment_id =
+        av1_get_spatial_seg_pred(cm, xd, &cdf_num, cr->skip_over4x4);
     if (prev_segment_id != mbmi->segment_id) {
       const int block_index = mi_row * cm->mi_params.mi_cols + mi_col;
       for (int mi_y = 0; mi_y < ymis; mi_y++) {
@@ -266,7 +270,6 @@ void av1_cyclic_refresh_update_segment(const AV1_COMP *cpi, MACROBLOCK *const x,
 void av1_init_cyclic_refresh_counters(MACROBLOCK *const x) {
   x->actual_num_seg1_blocks = 0;
   x->actual_num_seg2_blocks = 0;
-  x->cnt_zeromv = 0;
 }
 
 // Accumulate cyclic refresh counters.
@@ -274,39 +277,6 @@ void av1_accumulate_cyclic_refresh_counters(
     CYCLIC_REFRESH *const cyclic_refresh, const MACROBLOCK *const x) {
   cyclic_refresh->actual_num_seg1_blocks += x->actual_num_seg1_blocks;
   cyclic_refresh->actual_num_seg2_blocks += x->actual_num_seg2_blocks;
-  cyclic_refresh->cnt_zeromv += x->cnt_zeromv;
-}
-
-void av1_cyclic_refresh_postencode(AV1_COMP *const cpi) {
-  AV1_COMMON *const cm = &cpi->common;
-  const CommonModeInfoParams *const mi_params = &cm->mi_params;
-  CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
-  RATE_CONTROL *const rc = &cpi->rc;
-  SVC *const svc = &cpi->svc;
-  const int avg_cnt_zeromv =
-      100 * cr->cnt_zeromv / (mi_params->mi_rows * mi_params->mi_cols);
-
-  if (!cpi->ppi->use_svc ||
-      (cpi->ppi->use_svc &&
-       !cpi->svc.layer_context[cpi->svc.temporal_layer_id].is_key_frame &&
-       cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1)) {
-    rc->avg_frame_low_motion =
-        (rc->avg_frame_low_motion == 0)
-            ? avg_cnt_zeromv
-            : (3 * rc->avg_frame_low_motion + avg_cnt_zeromv) / 4;
-    // For SVC: set avg_frame_low_motion (only computed on top spatial layer)
-    // to all lower spatial layers.
-    if (cpi->ppi->use_svc &&
-        svc->spatial_layer_id == svc->number_spatial_layers - 1) {
-      for (int i = 0; i < svc->number_spatial_layers - 1; ++i) {
-        const int layer = LAYER_IDS_TO_IDX(i, svc->temporal_layer_id,
-                                           svc->number_temporal_layers);
-        LAYER_CONTEXT *const lc = &svc->layer_context[layer];
-        RATE_CONTROL *const lrc = &lc->rc;
-        lrc->avg_frame_low_motion = rc->avg_frame_low_motion;
-      }
-    }
-  }
 }
 
 void av1_cyclic_refresh_set_golden_update(AV1_COMP *const cpi) {
@@ -341,6 +311,9 @@ static void cyclic_refresh_update_map(AV1_COMP *const cpi) {
   unsigned char *const seg_map = cpi->enc_seg.map;
   int i, block_count, bl_index, sb_rows, sb_cols, sbs_in_frame;
   int xmis, ymis, x, y;
+  uint64_t sb_sad = 0;
+  uint64_t thresh_sad_low = 0;
+  uint64_t thresh_sad = INT64_MAX;
   memset(seg_map, CR_SEGMENT_ID_BASE, mi_params->mi_rows * mi_params->mi_cols);
   sb_cols = (mi_params->mi_cols + cm->seq_params->mib_size - 1) /
             cm->seq_params->mib_size;
@@ -370,14 +343,25 @@ static void cyclic_refresh_update_map(AV1_COMP *const cpi) {
     // Loop through all MI blocks in superblock and update map.
     xmis = AOMMIN(mi_params->mi_cols - mi_col, cm->seq_params->mib_size);
     ymis = AOMMIN(mi_params->mi_rows - mi_row, cm->seq_params->mib_size);
+    if (cpi->sf.rt_sf.sad_based_comp_prune && cr->use_block_sad_scene_det &&
+        cpi->rc.frames_since_key > 30 &&
+        cr->counter_encode_maxq_scene_change > 30 &&
+        cpi->src_sad_blk_64x64 != NULL) {
+      sb_sad = cpi->src_sad_blk_64x64[sb_col_index + sb_cols * sb_row_index];
+      int scale = (cm->width * cm->height < 640 * 360) ? 6 : 8;
+      int scale_low = 2;
+      thresh_sad = (scale * 64 * 64);
+      thresh_sad_low = (scale_low * 64 * 64);
+    }
     // cr_map only needed at 8x8 blocks.
     for (y = 0; y < ymis; y += 2) {
       for (x = 0; x < xmis; x += 2) {
         const int bl_index2 = bl_index + y * mi_params->mi_cols + x;
         // If the block is as a candidate for clean up then mark it
         // for possible boost/refresh (segment 1). The segment id may get
-        // reset to 0 later if block gets coded anything other than GLOBALMV.
-        if (cr->map[bl_index2] == 0) {
+        // reset to 0 later if block gets coded anything other than low motion.
+        // If the block_sad (sb_sad) is very low label it for refresh anyway.
+        if (cr->map[bl_index2] == 0 || sb_sad < thresh_sad_low) {
           sum_map += 4;
         } else if (cr->map[bl_index2] < 0) {
           cr->map[bl_index2]++;
@@ -386,7 +370,8 @@ static void cyclic_refresh_update_map(AV1_COMP *const cpi) {
     }
     // Enforce constant segment over superblock.
     // If segment is at least half of superblock, set to 1.
-    if (sum_map >= (xmis * ymis) >> 1) {
+    // Enforce that block sad (sb_sad) is not too high.
+    if (sum_map >= (xmis * ymis) >> 1 && sb_sad < thresh_sad) {
       for (y = 0; y < ymis; y++)
         for (x = 0; x < xmis; x++) {
           seg_map[bl_index + y * mi_params->mi_cols + x] = CR_SEGMENT_ID_BOOST1;
@@ -399,6 +384,10 @@ static void cyclic_refresh_update_map(AV1_COMP *const cpi) {
     }
   } while (cr->target_num_seg_blocks < block_count && i != cr->sb_index);
   cr->sb_index = i;
+  if (cr->target_num_seg_blocks == 0) {
+    // Disable segmentation, seg_map is already set to 0 above.
+    av1_disable_segmentation(&cm->seg);
+  }
 }
 
 // Set cyclic refresh parameters.
@@ -451,6 +440,11 @@ void av1_cyclic_refresh_update_parameters(AV1_COMP *const cpi) {
     cr->percent_refresh = 15;
   cr->max_qdelta_perc = 60;
   cr->time_for_refresh = 0;
+  cr->use_block_sad_scene_det =
+      (cpi->oxcf.tune_cfg.content != AOM_CONTENT_SCREEN &&
+       cm->seq_params->sb_size == BLOCK_64X64)
+          ? 1
+          : 0;
   cr->motion_thresh = 32;
   cr->rate_boost_fac =
       (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN) ? 10 : 15;

@@ -210,7 +210,7 @@ static void dr_prediction_z1_4xN_sse4_1(int N, uint8_t *dst, ptrdiff_t stride,
 
   dr_prediction_z1_HxW_internal_sse4_1(4, N, dstvec, above, upsample_above, dx);
   for (int i = 0; i < N; i++) {
-    *(uint32_t *)(dst + stride * i) = _mm_cvtsi128_si32(dstvec[i]);
+    *(int *)(dst + stride * i) = _mm_cvtsi128_si32(dstvec[i]);
   }
 }
 
@@ -571,7 +571,7 @@ static void dr_prediction_z2_Nx4_sse4_1(int N, uint8_t *dst, ptrdiff_t stride,
     resy = _mm_srli_si128(resx, 4);
 
     resxy = _mm_blendv_epi8(resx, resy, *(__m128i *)Mask[0][base_min_diff]);
-    *(uint32_t *)(dst) = _mm_cvtsi128_si32(resxy);
+    *(int *)(dst) = _mm_cvtsi128_si32(resxy);
     dst += stride;
   }
 }
@@ -938,10 +938,10 @@ static void dr_prediction_z3_4x4_sse4_1(uint8_t *dst, ptrdiff_t stride,
   transpose4x8_8x4_low_sse2(&dstvec[0], &dstvec[1], &dstvec[2], &dstvec[3],
                             &d[0], &d[1], &d[2], &d[3]);
 
-  *(uint32_t *)(dst + stride * 0) = _mm_cvtsi128_si32(d[0]);
-  *(uint32_t *)(dst + stride * 1) = _mm_cvtsi128_si32(d[1]);
-  *(uint32_t *)(dst + stride * 2) = _mm_cvtsi128_si32(d[2]);
-  *(uint32_t *)(dst + stride * 3) = _mm_cvtsi128_si32(d[3]);
+  *(int *)(dst + stride * 0) = _mm_cvtsi128_si32(d[0]);
+  *(int *)(dst + stride * 1) = _mm_cvtsi128_si32(d[1]);
+  *(int *)(dst + stride * 2) = _mm_cvtsi128_si32(d[2]);
+  *(int *)(dst + stride * 3) = _mm_cvtsi128_si32(d[3]);
   return;
 }
 
@@ -974,7 +974,7 @@ static void dr_prediction_z3_4x8_sse4_1(uint8_t *dst, ptrdiff_t stride,
   transpose4x8_8x4_sse2(&dstvec[0], &dstvec[1], &dstvec[2], &dstvec[3], &d[0],
                         &d[1], &d[2], &d[3], &d[4], &d[5], &d[6], &d[7]);
   for (int i = 0; i < 8; i++) {
-    *(uint32_t *)(dst + stride * i) = _mm_cvtsi128_si32(d[i]);
+    *(int *)(dst + stride * i) = _mm_cvtsi128_si32(d[i]);
   }
 }
 
@@ -1034,7 +1034,7 @@ static void dr_prediction_z3_4x16_sse4_1(uint8_t *dst, ptrdiff_t stride,
   dr_prediction_z1_HxW_internal_sse4_1(16, 4, dstvec, left, upsample_left, dy);
   transpose4x16_sse2(dstvec, d);
   for (int i = 0; i < 16; i++) {
-    *(uint32_t *)(dst + stride * i) = _mm_cvtsi128_si32(d[i]);
+    *(int *)(dst + stride * i) = _mm_cvtsi128_si32(d[i]);
   }
 }
 

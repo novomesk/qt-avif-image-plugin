@@ -207,11 +207,11 @@ void aom_highbd_convolve_copy_sse2(const uint16_t *src, ptrdiff_t src_stride,
   if (w == 2) {
     do {
       __m128i s = _mm_loadl_epi64((__m128i *)src);
-      *(uint32_t *)dst = _mm_cvtsi128_si32(s);
+      *(int *)dst = _mm_cvtsi128_si32(s);
       src += src_stride;
       dst += dst_stride;
       s = _mm_loadl_epi64((__m128i *)src);
-      *(uint32_t *)dst = _mm_cvtsi128_si32(s);
+      *(int *)dst = _mm_cvtsi128_si32(s);
       src += src_stride;
       dst += dst_stride;
       h -= 2;

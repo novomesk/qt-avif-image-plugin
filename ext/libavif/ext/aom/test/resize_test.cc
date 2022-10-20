@@ -257,7 +257,7 @@ class ResizeInternalTestLarge : public ResizeTest {
  protected:
 #if WRITE_COMPRESSED_STREAM
   ResizeInternalTestLarge()
-      : ResizeTest(), frame0_psnr_(0.0), outfile_(NULL), out_frames_(0) {}
+      : ResizeTest(), frame0_psnr_(0.0), outfile_(nullptr), out_frames_(0) {}
 #else
   ResizeInternalTestLarge() : ResizeTest(), frame0_psnr_(0.0) {}
 #endif
@@ -276,7 +276,7 @@ class ResizeInternalTestLarge : public ResizeTest {
       if (!fseek(outfile_, 0, SEEK_SET))
         write_ivf_file_header(&cfg_, out_frames_, outfile_);
       fclose(outfile_);
-      outfile_ = NULL;
+      outfile_ = nullptr;
     }
 #endif
   }
@@ -288,8 +288,7 @@ class ResizeInternalTestLarge : public ResizeTest {
       if (video->frame() == 0) {
         struct aom_scaling_mode mode = { AOME_ONETWO, AOME_ONETWO };
         encoder->Control(AOME_SET_SCALEMODE, &mode);
-      }
-      if (video->frame() == 1) {
+      } else if (video->frame() == 1) {
         struct aom_scaling_mode mode = { AOME_NORMAL, AOME_NORMAL };
         encoder->Control(AOME_SET_SCALEMODE, &mode);
         cfg_.rc_min_quantizer = cfg_.rc_max_quantizer = new_q;
@@ -725,7 +724,7 @@ class ResizeCspTest : public ResizeTest {
  protected:
 #if WRITE_COMPRESSED_STREAM
   ResizeCspTest()
-      : ResizeTest(), frame0_psnr_(0.0), outfile_(NULL), out_frames_(0) {}
+      : ResizeTest(), frame0_psnr_(0.0), outfile_(nullptr), out_frames_(0) {}
 #else
   ResizeCspTest() : ResizeTest(), frame0_psnr_(0.0) {}
 #endif
@@ -744,7 +743,7 @@ class ResizeCspTest : public ResizeTest {
       if (!fseek(outfile_, 0, SEEK_SET))
         write_ivf_file_header(&cfg_, out_frames_, outfile_);
       fclose(outfile_);
-      outfile_ = NULL;
+      outfile_ = nullptr;
     }
 #endif
   }

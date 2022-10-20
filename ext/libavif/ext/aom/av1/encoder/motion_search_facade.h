@@ -70,6 +70,28 @@ int_mv av1_simple_motion_sse_var(struct AV1_COMP *cpi, MACROBLOCK *x,
                                  const FULLPEL_MV start_mv, int use_subpixel,
                                  unsigned int *sse, unsigned int *var);
 
+static AOM_INLINE const search_site_config *av1_get_search_site_config(
+    search_site_config *ss_cfg_buf,
+    const MotionVectorSearchParams *mv_search_params,
+    SEARCH_METHODS search_method, const int ref_stride) {
+  if (ref_stride == mv_search_params->search_site_cfg[SS_CFG_SRC]->stride) {
+    return mv_search_params->search_site_cfg[SS_CFG_SRC];
+  } else if (ref_stride ==
+             mv_search_params->search_site_cfg[SS_CFG_LOOKAHEAD]->stride) {
+    return mv_search_params->search_site_cfg[SS_CFG_LOOKAHEAD];
+  }
+
+  if (ref_stride != ss_cfg_buf[search_method].stride) {
+    const int level =
+        search_method == NSTEP_8PT || search_method == CLAMPED_DIAMOND;
+    search_method = search_method_lookup[search_method];
+    av1_init_motion_compensation[search_method](&ss_cfg_buf[search_method],
+                                                ref_stride, level);
+  }
+
+  return ss_cfg_buf;
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

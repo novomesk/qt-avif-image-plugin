@@ -32,6 +32,7 @@
  * Loop restoration
  *
  * The following features are also disabled with CONFIG_REALTIME_ONLY:
+ * AV1E_SET_QUANT_B_ADAPT
  * CNN
  * 4X rectangular blocks
  * 4X rectangular transform in intra prediction
@@ -1372,6 +1373,9 @@ enum aome_enc_control_id {
   AV1E_SET_ENABLE_DIRECTIONAL_INTRA = 145,
 
   /*!\brief Control to turn on / off transform size search.
+   * Note: it can not work with non RD pick mode in real-time encoding,
+   * where the max transform size is only 16x16.
+   * It will be ignored if non RD pick mode is set.
    *
    * - 0 = disable, transforms always have the largest possible size
    * - 1 = enable, search for the best transform size for each block (default)
@@ -1445,6 +1449,11 @@ enum aome_enc_control_id {
    * details on level definitions and indices.
    */
   AV1E_GET_TARGET_SEQ_LEVEL_IDX = 155,
+
+  /*!\brief Codec control function to get the number of operating points. int*
+   * parameter.
+   */
+  AV1E_GET_NUM_OPERATING_POINTS = 156,
 
   // Any new encoder control IDs should be added above.
   // Maximum allowed encoder control ID is 229.
@@ -2058,6 +2067,9 @@ AOM_CTRL_USE_TYPE(AV1E_SET_FP_MT_UNIT_TEST, unsigned int)
 
 AOM_CTRL_USE_TYPE(AV1E_GET_TARGET_SEQ_LEVEL_IDX, int *)
 #define AOM_CTRL_AV1E_GET_TARGET_SEQ_LEVEL_IDX
+
+AOM_CTRL_USE_TYPE(AV1E_GET_NUM_OPERATING_POINTS, int *)
+#define AOM_CTRL_AV1E_GET_NUM_OPERATING_POINTS
 
 /*!\endcond */
 /*! @} - end defgroup aom_encoder */

@@ -475,13 +475,8 @@ static void variance_neon_w4x4(const uint8_t *a, int a_stride, const uint8_t *b,
     b += 4 * b_stride;
   }
 
-#if defined(__aarch64__)
-  *sum = vaddvq_s32(vpaddlq_s16(sum_s16));
-  *sse = (uint32_t)vaddvq_s32(sse_s32);
-#else
   *sum = horizontal_add_s16x8(sum_s16);
   *sse = (uint32_t)horizontal_add_s32x4(sse_s32);
-#endif
 }
 
 // Process a block of any size where the width is divisible by 16.
@@ -524,13 +519,8 @@ static void variance_neon_w16(const uint8_t *a, int a_stride, const uint8_t *b,
     b += b_stride;
   }
 
-#if defined(__aarch64__)
-  *sum = vaddvq_s32(vpaddlq_s16(sum_s16));
-  *sse = (uint32_t)vaddvq_s32(sse_s32);
-#else
   *sum = horizontal_add_s16x8(sum_s16);
   *sse = (uint32_t)horizontal_add_s32x4(sse_s32);
-#endif
 }
 
 // Process a block of width 8 two rows at a time.
@@ -568,13 +558,8 @@ static void variance_neon_w8x2(const uint8_t *a, int a_stride, const uint8_t *b,
     i += 2;
   } while (i < h);
 
-#if defined(__aarch64__)
-  *sum = vaddvq_s32(vpaddlq_s16(sum_s16));
-  *sse = (uint32_t)vaddvq_s32(sse_s32);
-#else
   *sum = horizontal_add_s16x8(sum_s16);
   *sse = (uint32_t)horizontal_add_s32x4(sse_s32);
-#endif
 }
 
 #define VARIANCE_NXM(n, m, shift)                                           \
@@ -635,11 +620,10 @@ static void variance_neon_wide_block(const uint8_t *a, int a_stride,
     v_diff = vpadalq_s16(v_diff, sum_s16);
     v_sse = vpadalq_s32(v_sse, sse_s32);
   }
+  int diff = horizontal_add_s32x4(v_diff);
 #if defined(__aarch64__)
-  int diff = vaddvq_s32(v_diff);
   uint32_t sq = (uint32_t)vaddvq_u64(vreinterpretq_u64_s64(v_sse));
 #else
-  int diff = horizontal_add_s32x4(v_diff);
   uint32_t sq = vget_lane_u32(
       vreinterpret_u32_s64(vadd_s64(vget_low_s64(v_sse), vget_high_s64(v_sse))),
       0);

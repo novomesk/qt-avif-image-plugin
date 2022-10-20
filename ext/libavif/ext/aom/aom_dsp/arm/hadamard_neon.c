@@ -104,8 +104,8 @@ void aom_hadamard_lp_8x8_neon(const int16_t *src_diff, ptrdiff_t src_stride,
   vst1q_s16(coeff + 56, a7);
 }
 
-void aom_hadamard_8x8_dual_neon(const int16_t *src_diff, ptrdiff_t src_stride,
-                                int16_t *coeff) {
+void aom_hadamard_lp_8x8_dual_neon(const int16_t *src_diff,
+                                   ptrdiff_t src_stride, int16_t *coeff) {
   for (int i = 0; i < 2; i++) {
     aom_hadamard_lp_8x8_neon(src_diff + (i * 8), src_stride, coeff + (i * 64));
   }

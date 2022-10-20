@@ -64,6 +64,9 @@ class LevelTest
       }
     }
 
+    int num_operating_points;
+    encoder->Control(AV1E_GET_NUM_OPERATING_POINTS, &num_operating_points);
+    ASSERT_EQ(num_operating_points, 1);
     encoder->Control(AV1E_GET_SEQ_LEVEL_IDX, level_);
     ASSERT_LE(level_[0], kLevelMax);
     ASSERT_GE(level_[0], kLevelMin);

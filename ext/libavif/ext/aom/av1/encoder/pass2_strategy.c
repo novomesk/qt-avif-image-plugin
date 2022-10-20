@@ -220,7 +220,7 @@ static void twopass_update_bpm_factor(AV1_COMP *cpi, int rate_err_tol) {
   double rolling_arf_group_target_bits =
       (double)twopass->rolling_arf_group_target_bits;
 
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   const int is_parallel_frame =
       cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 ? 1 : 0;
   const int simulate_parallel_frame =
@@ -1753,12 +1753,15 @@ void av1_identify_regions(const FIRSTPASS_STATS *const stats_start,
   if (total_frames <= 1) return;
 
   // store the initial decisions
-  REGIONS temp_regions[MAX_FIRSTPASS_ANALYSIS_FRAMES];
-  av1_zero_array(temp_regions, MAX_FIRSTPASS_ANALYSIS_FRAMES);
+  REGIONS *temp_regions =
+      (REGIONS *)aom_malloc(total_frames * sizeof(temp_regions[0]));
+  av1_zero_array(temp_regions, total_frames);
   // buffers for filtered stats
-  double filt_intra_err[MAX_FIRSTPASS_ANALYSIS_FRAMES] = { 0 };
-  double filt_coded_err[MAX_FIRSTPASS_ANALYSIS_FRAMES] = { 0 };
-  double grad_coded[MAX_FIRSTPASS_ANALYSIS_FRAMES] = { 0 };
+  double *filt_intra_err =
+      (double *)aom_calloc(total_frames, sizeof(*filt_intra_err));
+  double *filt_coded_err =
+      (double *)aom_calloc(total_frames, sizeof(*filt_coded_err));
+  double *grad_coded = (double *)aom_calloc(total_frames, sizeof(*grad_coded));
 
   int cur_region = 0, this_start = 0, this_last;
 
@@ -1847,6 +1850,11 @@ void av1_identify_regions(const FIRSTPASS_STATS *const stats_start,
     regions[k].start += offset;
     regions[k].last += offset;
   }
+
+  aom_free(temp_regions);
+  aom_free(filt_coded_err);
+  aom_free(filt_intra_err);
+  aom_free(grad_coded);
 }
 
 static int find_regions_index(const REGIONS *regions, int num_regions,
@@ -3628,6 +3636,15 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
   GF_GROUP *const gf_group = &cpi->ppi->gf_group;
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
 
+  if (cpi->use_ducky_encode &&
+      cpi->ducky_encode_info.frame_info.gop_mode == DUCKY_ENCODE_GOP_MODE_RCL) {
+    frame_params->frame_type = gf_group->frame_type[cpi->gf_frame_index];
+    frame_params->show_frame =
+        !(gf_group->update_type[cpi->gf_frame_index] == ARF_UPDATE ||
+          gf_group->update_type[cpi->gf_frame_index] == INTNL_ARF_UPDATE);
+    return;
+  }
+
   const FIRSTPASS_STATS *const start_pos = cpi->twopass_frame.stats_in;
   int update_total_stats = 0;
 
@@ -4007,6 +4024,8 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
 
   // Increment the stats_in pointer.
   if (is_stat_consumption_stage(cpi) &&
+      !(cpi->use_ducky_encode && cpi->ducky_encode_info.frame_info.gop_mode ==
+                                     DUCKY_ENCODE_GOP_MODE_RCL) &&
       (cpi->gf_frame_index < cpi->ppi->gf_group.size ||
        rc->frames_to_key == 0)) {
     const int update_type = cpi->ppi->gf_group.update_type[cpi->gf_frame_index];
@@ -4051,7 +4070,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
     p_rc->rate_error_estimate = 0;
   }
 
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   /* The variables temp_vbr_bits_off_target, temp_bits_left,
    * temp_rolling_arf_group_target_bits, temp_rolling_arf_group_actual_bits
    * temp_rate_error_estimate are introduced for quality simulation purpose,
@@ -4183,7 +4202,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
       }
     }
 
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
     if (cpi->do_frame_data_update && !show_existing_between_parallel_frames &&
         simulate_parallel_frame) {
       cpi->ppi->p_rc.temp_vbr_bits_off_target_fast =
@@ -4197,7 +4216,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
 
   // Update the frame probabilities obtained from parallel encode frames
   FrameProbInfo *const frame_probs = &cpi->ppi->frame_probs;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   /* The variable temp_active_best_quality is introduced only for quality
    * simulation purpose, it retains the value previous to the parallel
    * encode frames. The variable is updated based on the update flag.
@@ -4238,7 +4257,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
         for (j = TX_TYPES - 1; j >= 0; j--) {
           const int new_prob =
               cpi->frame_new_probs[loop].tx_type_probs[update_type][i][j];
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
           int prob =
               (temp_frame_probs_simulation->tx_type_probs[update_type][i][j] +
                new_prob) >>
@@ -4266,7 +4285,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
       for (i = 0; i < BLOCK_SIZES_ALL; i++) {
         const int new_prob =
             cpi->frame_new_probs[loop].obmc_probs[update_type][i];
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
         temp_frame_probs_simulation->obmc_probs[update_type][i] =
             (temp_frame_probs_simulation->obmc_probs[update_type][i] +
              new_prob) >>
@@ -4284,7 +4303,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
       const FRAME_UPDATE_TYPE update_type =
           get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
       const int new_prob = cpi->frame_new_probs[loop].warped_probs[update_type];
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
       temp_frame_probs_simulation->warped_probs[update_type] =
           (temp_frame_probs_simulation->warped_probs[update_type] + new_prob) >>
           1;
@@ -4306,7 +4325,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
         for (j = SWITCHABLE_FILTERS - 1; j >= 0; j--) {
           const int new_prob = cpi->frame_new_probs[loop]
                                    .switchable_interp_probs[update_type][i][j];
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
           int prob = (temp_frame_probs_simulation
                           ->switchable_interp_probs[update_type][i][j] +
                       new_prob) >>
@@ -4329,7 +4348,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
     }
   }
 
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   // Copying temp_frame_probs_simulation to temp_frame_probs based on
   // the flag
   if (cpi->do_frame_data_update &&
@@ -4363,7 +4382,7 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
   if (cpi->common.show_frame &&
       cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0)
     cpi->framerate = cpi->new_framerate;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   // SIMULATION PURPOSE
   int show_existing_between_parallel_frames_cndn =
       (cpi->ppi->gf_group.update_type[cpi->gf_frame_index] ==

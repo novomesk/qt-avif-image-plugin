@@ -1,7 +1,7 @@
 # Copyright 2022 Google LLC. All rights reserved.
 # SPDX-License-Identifier: BSD-2-Clause
 
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.13)
 
 project(avif_android_jni)
 
@@ -26,4 +26,9 @@ add_subdirectory(../../../../.. build)
 
 add_library("avif_android" SHARED "libavif_jni.cc")
 
-target_link_libraries(avif_android jnigraphics avif log)
+# Import the cpu-features module to compute the number of threads used for
+# decoding.
+include(AndroidNdkModules)
+android_ndk_import_module_cpufeatures()
+
+target_link_libraries(avif_android jnigraphics avif log cpufeatures)

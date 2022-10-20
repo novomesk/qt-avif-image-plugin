@@ -81,7 +81,7 @@ class DatarateTestLarge
     ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
     ASSERT_GE(effective_datarate_, cfg_.rc_target_bitrate * 0.85)
         << " The datarate for the file is lower than target by too much!";
-    ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.16)
+    ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.19)
         << " The datarate for the file is greater than target by too much!";
   }
 
@@ -210,7 +210,7 @@ class DatarateTestLarge
         << " The datarate for the file is greater than target by too much!";
   }
 
-  virtual void BasicRateTargeting444CBRTest() {
+  virtual void BasicRateTargeting444CBRScreenTest() {
     ::libaom_test::Y4mVideoSource video("rush_hour_444.y4m", 0, 140);
 
     cfg_.g_profile = 1;
@@ -227,6 +227,7 @@ class DatarateTestLarge
     const int bitrate_array[2] = { 250, 650 };
     cfg_.rc_target_bitrate = bitrate_array[GET_PARAM(4)];
     ResetModel();
+    screen_mode_ = true;
     ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
     ASSERT_GE(static_cast<double>(cfg_.rc_target_bitrate),
               effective_datarate_ * 0.85)
@@ -334,9 +335,9 @@ TEST_P(DatarateTestLarge, ErrorResilienceOnSceneCuts) {
   ErrorResilienceOnSceneCuts();
 }
 
-// Check basic rate targeting for CBR.
-TEST_P(DatarateTestLarge, BasicRateTargeting444CBR) {
-  BasicRateTargeting444CBRTest();
+// Check basic rate targeting for CBR, for 444 input screen mode.
+TEST_P(DatarateTestLarge, BasicRateTargeting444CBRScreen) {
+  BasicRateTargeting444CBRScreenTest();
 }
 
 // Check that (1) the first dropped frame gets earlier and earlier
@@ -398,7 +399,7 @@ class DatarateTestSpeedChangeRealtime
     ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
     ASSERT_GE(effective_datarate_, cfg_.rc_target_bitrate * 0.83)
         << " The datarate for the file is lower than target by too much!";
-    ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.21)
+    ASSERT_LE(effective_datarate_, cfg_.rc_target_bitrate * 1.24)
         << " The datarate for the file is greater than target by too much!";
   }
 };
@@ -433,9 +434,9 @@ TEST_P(DatarateTestRealtime, ErrorResilienceOnSceneCuts) {
   ErrorResilienceOnSceneCuts();
 }
 
-// Check basic rate targeting for CBR.
-TEST_P(DatarateTestRealtime, BasicRateTargeting444CBR) {
-  BasicRateTargeting444CBRTest();
+// Check basic rate targeting for CBR for 444 screen mode.
+TEST_P(DatarateTestRealtime, BasicRateTargeting444CBRScreen) {
+  BasicRateTargeting444CBRScreenTest();
 }
 
 // Check that (1) the first dropped frame gets earlier and earlier

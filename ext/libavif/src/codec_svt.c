@@ -46,9 +46,24 @@ static avifResult svtCodecEncodeImage(avifCodec * codec,
                                       avifEncoder * encoder,
                                       const avifImage * image,
                                       avifBool alpha,
+                                      int tileRowsLog2,
+                                      int tileColsLog2,
+                                      avifEncoderChanges encoderChanges,
                                       uint32_t addImageFlags,
                                       avifCodecEncodeOutput * output)
 {
+    // SVT-AV1 does not support changing encoder settings.
+    if (encoderChanges) {
+        return AVIF_RESULT_NOT_IMPLEMENTED;
+    }
+
+    // SVT-AV1 does not support changing image dimensions.
+    if (codec->internal->svt_encoder != NULL) {
+        if ((codec->internal->svt_config.source_width != image->width) || (codec->internal->svt_config.source_height != image->height)) {
+            return AVIF_RESULT_NOT_IMPLEMENTED;
+        }
+    }
+
     avifResult result = AVIF_RESULT_UNKNOWN_ERROR;
     EbColorFormat color_format = EB_YUV420;
     EbBufferHeaderType * input_buffer = NULL;
@@ -57,7 +72,7 @@ static avifResult svtCodecEncodeImage(avifCodec * codec,
     int y_shift = 0;
     // EbColorRange svt_range;
     if (alpha) {
-        // svt_range = (image->alphaRange == AVIF_RANGE_FULL) ? EB_CR_FULL_RANGE : EB_CR_STUDIO_RANGE;
+        // svt_range = EB_CR_FULL_RANGE;
         y_shift = 1;
     } else {
         // svt_range = (image->yuvRange == AVIF_RANGE_FULL) ? EB_CR_FULL_RANGE : EB_CR_STUDIO_RANGE;
@@ -74,6 +89,7 @@ static avifResult svtCodecEncodeImage(avifCodec * codec,
                 break;
             case AVIF_PIXEL_FORMAT_YUV400:
             case AVIF_PIXEL_FORMAT_NONE:
+            case AVIF_PIXEL_FORMAT_COUNT:
             default:
                 return AVIF_RESULT_UNKNOWN_ERROR;
         }
@@ -120,11 +136,11 @@ static avifResult svtCodecEncodeImage(avifCodec * codec,
             svt_config->qp = AVIF_CLAMP(encoder->maxQuantizer, 0, 63);
         }
 
-        if (encoder->tileRowsLog2 != 0) {
-            svt_config->tile_rows = AVIF_CLAMP(encoder->tileRowsLog2, 0, 6);
+        if (tileRowsLog2 != 0) {
+            svt_config->tile_rows = tileRowsLog2;
         }
-        if (encoder->tileColsLog2 != 0) {
-            svt_config->tile_columns = AVIF_CLAMP(encoder->tileColsLog2, 0, 6);
+        if (tileColsLog2 != 0) {
+            svt_config->tile_columns = tileColsLog2;
         }
         if (encoder->speed != AVIF_SPEED_DEFAULT) {
             int speed = AVIF_CLAMP(encoder->speed, 0, 8);
@@ -207,6 +223,7 @@ static avifBool svtCodecEncodeFinish(avifCodec * codec, avifCodecEncodeOutput * 
     input_buffer.p_app_private = NULL;
     input_buffer.flags = EB_BUFFERFLAG_EOS;
     input_buffer.p_buffer = NULL;
+    input_buffer.metadata = NULL;
 
     // flush
     ret = svt_av1_enc_send_picture(codec->internal->svt_encoder, &input_buffer);
@@ -263,6 +280,7 @@ static avifBool allocate_svt_buffers(EbBufferHeaderType ** input_buf)
     (*input_buf)->size = sizeof(EbBufferHeaderType);
     (*input_buf)->p_app_private = NULL;
     (*input_buf)->pic_type = EB_AV1_INVALID_PICTURE;
+    (*input_buf)->metadata = NULL;
 
     return AVIF_TRUE;
 }

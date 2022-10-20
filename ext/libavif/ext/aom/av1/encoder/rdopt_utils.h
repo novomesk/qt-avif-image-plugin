@@ -740,13 +740,16 @@ static INLINE void store_winner_mode_stats(
       AOMMIN(x->winner_mode_count + 1, max_winner_mode_count);
 }
 
-unsigned int av1_get_sby_perpixel_variance(const struct AV1_COMP *cpi,
-                                           const struct buf_2d *ref,
-                                           BLOCK_SIZE bs);
+unsigned int av1_get_perpixel_variance(const AV1_COMP *cpi,
+                                       const MACROBLOCKD *xd,
+                                       const struct buf_2d *ref,
+                                       BLOCK_SIZE bsize, int plane,
+                                       int use_hbd);
 
-unsigned int av1_high_get_sby_perpixel_variance(const struct AV1_COMP *cpi,
-                                                const struct buf_2d *ref,
-                                                BLOCK_SIZE bs, int bd);
+unsigned int av1_get_perpixel_variance_facade(const struct AV1_COMP *cpi,
+                                              const MACROBLOCKD *xd,
+                                              const struct buf_2d *ref,
+                                              BLOCK_SIZE bsize, int plane);
 
 static INLINE int is_mode_intra(PREDICTION_MODE mode) {
   return mode < INTRA_MODE_END;

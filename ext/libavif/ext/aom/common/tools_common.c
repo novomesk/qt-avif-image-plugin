@@ -254,12 +254,12 @@ void aom_img_write(const aom_image_t *img, FILE *file) {
 
 bool aom_img_read(aom_image_t *img, FILE *file) {
   int plane;
+  const int bytespp = (img->fmt & AOM_IMG_FMT_HIGHBITDEPTH) ? 2 : 1;
 
   for (plane = 0; plane < 3; ++plane) {
     unsigned char *buf = img->planes[plane];
     const int stride = img->stride[plane];
-    const int w = aom_img_plane_width(img, plane) *
-                  ((img->fmt & AOM_IMG_FMT_HIGHBITDEPTH) ? 2 : 1);
+    const int w = aom_img_plane_width(img, plane) * bytespp;
     const int h = aom_img_plane_height(img, plane);
     int y;
 

@@ -3,6 +3,7 @@
 
 #include <android/bitmap.h>
 #include <android/log.h>
+#include <cpu-features.h>
 #include <jni.h>
 
 #include "avif/avif.h"
@@ -44,14 +45,25 @@ struct AvifDecoderWrapper {
 };
 
 bool CreateDecoderAndParse(AvifDecoderWrapper* const decoder,
-                           const uint8_t* const buffer, int length) {
+                           const uint8_t* const buffer, int length,
+                           int threads) {
   decoder->decoder = avifDecoderCreate();
   if (decoder->decoder == nullptr) {
     LOGE("Failed to create AVIF Decoder.");
     return false;
   }
+  decoder->decoder->maxThreads = threads;
   decoder->decoder->ignoreXMP = AVIF_TRUE;
   decoder->decoder->ignoreExif = AVIF_TRUE;
+
+  // Turn off 'clap' (clean aperture) property validation. The JNI wrapper
+  // ignores the 'clap' property.
+  decoder->decoder->strictFlags &= ~AVIF_STRICT_CLAP_VALID;
+  // Allow 'pixi' (pixel information) property to be missing. Older versions of
+  // libheif did not add the 'pixi' item property to AV1 image items (See
+  // crbug.com/1198455).
+  decoder->decoder->strictFlags &= ~AVIF_STRICT_PIXI_REQUIRED;
+
   avifResult res = avifDecoderSetIOMemory(decoder->decoder, buffer, length);
   if (res != AVIF_RESULT_OK) {
     LOGE("Failed to set AVIF IO to a memory reader.");
@@ -91,7 +103,7 @@ FUNC(jboolean, getInfo, jobject encoded, int length, jobject info) {
   const uint8_t* const buffer =
       static_cast<const uint8_t*>(env->GetDirectBufferAddress(encoded));
   AvifDecoderWrapper decoder;
-  if (!CreateDecoderAndParse(&decoder, buffer, length)) {
+  if (!CreateDecoderAndParse(&decoder, buffer, length, /*threads=*/ 1)) {
     return false;
   }
   env->SetIntField(info, global_info_width, decoder.decoder->image->width);
@@ -104,7 +116,8 @@ FUNC(jboolean, decode, jobject encoded, int length, jobject bitmap) {
   const uint8_t* const buffer =
       static_cast<const uint8_t*>(env->GetDirectBufferAddress(encoded));
   AvifDecoderWrapper decoder;
-  if (!CreateDecoderAndParse(&decoder, buffer, length)) {
+  if (!CreateDecoderAndParse(&decoder, buffer, length,
+                             android_getCpuCount())) {
     return false;
   }
   avifResult res = avifDecoderNextImage(decoder.decoder);
@@ -127,8 +140,9 @@ FUNC(jboolean, decode, jobject encoded, int length, jobject bitmap) {
         decoder.decoder->image->height);
     return false;
   }
-  // Ensure that the bitmap format is either RGBA_8888 or RGBA_F16.
+  // Ensure that the bitmap format is RGBA_8888, RGB_565 or RGBA_F16.
   if (bitmap_info.format != ANDROID_BITMAP_FORMAT_RGBA_8888 &&
+      bitmap_info.format != ANDROID_BITMAP_FORMAT_RGB_565 &&
       bitmap_info.format != ANDROID_BITMAP_FORMAT_RGBA_F16) {
     LOGE("Bitmap format (%d) is not supported.", bitmap_info.format);
     return false;
@@ -144,6 +158,9 @@ FUNC(jboolean, decode, jobject encoded, int length, jobject bitmap) {
   if (bitmap_info.format == ANDROID_BITMAP_FORMAT_RGBA_F16) {
     rgb_image.depth = 16;
     rgb_image.isFloat = AVIF_TRUE;
+  } else if (bitmap_info.format == ANDROID_BITMAP_FORMAT_RGB_565) {
+    rgb_image.format = AVIF_RGB_FORMAT_RGB_565;
+    rgb_image.depth = 8;
   } else {
     rgb_image.depth = 8;
   }

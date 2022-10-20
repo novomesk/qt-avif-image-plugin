@@ -24,7 +24,7 @@ namespace libaom_test {
 class Y4mVideoSource : public VideoSource {
  public:
   Y4mVideoSource(const std::string &file_name, unsigned int start, int limit)
-      : file_name_(file_name), input_file_(NULL), img_(new aom_image_t()),
+      : file_name_(file_name), input_file_(nullptr), img_(new aom_image_t()),
         start_(start), limit_(limit), frame_(0), framerate_numerator_(0),
         framerate_denominator_(0), y4m_() {}
 
@@ -43,7 +43,7 @@ class Y4mVideoSource : public VideoSource {
   virtual void ReadSourceToStart() {
     ASSERT_NE(input_file_, nullptr);
     ASSERT_FALSE(
-        y4m_input_open(&y4m_, input_file_, NULL, 0, AOM_CSP_UNKNOWN, 0));
+        y4m_input_open(&y4m_, input_file_, nullptr, 0, AOM_CSP_UNKNOWN, 0));
     framerate_numerator_ = y4m_.fps_n;
     framerate_denominator_ = y4m_.fps_d;
     frame_ = 0;
@@ -64,7 +64,7 @@ class Y4mVideoSource : public VideoSource {
   }
 
   virtual aom_image_t *img() const {
-    return (frame_ < limit_) ? img_.get() : NULL;
+    return (frame_ < limit_) ? img_.get() : nullptr;
   }
 
   // Models a stream where Timebase = 1/FPS, so pts == frame.
@@ -103,9 +103,9 @@ class Y4mVideoSource : public VideoSource {
   void CloseSource() {
     y4m_input_close(&y4m_);
     y4m_ = y4m_input();
-    if (input_file_ != NULL) {
+    if (input_file_ != nullptr) {
       fclose(input_file_);
-      input_file_ = NULL;
+      input_file_ = nullptr;
     }
   }
 

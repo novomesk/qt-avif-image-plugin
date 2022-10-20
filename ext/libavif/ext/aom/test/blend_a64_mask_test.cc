@@ -525,7 +525,7 @@ class BlendA64MaskTestHBD_d16
 };
 
 TEST_P(BlendA64MaskTestHBD_d16, RandomValues) {
-  if (params_.tst_func == NULL) return;
+  if (params_.tst_func == nullptr) return;
   for (int iter = 0; iter < kIterations && !HasFatalFailure(); ++iter) {
     int bsize = rng_.Rand8() % BLOCK_SIZES_ALL;
     switch (rng_(3)) {
@@ -592,9 +592,9 @@ TEST_P(BlendA64MaskTestHBD_d16, DISABLED_Speed) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    C, BlendA64MaskTestHBD_d16,
-    ::testing::Values(TestFuncsHBD_d16(aom_highbd_blend_a64_d16_mask_c, NULL)));
+INSTANTIATE_TEST_SUITE_P(C, BlendA64MaskTestHBD_d16,
+                         ::testing::Values(TestFuncsHBD_d16(
+                             aom_highbd_blend_a64_d16_mask_c, nullptr)));
 
 #if HAVE_SSE4_1
 INSTANTIATE_TEST_SUITE_P(

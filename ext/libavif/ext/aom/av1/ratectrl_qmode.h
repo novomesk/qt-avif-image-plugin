@@ -44,39 +44,32 @@ struct TplGopDepStats {
 
 GopFrame GopFrameInvalid();
 
-// gop frame type used for facilitate setting up GopFrame
-// TODO(angiebird): Define names for forward key frame and
-// key frame with overlay
-enum class GopFrameType {
-  kRegularKey,  // High quality key frame without overlay
-  kRegularArf,  // High quality arf with strong filtering followed by an overlay
-                // later
-  kIntermediateArf,  // Good quality arf with weak or no filtering followed by a
-                     // show_existing later
-  kRegularLeaf,      // Regular leaf frame
-  kShowExisting,     // Show_existing frame
-  kOverlay           // Overlay frame
-};
-
 // Set up is_key_frame, is_arf_frame, is_show_frame, is_golden_frame and
 // encode_ref_mode in GopFrame based on gop_frame_type
 void SetGopFrameByType(GopFrameType gop_frame_type, GopFrame *gop_frame);
 
 GopFrame GopFrameBasic(int global_coding_idx_offset,
                        int global_order_idx_offset, int coding_idx,
-                       int order_idx, int depth, GopFrameType gop_frame_type);
+                       int order_idx, int depth, int display_idx,
+                       GopFrameType gop_frame_type);
 
 GopStruct ConstructGop(RefFrameManager *ref_frame_manager, int show_frame_count,
                        bool has_key_frame, int global_coding_idx_offset,
                        int global_order_idx_offset);
 
+// Creates a TplFrameDepStats containing an 2D array of default-initialized
+// TplUnitDepStats, with dimensions of
+//   ceil(frame_height / min_block_size) x ceil(frame_width / min_block_size).
+// i.e., there will be one entry for each square block of size min_block_size,
+// and blocks along the bottom or right edge of the frame may extend beyond the
+// edges of the frame.
 TplFrameDepStats CreateTplFrameDepStats(int frame_height, int frame_width,
                                         int min_block_size);
 
 TplUnitDepStats TplBlockStatsToDepStats(const TplBlockStats &block_stats,
                                         int unit_count);
 
-TplFrameDepStats CreateTplFrameDepStatsWithoutPropagation(
+StatusOr<TplFrameDepStats> CreateTplFrameDepStatsWithoutPropagation(
     const TplFrameStats &frame_stats);
 
 std::vector<int> GetKeyFrameList(const FirstpassInfo &first_pass_info);
@@ -92,17 +85,26 @@ void TplFrameDepStatsPropagate(int coding_idx,
 
 int GetBlockOverlapArea(int r0, int c0, int r1, int c1, int size);
 
-TplGopDepStats ComputeTplGopDepStats(
+StatusOr<TplGopDepStats> ComputeTplGopDepStats(
     const TplGopStats &tpl_gop_stats,
     const std::vector<RefFrameTable> &ref_frame_table_list);
 
 class AV1RateControlQMode : public AV1RateControlQModeInterface {
  public:
-  void SetRcParam(const RateControlParam &rc_param) override;
-  GopStructList DetermineGopInfo(const FirstpassInfo &firstpass_info) override;
-  GopEncodeInfo GetGopEncodeInfo(
+  Status SetRcParam(const RateControlParam &rc_param) override;
+  StatusOr<GopStructList> DetermineGopInfo(
+      const FirstpassInfo &firstpass_info) override;
+  StatusOr<GopEncodeInfo> GetGopEncodeInfo(
       const GopStruct &gop_struct, const TplGopStats &tpl_gop_stats,
       const RefFrameTable &ref_frame_table_snapshot) override;
+
+  // Public for testing only.
+  // Returns snapshots of the ref frame before and after each frame in
+  // gop_struct. The returned list will have n+1 entries for n frames.
+  // If this is first GOP, ref_frame_table is ignored and all refs are assumed
+  // invalid; otherwise ref_frame_table is used as the initial state.
+  std::vector<RefFrameTable> GetRefFrameTableList(
+      const GopStruct &gop_struct, RefFrameTable ref_frame_table);
 
  private:
   RateControlParam rc_param_;

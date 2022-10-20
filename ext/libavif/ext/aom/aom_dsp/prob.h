@@ -641,26 +641,33 @@ static INLINE uint8_t get_prob(unsigned int num, unsigned int den) {
 }
 
 static INLINE void update_cdf(aom_cdf_prob *cdf, int8_t val, int nsymbs) {
-  int rate;
-  int i, tmp;
-
-  static const int nsymbs2speed[17] = { 0, 0, 1, 1, 2, 2, 2, 2, 2,
-                                        2, 2, 2, 2, 2, 2, 2, 2 };
   assert(nsymbs < 17);
-  rate = 3 + (cdf[nsymbs] > 15) + (cdf[nsymbs] > 31) +
-         nsymbs2speed[nsymbs];  // + get_msb(nsymbs);
-  tmp = AOM_ICDF(0);
+  const int count = cdf[nsymbs];
 
-  // Single loop (faster)
-  for (i = 0; i < nsymbs - 1; ++i) {
-    tmp = (i == val) ? 0 : tmp;
-    if (tmp < cdf[i]) {
-      cdf[i] -= ((cdf[i] - tmp) >> rate);
+  // rate is computed in the spec as:
+  //  3 + ( cdf[N] > 15 ) + ( cdf[N] > 31 ) + Min(FloorLog2(N), 2)
+  // In this case cdf[N] is |count|.
+  // Min(FloorLog2(N), 2) is 1 for nsymbs == {2, 3} and 2 for all
+  // nsymbs > 3. So the equation becomes:
+  //  4 + (count > 15) + (count > 31) + (nsymbs > 3).
+  // Note that the largest value for count is 32 (it is not incremented beyond
+  // 32). So using that information:
+  //  count >> 4 is 0 for count from 0 to 15.
+  //  count >> 4 is 1 for count from 16 to 31.
+  //  count >> 4 is 2 for count == 31.
+  // Now, the equation becomes:
+  //  4 + (count >> 4) + (nsymbs > 3).
+  const int rate = 4 + (count >> 4) + (nsymbs > 3);
+
+  int i = 0;
+  do {
+    if (i < val) {
+      cdf[i] += (CDF_PROB_TOP - cdf[i]) >> rate;
     } else {
-      cdf[i] += ((tmp - cdf[i]) >> rate);
+      cdf[i] -= cdf[i] >> rate;
     }
-  }
-  cdf[nsymbs] += (cdf[nsymbs] < 32);
+  } while (++i < nsymbs - 1);
+  cdf[nsymbs] += (count < 32);
 }
 
 #ifdef __cplusplus

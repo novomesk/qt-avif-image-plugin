@@ -36,7 +36,7 @@ namespace libaom_test {
 
 template <typename T>
 struct FuncParam {
-  FuncParam(T ref = NULL, T tst = NULL, int bit_depth = 0)
+  FuncParam(T ref = nullptr, T tst = nullptr, int bit_depth = 0)
       : ref_func(ref), tst_func(tst), bit_depth(bit_depth) {}
   T ref_func;
   T tst_func;

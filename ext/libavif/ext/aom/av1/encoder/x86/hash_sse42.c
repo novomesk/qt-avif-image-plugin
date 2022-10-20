@@ -47,5 +47,5 @@ uint32_t av1_get_crc32c_value_sse4_2(void *crc_calculator, uint8_t *p,
   CALC_CRC(_mm_crc32_u32, crc, uint32_t, buf, len)
   CALC_CRC(_mm_crc32_u16, crc, uint16_t, buf, len)
   CALC_CRC(_mm_crc32_u8, crc, uint8_t, buf, len)
-  return (crc ^= 0xFFFFFFFF);
+  return (crc ^ 0xFFFFFFFF);
 }

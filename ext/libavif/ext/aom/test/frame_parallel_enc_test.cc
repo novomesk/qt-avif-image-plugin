@@ -21,7 +21,7 @@
 
 namespace {
 
-#if (CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST && !CONFIG_REALTIME_ONLY)
+#if CONFIG_FPMT_TEST && !CONFIG_REALTIME_ONLY
 class AVxFrameParallelThreadEncodeTest
     : public ::libaom_test::CodecTestWith3Params<int, int, int>,
       public ::libaom_test::EncoderTest {
@@ -192,7 +192,6 @@ AV1_INSTANTIATE_TEST_SUITE(AVxFrameParallelThreadEncodeLowResTestLarge,
 AV1_INSTANTIATE_TEST_SUITE(AVxFrameParallelThreadEncodeLowResTest,
                            ::testing::Values(4, 5, 6), ::testing::Values(1),
                            ::testing::Values(0));
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE &&
-        // CONFIG_FPMT_TEST && !CONFIG_REALTIME_ONLY
+#endif  // CONFIG_FPMT_TEST && !CONFIG_REALTIME_ONLY
 
 }  // namespace

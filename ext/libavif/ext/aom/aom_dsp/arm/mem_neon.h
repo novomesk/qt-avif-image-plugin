@@ -413,6 +413,13 @@ static INLINE void load_unaligned_u8_4x2(const uint8_t *buf, int stride,
     memcpy(dst, &a, 4);                                \
   } while (0)
 
+#define store_unaligned_u8_2x1(dst, src, lane)         \
+  do {                                                 \
+    uint16_t a;                                        \
+    a = vget_lane_u16(vreinterpret_u16_u8(src), lane); \
+    memcpy(dst, &a, 2);                                \
+  } while (0)
+
 static INLINE void load_unaligned_u8_2x2(const uint8_t *buf, int stride,
                                          uint16x4_t *tu0) {
   uint16_t a;

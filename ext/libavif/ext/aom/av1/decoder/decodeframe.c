@@ -2530,7 +2530,8 @@ static INLINE void sync_read(AV1DecRowMTSync *const dec_row_mt_sync, int r,
     pthread_mutex_t *const mutex = &dec_row_mt_sync->mutex_[r - 1];
     pthread_mutex_lock(mutex);
 
-    while (c > dec_row_mt_sync->cur_sb_col[r - 1] - nsync) {
+    while (c > dec_row_mt_sync->cur_sb_col[r - 1] - nsync -
+                   dec_row_mt_sync->intrabc_extra_top_right_sb_delay) {
       pthread_cond_wait(&dec_row_mt_sync->cond_[r - 1], mutex);
     }
     pthread_mutex_unlock(mutex);
@@ -2553,7 +2554,7 @@ static INLINE void sync_write(AV1DecRowMTSync *const dec_row_mt_sync, int r,
     cur = c;
     if (c % nsync) sig = 0;
   } else {
-    cur = sb_cols + nsync;
+    cur = sb_cols + nsync + dec_row_mt_sync->intrabc_extra_top_right_sb_delay;
   }
 
   if (sig) {
@@ -3675,6 +3676,8 @@ static AOM_INLINE void row_mt_frame_init(AV1Decoder *pbi, int tile_rows_start,
       tile_data->dec_row_mt_sync.mi_cols =
           ALIGN_POWER_OF_TWO(tile_info->mi_col_end - tile_info->mi_col_start,
                              cm->seq_params->mib_size_log2);
+      tile_data->dec_row_mt_sync.intrabc_extra_top_right_sb_delay =
+          av1_get_intrabc_extra_top_right_sb_delay(cm);
 
       frame_row_mt_info->mi_rows_to_decode +=
           tile_data->dec_row_mt_sync.mi_rows;

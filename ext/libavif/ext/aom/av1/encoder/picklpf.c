@@ -271,7 +271,7 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
     lf->filter_level_u = clamp(filt_guess, min_filter_level, max_filter_level);
     lf->filter_level_v = clamp(filt_guess, min_filter_level, max_filter_level);
     if (cpi->oxcf.algo_cfg.loopfilter_control == LOOPFILTER_SELECTIVELY &&
-        !frame_is_intra_only(cm)) {
+        !frame_is_intra_only(cm) && !cpi->rc.high_source_sad) {
       if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN) {
         lf->filter_level[0] = 0;
         lf->filter_level[1] = 0;

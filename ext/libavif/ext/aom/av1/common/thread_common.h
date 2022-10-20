@@ -168,6 +168,7 @@ void av1_loop_restoration_dealloc(AV1LrSync *lr_sync, int num_workers);
 void av1_loop_restoration_alloc(AV1LrSync *lr_sync, AV1_COMMON *cm,
                                 int num_workers, int num_rows_lr,
                                 int num_planes, int width);
+int av1_get_intrabc_extra_top_right_sb_delay(const AV1_COMMON *cm);
 
 #ifdef __cplusplus
 }  // extern "C"

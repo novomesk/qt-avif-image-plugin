@@ -452,7 +452,7 @@ static void masked_variance(const uint8_t *src_ptr, int src_stride,
   sum = _mm_hadd_epi32(sum, sum_sq);
   sum = _mm_hadd_epi32(sum, sum);
   *sum_ = _mm_cvtsi128_si32(sum);
-  *sse = _mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
+  *sse = (unsigned int)_mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
 }
 
 static void masked_variance8xh(const uint8_t *src_ptr, int src_stride,
@@ -482,7 +482,7 @@ static void masked_variance8xh(const uint8_t *src_ptr, int src_stride,
   sum = _mm_hadd_epi32(sum, sum_sq);
   sum = _mm_hadd_epi32(sum, sum);
   *sum_ = _mm_cvtsi128_si32(sum);
-  *sse = _mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
+  *sse = (unsigned int)_mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
 }
 
 static void masked_variance4xh(const uint8_t *src_ptr, int src_stride,
@@ -514,7 +514,7 @@ static void masked_variance4xh(const uint8_t *src_ptr, int src_stride,
   sum = _mm_hadd_epi32(sum, sum_sq);
   sum = _mm_hadd_epi32(sum, sum);
   *sum_ = _mm_cvtsi128_si32(sum);
-  *sse = _mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
+  *sse = (unsigned int)_mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
 }
 
 #if CONFIG_AV1_HIGHBITDEPTH
@@ -1024,7 +1024,7 @@ static void highbd_masked_variance4xh(const uint16_t *src_ptr, int src_stride,
   sum = _mm_hadd_epi32(sum, sum_sq);
   sum = _mm_hadd_epi32(sum, zero);
   *sum_ = _mm_cvtsi128_si32(sum);
-  *sse = _mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
+  *sse = (unsigned int)_mm_cvtsi128_si32(_mm_srli_si128(sum, 4));
 }
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 

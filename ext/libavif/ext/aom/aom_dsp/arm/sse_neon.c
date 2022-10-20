@@ -63,11 +63,7 @@ int64_t aom_sse_neon(const uint8_t *a, int a_stride, const uint8_t *b,
         b += b_stride << 1;
         y += 2;
       } while (y < height);
-#if defined(__aarch64__)
-      sse = vaddvq_u32(sum);
-#else
       sse = horizontal_add_s32x4(vreinterpretq_s32_u32(sum));
-#endif  // __aarch64__
       break;
     case 8:
       do {
@@ -76,11 +72,7 @@ int64_t aom_sse_neon(const uint8_t *a, int a_stride, const uint8_t *b,
         b += b_stride;
         y += 1;
       } while (y < height);
-#if defined(__aarch64__)
-      sse = vaddvq_u32(sum);
-#else
       sse = horizontal_add_s32x4(vreinterpretq_s32_u32(sum));
-#endif  // __aarch64__
       break;
     case 16:
       do {
@@ -89,11 +81,7 @@ int64_t aom_sse_neon(const uint8_t *a, int a_stride, const uint8_t *b,
         b += b_stride;
         y += 1;
       } while (y < height);
-#if defined(__aarch64__)
-      sse = vaddvq_u32(sum);
-#else
       sse = horizontal_add_s32x4(vreinterpretq_s32_u32(sum));
-#endif  // __aarch64__
       break;
     case 32:
       do {
@@ -103,11 +91,7 @@ int64_t aom_sse_neon(const uint8_t *a, int a_stride, const uint8_t *b,
         b += b_stride;
         y += 1;
       } while (y < height);
-#if defined(__aarch64__)
-      sse = vaddvq_u32(sum);
-#else
       sse = horizontal_add_s32x4(vreinterpretq_s32_u32(sum));
-#endif  // __aarch64__
       break;
     case 64:
       do {
@@ -119,11 +103,7 @@ int64_t aom_sse_neon(const uint8_t *a, int a_stride, const uint8_t *b,
         b += b_stride;
         y += 1;
       } while (y < height);
-#if defined(__aarch64__)
-      sse = vaddvq_u32(sum);
-#else
       sse = horizontal_add_s32x4(vreinterpretq_s32_u32(sum));
-#endif  // __aarch64__
       break;
     case 128:
       do {
@@ -139,11 +119,7 @@ int64_t aom_sse_neon(const uint8_t *a, int a_stride, const uint8_t *b,
         b += b_stride;
         y += 1;
       } while (y < height);
-#if defined(__aarch64__)
-      sse = vaddvq_u32(sum);
-#else
       sse = horizontal_add_s32x4(vreinterpretq_s32_u32(sum));
-#endif  // __aarch64__
       break;
     default:
       if (width & 0x07) {
@@ -171,11 +147,7 @@ int64_t aom_sse_neon(const uint8_t *a, int a_stride, const uint8_t *b,
           y += 1;
         } while (y < height);
       }
-#if defined(__aarch64__)
-      sse = vaddvq_u32(sum);
-#else
       sse = horizontal_add_s32x4(vreinterpretq_s32_u32(sum));
-#endif  // __aarch64__
       break;
   }
   return sse;

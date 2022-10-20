@@ -716,6 +716,9 @@ typedef struct PARTITION_SPEED_FEATURES {
   // 2: on top of 1, prune rectangular partitions if NONE is inter, not a newmv
   // mode and skippable
   int skip_non_sq_part_based_on_none;
+
+  // Disables 8x8 and below partitions for low quantizers.
+  int disable_8x8_part_based_on_qidx;
 } PARTITION_SPEED_FEATURES;
 
 typedef struct MV_SPEED_FEATURES {
@@ -1065,6 +1068,17 @@ typedef struct INTRA_MODE_SPEED_FEATURES {
   // Enable/disable smooth intra modes.
   int disable_smooth_intra;
 
+  // Prune UV_SMOOTH_PRED mode for chroma based on chroma source variance.
+  // false : No pruning
+  // true  : Prune UV_SMOOTH_PRED mode based on chroma source variance
+  //
+  // For allintra encode, this speed feature reduces instruction count
+  // by 1.90%, 2.21% and 1.97% for speed 6, 7 and 8 with coding performance
+  // change less than 0.04%. For AVIF image encode, this speed feature reduces
+  // encode time by 1.56%, 2.14% and 0.90% for speed 6, 7 and 8 on a typical
+  // image dataset with coding performance change less than 0.05%.
+  bool prune_smooth_intra_mode_for_chroma;
+
   // Prune filter intra modes in intra frames.
   // 0 : No pruning
   // 1 : Evaluate applicable filter intra modes based on best intra mode so far
@@ -1131,6 +1145,16 @@ typedef struct INTRA_MODE_SPEED_FEATURES {
   // neighbor block and quantizer information.
   int adapt_top_model_rd_count_using_neighbors;
 
+  // Prune the evaluation of odd delta angles of directional luma intra modes by
+  // using the rdcosts of neighbouring delta angles.
+  // For allintra encode, this speed feature reduces instruction count
+  // by 4.461%, 3.699% and 3.536% for speed 6, 7 and 8 on a typical video
+  // dataset with coding performance change less than 0.26%. For AVIF image
+  // encode, this speed feature reduces encode time by 2.849%, 2.471%,
+  // and 2.051% for speed 6, 7 and 8 on a typical image dataset with coding
+  // performance change less than 0.27%.
+  int prune_luma_odd_delta_angles_in_intra;
+
   // Terminate early in chroma palette_size search.
   // 0: No early termination
   // 1: Terminate early for higher palette_size, if header rd cost of lower
@@ -1185,18 +1209,45 @@ typedef struct TX_SPEED_FEATURES {
   // of 0 indicates no pruning, and the aggressiveness of pruning progressively
   // increases from levels 1 to 3.
   int prune_tx_size_level;
+
+  // Prune the evaluation of transform depths as decided by the NN model.
+  // false: No pruning.
+  // true : Avoid the evaluation of specific transform depths using NN model.
+  //
+  // For allintra encode, this speed feature reduces instruction count
+  // by 4.76%, 8.92% and 11.28% for speed 6, 7 and 8 with coding performance
+  // change less than 0.32%. For AVIF image encode, this speed feature reduces
+  // encode time by 4.65%, 9.16% and 10.45% for speed 6, 7 and 8 on a typical
+  // image dataset with coding performance change less than 0.19%.
+  bool prune_intra_tx_depths_using_nn;
 } TX_SPEED_FEATURES;
 
 typedef struct RD_CALC_SPEED_FEATURES {
   // Fast approximation of av1_model_rd_from_var_lapndz
   int simple_model_rd_from_var;
 
-  // Whether to compute distortion in the image domain (slower but
-  // more accurate), or in the transform domain (faster but less acurate).
-  // 0: use image domain
-  // 1: use transform domain in tx_type search, and use image domain for
-  // RD_STATS
-  // 2: use transform domain
+  // Perform faster distortion computation during the R-D evaluation by trying
+  // to approximate the prediction error with transform coefficients (faster but
+  // less accurate) rather than computing distortion in the pixel domain (slower
+  // but more accurate). The following methods are used for distortion
+  // computation:
+  // Method 0: Always compute distortion in the pixel domain
+  // Method 1: Based on block error, try using transform domain distortion for
+  // tx_type search and compute distortion in pixel domain for final RD_STATS
+  // Method 2: Based on block error, try to compute distortion in transform
+  // domain
+  // Methods 1 and 2 may fallback to computing distortion in the pixel domain in
+  // case the block error is less than the threshold, which is controlled by the
+  // speed feature tx_domain_dist_thres_level.
+  //
+  // The speed feature tx_domain_dist_level decides which of the above methods
+  // needs to be used across different mode evaluation stages as described
+  // below:
+  // Eval type:    Default      Mode        Winner
+  // Level 0  :    Method 0    Method 2    Method 0
+  // Level 1  :    Method 1    Method 2    Method 0
+  // Level 2  :    Method 2    Method 2    Method 0
+  // Level 3  :    Method 2    Method 2    Method 2
   int tx_domain_dist_level;
 
   // Transform domain distortion threshold level
@@ -1242,9 +1293,11 @@ typedef struct WINNER_MODE_SPEED_FEATURES {
   // 1 / 2 : Use configured number of winner candidates
   int motion_mode_for_winner_cand;
 
-  // Early DC only txfm block prediction
-  // 0: speed feature OFF
-  // 1 / 2 : Use the configured level for different modes
+  // Controls the prediction of transform skip block or DC only block.
+  //
+  // Different speed feature values (0 to 3) decide the aggressiveness of
+  // prediction (refer to predict_dc_levels[][] in speed_features.c) to be used
+  // during different mode evaluation stages.
   int dc_blk_pred_level;
 
   // If on, disables interpolation filter search in handle_inter_mode loop, and
@@ -1405,8 +1458,9 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // Check for scene/content change detection on every frame before encoding.
   int check_scene_detection;
 
-  // Forces larger partition blocks in variance based partitioning
-  int force_large_partition_blocks;
+  // For nonrd mode: Prefer larger partition blks in variance based partitioning
+  // 0: disabled, 1-4: increasing aggressiveness
+  int prefer_large_partition_blocks;
 
   // uses results of temporal noise estimate
   int use_temporal_noise_estimate;
@@ -1518,6 +1572,30 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // by 8.44% for speed 9 on a typical image dataset with coding performance
   // gain of 0.78%.
   bool vbp_prune_16x16_split_using_min_max_sub_blk_var;
+
+  // A qindex threshold that determines whether to use qindex based
+  // CDEF filter strength estimation for screen content types.
+  // This speed feature has a substantial gain on coding metrics,
+  // with moderate increased encoding time.
+  // Set to zero to turn off this speed feature.
+  int screen_content_cdef_filter_qindex_thresh;
+
+  // Prunes global_globalmv search if its variance is \gt the globalmv's
+  // variance.
+  bool prune_global_globalmv_with_zeromv;
+
+  // Allow mode cost update at frame level every couple frames. This
+  // overrides the command line setting --mode-cost-upd-freq=3 (never update
+  // except on key frame and first delta).
+  bool frame_level_mode_cost_update;
+
+  // If compound is enabled, and the current block size is \geq BLOCK_16X16,
+  // limit the compound modes to GLOBAL_GLOBALMV. This does not apply to the
+  // base layer of svc.
+  bool check_only_zero_zeromv_on_large_blocks;
+
+  // Allow for disabling cdf update for non reference frames in svc mode.
+  bool disable_cdf_update_non_reference_frame;
 } REAL_TIME_SPEED_FEATURES;
 
 /*!\endcond */

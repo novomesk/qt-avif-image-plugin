@@ -22,25 +22,30 @@ TEST(DecodeAPI, InvalidParams) {
   uint8_t buf[1] = { 0 };
   aom_codec_ctx_t dec;
 
-  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_dec_init(NULL, NULL, NULL, 0));
-  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_dec_init(&dec, NULL, NULL, 0));
-  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_decode(NULL, NULL, 0, NULL));
-  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_decode(NULL, buf, 0, NULL));
   EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
-            aom_codec_decode(NULL, buf, sizeof(buf), NULL));
+            aom_codec_dec_init(nullptr, nullptr, nullptr, 0));
   EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
-            aom_codec_decode(NULL, NULL, sizeof(buf), NULL));
-  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_destroy(NULL));
-  EXPECT_TRUE(aom_codec_error(NULL) != NULL);
-  EXPECT_TRUE(aom_codec_error_detail(NULL) == NULL);
+            aom_codec_dec_init(&dec, nullptr, nullptr, 0));
+  EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
+            aom_codec_decode(nullptr, nullptr, 0, nullptr));
+  EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
+            aom_codec_decode(nullptr, buf, 0, nullptr));
+  EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
+            aom_codec_decode(nullptr, buf, sizeof(buf), nullptr));
+  EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
+            aom_codec_decode(nullptr, nullptr, sizeof(buf), nullptr));
+  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_destroy(nullptr));
+  EXPECT_NE(aom_codec_error(nullptr), nullptr);
+  EXPECT_EQ(aom_codec_error_detail(nullptr), nullptr);
 
   aom_codec_iface_t *iface = aom_codec_av1_dx();
-  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_dec_init(NULL, iface, NULL, 0));
-
-  EXPECT_EQ(AOM_CODEC_OK, aom_codec_dec_init(&dec, iface, NULL, 0));
   EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
-            aom_codec_decode(&dec, NULL, sizeof(buf), NULL));
-  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_decode(&dec, buf, 0, NULL));
+            aom_codec_dec_init(nullptr, iface, nullptr, 0));
+
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_dec_init(&dec, iface, nullptr, 0));
+  EXPECT_EQ(AOM_CODEC_INVALID_PARAM,
+            aom_codec_decode(&dec, nullptr, sizeof(buf), nullptr));
+  EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_decode(&dec, buf, 0, nullptr));
 
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&dec));
 }
@@ -48,7 +53,7 @@ TEST(DecodeAPI, InvalidParams) {
 TEST(DecodeAPI, InvalidControlId) {
   aom_codec_iface_t *iface = aom_codec_av1_dx();
   aom_codec_ctx_t dec;
-  EXPECT_EQ(AOM_CODEC_OK, aom_codec_dec_init(&dec, iface, NULL, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_dec_init(&dec, iface, nullptr, 0));
   EXPECT_EQ(AOM_CODEC_ERROR, aom_codec_control(&dec, -1, 0));
   EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_control(&dec, 0, 0));
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&dec));

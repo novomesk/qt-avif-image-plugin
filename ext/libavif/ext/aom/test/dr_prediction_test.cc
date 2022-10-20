@@ -133,8 +133,8 @@ void z3_wrapper_hbd(uint16_t *dst, ptrdiff_t stride, int bw, int bh,
 
 template <typename FuncType>
 struct DrPredFunc {
-  DrPredFunc(FuncType pred = NULL, FuncType tst = NULL, int bit_depth_value = 0,
-             int start_angle_value = 0)
+  DrPredFunc(FuncType pred = nullptr, FuncType tst = nullptr,
+             int bit_depth_value = 0, int start_angle_value = 0)
       : ref_fn(pred), tst_fn(tst), bit_depth(bit_depth_value),
         start_angle(start_angle_value) {}
 
@@ -222,7 +222,7 @@ class DrPredTest : public ::testing::TestWithParam<DrPredFunc<FuncType> > {
       }
     }
     for (int tx = 0; tx < TX_SIZES_ALL; ++tx) {
-      if (params_.tst_fn == NULL) {
+      if (params_.tst_fn == nullptr) {
         for (int i = 0; i < kDstSize; ++i) {
           dst_tst_[i] = (1 << bd_) - 1;
           dst_ref_[i] = (1 << bd_) - 1;
@@ -274,7 +274,7 @@ class DrPredTest : public ::testing::TestWithParam<DrPredFunc<FuncType> > {
   }
 
   void RundrPredTest(const int speed) {
-    if (params_.tst_fn == NULL) return;
+    if (params_.tst_fn == nullptr) return;
     const int angles[] = { 3, 45, 87 };
     const int start_angle = speed ? 0 : start_angle_;
     const int stop_angle = speed ? 3 : stop_angle_;
@@ -340,11 +340,11 @@ using std::make_tuple;
 INSTANTIATE_TEST_SUITE_P(
     C, LowbdDrPredTest,
     ::testing::Values(DrPredFunc<DrPred>(&z1_wrapper<av1_dr_prediction_z1_c>,
-                                         NULL, AOM_BITS_8, kZ1Start),
+                                         nullptr, AOM_BITS_8, kZ1Start),
                       DrPredFunc<DrPred>(&z2_wrapper<av1_dr_prediction_z2_c>,
-                                         NULL, AOM_BITS_8, kZ2Start),
+                                         nullptr, AOM_BITS_8, kZ2Start),
                       DrPredFunc<DrPred>(&z3_wrapper<av1_dr_prediction_z3_c>,
-                                         NULL, AOM_BITS_8, kZ3Start)));
+                                         nullptr, AOM_BITS_8, kZ3Start)));
 
 #if CONFIG_AV1_HIGHBITDEPTH
 class HighbdDrPredTest : public DrPredTest<uint16_t, DrPred_Hbd> {};
@@ -363,23 +363,23 @@ INSTANTIATE_TEST_SUITE_P(
     C, HighbdDrPredTest,
     ::testing::Values(
         DrPredFunc<DrPred_Hbd>(&z1_wrapper_hbd<av1_highbd_dr_prediction_z1_c>,
-                               NULL, AOM_BITS_8, kZ1Start),
+                               nullptr, AOM_BITS_8, kZ1Start),
         DrPredFunc<DrPred_Hbd>(&z1_wrapper_hbd<av1_highbd_dr_prediction_z1_c>,
-                               NULL, AOM_BITS_10, kZ1Start),
+                               nullptr, AOM_BITS_10, kZ1Start),
         DrPredFunc<DrPred_Hbd>(&z1_wrapper_hbd<av1_highbd_dr_prediction_z1_c>,
-                               NULL, AOM_BITS_12, kZ1Start),
+                               nullptr, AOM_BITS_12, kZ1Start),
         DrPredFunc<DrPred_Hbd>(&z2_wrapper_hbd<av1_highbd_dr_prediction_z2_c>,
-                               NULL, AOM_BITS_8, kZ2Start),
+                               nullptr, AOM_BITS_8, kZ2Start),
         DrPredFunc<DrPred_Hbd>(&z2_wrapper_hbd<av1_highbd_dr_prediction_z2_c>,
-                               NULL, AOM_BITS_10, kZ2Start),
+                               nullptr, AOM_BITS_10, kZ2Start),
         DrPredFunc<DrPred_Hbd>(&z2_wrapper_hbd<av1_highbd_dr_prediction_z2_c>,
-                               NULL, AOM_BITS_12, kZ2Start),
+                               nullptr, AOM_BITS_12, kZ2Start),
         DrPredFunc<DrPred_Hbd>(&z3_wrapper_hbd<av1_highbd_dr_prediction_z3_c>,
-                               NULL, AOM_BITS_8, kZ3Start),
+                               nullptr, AOM_BITS_8, kZ3Start),
         DrPredFunc<DrPred_Hbd>(&z3_wrapper_hbd<av1_highbd_dr_prediction_z3_c>,
-                               NULL, AOM_BITS_10, kZ3Start),
+                               nullptr, AOM_BITS_10, kZ3Start),
         DrPredFunc<DrPred_Hbd>(&z3_wrapper_hbd<av1_highbd_dr_prediction_z3_c>,
-                               NULL, AOM_BITS_12, kZ3Start)));
+                               nullptr, AOM_BITS_12, kZ3Start)));
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
 TEST_P(LowbdDrPredTest, OperationCheck) { RundrPredTest(0); }
@@ -469,7 +469,7 @@ TEST_P(HighbdDrPredTest, DISABLED_Speed) {
 }
 
 TEST_P(HighbdDrPredTest, OperationCheck) {
-  if (params_.tst_fn == NULL) return;
+  if (params_.tst_fn == nullptr) return;
   // const int angles[] = { 3, 45, 81, 87, 93, 100, 145, 187, 199, 260 };
   for (enable_upsample_ = 0; enable_upsample_ < 2; ++enable_upsample_) {
     for (int angle = start_angle_; angle < stop_angle_; angle++) {

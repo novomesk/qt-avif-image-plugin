@@ -1223,7 +1223,7 @@ void av1_update_level_info(AV1_COMP *cpi, size_t size, int64_t ts_start,
 
     // Check whether target level is met.
     const AV1_LEVEL target_level = level_params->target_seq_level_idx[i];
-    if (target_level < SEQ_LEVELS && cpi->oxcf.strict_level_conformance == 1) {
+    if (target_level < SEQ_LEVELS && cpi->oxcf.strict_level_conformance) {
       assert(is_valid_seq_level_idx(target_level));
       const int tier = seq_params->tier[i];
       const TARGET_LEVEL_FAIL_ID fail_id = check_level_constraints(

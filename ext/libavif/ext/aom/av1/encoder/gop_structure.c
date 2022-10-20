@@ -58,8 +58,6 @@ static void set_src_offset(GF_GROUP *const gf_group, int *first_frame_index,
   }
 }
 
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
 // Sets the GF_GROUP params for LF_UPDATE frames.
 static AOM_INLINE void set_params_for_leaf_frames(
     const TWO_PASS *twopass, const TWO_PASS_FRAME *twopass_frame,
@@ -431,8 +429,6 @@ static AOM_INLINE void set_multi_layer_params_for_gf14(
     }
   }
 }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
 // Set parameters for frames between 'start' and 'end' (excluding both).
 static void set_multi_layer_params(
@@ -539,14 +535,10 @@ static int construct_multi_layer_gf_structure(
   int frame_index = 0;
   int cur_frame_index = 0;
 
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
   // Set the display order hint for the first frame in the GF_GROUP.
   int cur_disp_index = (first_frame_update_type == KF_UPDATE)
                            ? 0
                            : cpi->common.current_frame.frame_number;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
   // Initialize gf_group->frame_parallel_level and gf_group->is_frame_non_ref to
   // 0.
@@ -557,8 +549,6 @@ static int construct_multi_layer_gf_structure(
          sizeof(gf_group->is_frame_non_ref[0]) * MAX_STATIC_GF_GROUP_LENGTH);
   memset(gf_group->src_offset, 0,
          sizeof(gf_group->src_offset[0]) * MAX_STATIC_GF_GROUP_LENGTH);
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
   // Initialize gf_group->skip_frame_refresh and gf_group->skip_frame_as_ref
   // with INVALID_IDX.
   memset(gf_group->skip_frame_refresh, INVALID_IDX,
@@ -566,8 +556,6 @@ static int construct_multi_layer_gf_structure(
              MAX_STATIC_GF_GROUP_LENGTH * REF_FRAMES);
   memset(gf_group->skip_frame_as_ref, INVALID_IDX,
          sizeof(gf_group->skip_frame_as_ref[0]) * MAX_STATIC_GF_GROUP_LENGTH);
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
   int kf_decomp = cpi->oxcf.kf_cfg.enable_keyframe_filtering > 1;
   // This is a patch that fixes https://crbug.com/aomedia/3163
@@ -589,12 +577,8 @@ static int construct_multi_layer_gf_structure(
     gf_group->frame_type[frame_index] = KEY_FRAME;
     gf_group->refbuf_state[frame_index] = REFBUF_RESET;
     gf_group->max_layer_depth = 0;
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
     gf_group->display_idx[frame_index] = cur_disp_index;
     if (!kf_decomp) cur_disp_index++;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
     ++frame_index;
 
     if (kf_decomp) {
@@ -605,12 +589,8 @@ static int construct_multi_layer_gf_structure(
       gf_group->frame_type[frame_index] = INTER_FRAME;
       gf_group->refbuf_state[frame_index] = REFBUF_UPDATE;
       gf_group->max_layer_depth = 0;
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
       gf_group->display_idx[frame_index] = cur_disp_index;
       cur_disp_index++;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
       ++frame_index;
     }
     cur_frame_index++;
@@ -624,12 +604,8 @@ static int construct_multi_layer_gf_structure(
     gf_group->frame_type[frame_index] = INTER_FRAME;
     gf_group->refbuf_state[frame_index] = REFBUF_UPDATE;
     gf_group->max_layer_depth = 0;
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
     gf_group->display_idx[frame_index] = cur_disp_index;
     cur_disp_index++;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
     ++frame_index;
     ++cur_frame_index;
   }
@@ -648,12 +624,8 @@ static int construct_multi_layer_gf_structure(
     gf_group->refbuf_state[frame_index] = REFBUF_UPDATE;
     gf_group->max_layer_depth = 1;
     gf_group->arf_index = frame_index;
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
     gf_group->display_idx[frame_index] =
         cur_disp_index + gf_group->arf_src_offset[frame_index];
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
     ++frame_index;
   } else {
     gf_group->arf_index = -1;
@@ -671,8 +643,6 @@ static int construct_multi_layer_gf_structure(
                                   gf_group->max_layer_depth_allowed >= 4);
 
   int first_frame_index = cur_frame_index;
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
   if (do_frame_parallel_encode) {
     // construct_multi_layer_gf_structure() takes the input parameter
     // 'gf_interval' as p_rc->baseline_gf_interval - 1 . Below code computes the
@@ -747,8 +717,6 @@ static int construct_multi_layer_gf_structure(
     }
     is_multi_layer_configured = 1;
   }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
 
   // Rest of the frames.
   if (!is_multi_layer_configured)
@@ -767,11 +735,7 @@ static int construct_multi_layer_gf_structure(
     gf_group->frame_type[frame_index] = INTER_FRAME;
     gf_group->refbuf_state[frame_index] =
         is_fwd_kf ? REFBUF_RESET : REFBUF_UPDATE;
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
     gf_group->display_idx[frame_index] = cur_disp_index;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
     ++frame_index;
   } else {
     for (; cur_frame_index <= gf_interval; ++cur_frame_index) {
@@ -785,12 +749,8 @@ static int construct_multi_layer_gf_structure(
       gf_group->max_layer_depth = AOMMAX(gf_group->max_layer_depth, 2);
       set_src_offset(gf_group, &first_frame_index, cur_frame_index,
                      frame_index);
-#if CONFIG_FRAME_PARALLEL_ENCODE
-#if CONFIG_FRAME_PARALLEL_ENCODE_2
       gf_group->display_idx[frame_index] = cur_disp_index;
       cur_disp_index++;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE_2
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
       ++frame_index;
     }
   }

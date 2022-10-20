@@ -165,6 +165,13 @@ void av1_update_temporal_layer_framerate(AV1_COMP *const cpi) {
   }
 }
 
+static AOM_INLINE bool check_ref_is_low_spatial_res_super_frame(
+    int ref_frame, const SVC *svc) {
+  int ref_frame_idx = svc->ref_idx[ref_frame - 1];
+  return svc->buffer_time_index[ref_frame_idx] == svc->current_superframe &&
+         svc->buffer_spatial_layer[ref_frame_idx] <= svc->spatial_layer_id - 1;
+}
+
 void av1_restore_layer_context(AV1_COMP *const cpi) {
   SVC *const svc = &cpi->svc;
   const AV1_COMMON *const cm = &cpi->common;
@@ -195,19 +202,21 @@ void av1_restore_layer_context(AV1_COMP *const cpi) {
   }
   svc->skip_mvsearch_last = 0;
   svc->skip_mvsearch_gf = 0;
+  svc->skip_mvsearch_altref = 0;
   // For each reference (LAST/GOLDEN) set the skip_mvsearch_last/gf frame flags.
   // This is to skip searching mv for that reference if it was last
   // refreshed (i.e., buffer slot holding that reference was refreshed) on the
   // previous spatial layer(s) at the same time (current_superframe).
   if (svc->set_ref_frame_config && svc->force_zero_mode_spatial_ref) {
-    int ref_frame_idx = svc->ref_idx[LAST_FRAME - 1];
-    if (svc->buffer_time_index[ref_frame_idx] == svc->current_superframe &&
-        svc->buffer_spatial_layer[ref_frame_idx] <= svc->spatial_layer_id - 1)
+    if (check_ref_is_low_spatial_res_super_frame(LAST_FRAME, svc)) {
       svc->skip_mvsearch_last = 1;
-    ref_frame_idx = svc->ref_idx[GOLDEN_FRAME - 1];
-    if (svc->buffer_time_index[ref_frame_idx] == svc->current_superframe &&
-        svc->buffer_spatial_layer[ref_frame_idx] <= svc->spatial_layer_id - 1)
+    }
+    if (check_ref_is_low_spatial_res_super_frame(GOLDEN_FRAME, svc)) {
       svc->skip_mvsearch_gf = 1;
+    }
+    if (check_ref_is_low_spatial_res_super_frame(ALTREF_FRAME, svc)) {
+      svc->skip_mvsearch_altref = 1;
+    }
   }
 }
 

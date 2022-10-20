@@ -124,12 +124,12 @@ TEST(FilmGrainTableTest, SplitSingleSegment) {
 
   // Test lookup and remove that adjusts start time
   EXPECT_TRUE(aom_film_grain_table_lookup(&table, 0, 100, true, &grain));
-  EXPECT_EQ(NULL, table.head->next);
+  EXPECT_EQ(nullptr, table.head->next);
   EXPECT_EQ(100, table.head->start_time);
 
   // Test lookup and remove that adjusts end time
   EXPECT_TRUE(aom_film_grain_table_lookup(&table, 900, 1000, true, &grain));
-  EXPECT_EQ(NULL, table.head->next);
+  EXPECT_EQ(nullptr, table.head->next);
   EXPECT_EQ(100, table.head->start_time);
   EXPECT_EQ(900, table.head->end_time);
 
@@ -138,7 +138,7 @@ TEST(FilmGrainTableTest, SplitSingleSegment) {
   EXPECT_EQ(100, table.head->start_time);
   EXPECT_EQ(400, table.head->end_time);
 
-  ASSERT_NE((void *)NULL, table.head->next);
+  ASSERT_NE(nullptr, table.head->next);
   EXPECT_EQ(table.tail, table.head->next);
   EXPECT_EQ(600, table.head->next->start_time);
   EXPECT_EQ(900, table.head->next->end_time);
@@ -193,6 +193,7 @@ TEST_F(FilmGrainTableIOTest, ReadTruncatedFile) {
 
   std::string grain_file;
   FILE *file = libaom_test::GetTempOutFile(&grain_file);
+  ASSERT_NE(file, nullptr);
   fwrite("deadbeef", 8, 1, file);
   fclose(file);
   ASSERT_EQ(AOM_CODEC_ERROR,
@@ -217,7 +218,9 @@ TEST_F(FilmGrainTableIOTest, RoundTripReadWrite) {
                                 expected_grain + i);
   }
   std::string grain_file;
-  fclose(libaom_test::GetTempOutFile(&grain_file));
+  FILE *tmpfile = libaom_test::GetTempOutFile(&grain_file);
+  ASSERT_NE(tmpfile, nullptr);
+  fclose(tmpfile);
   ASSERT_EQ(AOM_CODEC_OK,
             aom_film_grain_table_write(&table, grain_file.c_str(), &error_));
   aom_film_grain_table_free(&table);
@@ -237,7 +240,9 @@ TEST_F(FilmGrainTableIOTest, RoundTripReadWrite) {
 
 TEST_F(FilmGrainTableIOTest, RoundTripSplit) {
   std::string grain_file;
-  fclose(libaom_test::GetTempOutFile(&grain_file));
+  FILE *tmpfile = libaom_test::GetTempOutFile(&grain_file);
+  ASSERT_NE(tmpfile, nullptr);
+  fclose(tmpfile);
 
   aom_film_grain_table_t table;
   memset(&table, 0, sizeof(table));

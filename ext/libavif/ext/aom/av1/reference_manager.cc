@@ -22,7 +22,7 @@ namespace aom {
 
 void RefFrameManager::Reset() {
   free_ref_idx_list_.clear();
-  for (int i = 0; i < kRefFrameTableSize; ++i) {
+  for (int i = 0; i < static_cast<int>(ref_frame_table_.size()); ++i) {
     free_ref_idx_list_.push_back(i);
     ref_frame_table_[i] = GopFrameInvalid();
   }
@@ -81,7 +81,10 @@ int RefFrameManager::GetRefFrameIdxByPriority(RefUpdateType ref_update_type,
   if (ref_update_type == RefUpdateType::kForward) {
     int size = static_cast<int>(forward_stack_.size());
     if (priority_idx < size) {
-      return forward_stack_[size - priority_idx - 1];
+      if (priority_idx == 0)
+        return forward_stack_[priority_idx];
+      else
+        return forward_stack_[size - priority_idx];
     }
   } else if (ref_update_type == RefUpdateType::kBackward) {
     int size = static_cast<int>(backward_queue_.size());
@@ -121,9 +124,9 @@ ReferenceName get_ref_name(RefUpdateType ref_update_type, int priority_idx,
   // Maybe sort the names based on how frequent each name is being used in the
   // past?
   const std::vector<ReferenceName> forward_name_list{
-    ReferenceName::kBwdrefFrame, ReferenceName::kAltref2Frame,
-    ReferenceName::kAltrefFrame, ReferenceName::kGoldenFrame,
-    ReferenceName::kLastFrame,   ReferenceName::kLast2Frame,
+    ReferenceName::kAltrefFrame,  ReferenceName::kBwdrefFrame,
+    ReferenceName::kAltref2Frame, ReferenceName::kGoldenFrame,
+    ReferenceName::kLastFrame,    ReferenceName::kLast2Frame,
     ReferenceName::kLast3Frame
   };
   const std::vector<ReferenceName> backward_name_list{
@@ -159,11 +162,11 @@ ReferenceName get_ref_name(RefUpdateType ref_update_type, int priority_idx,
 }
 
 // Generate a list of available reference frames in priority order for the
-// current to-be-coded frame. The list size should be less or equal to
-// kRefFrameTableSize. The reference frames with smaller indices are more likely
-// to be a good reference frame. Therefore, they should be prioritized when the
-// reference frame count is limited. For example, if we plan to use 3 reference
-// frames, we should choose ref_frame_list[0], ref_frame_list[1] and
+// current to-be-coded frame. The list size should be less or equal to the size
+// of ref_frame_table_. The reference frames with smaller indices are more
+// likely to be a good reference frame. Therefore, they should be prioritized
+// when the reference frame count is limited. For example, if we plan to use 3
+// reference frames, we should choose ref_frame_list[0], ref_frame_list[1] and
 // ref_frame_list[2].
 std::vector<ReferenceFrame> RefFrameManager::GetRefFrameListByPriority() const {
   constexpr int round_robin_size = 3;
@@ -202,7 +205,9 @@ void RefFrameManager::UpdateOrder(int global_order_idx) {
   }
   int ref_idx = forward_stack_.back();
   const GopFrame &gf_frame = ref_frame_table_[ref_idx];
-  if (gf_frame.global_order_idx <= global_order_idx) {
+
+  // If the current processing frame is an overlay / show existing frame.
+  if (gf_frame.global_order_idx == global_order_idx) {
     forward_stack_.pop_back();
     if (gf_frame.is_golden_frame) {
       // high quality frame
@@ -214,7 +219,7 @@ void RefFrameManager::UpdateOrder(int global_order_idx) {
 }
 
 int RefFrameManager::ColocatedRefIdx(int global_order_idx) {
-  if (forward_stack_.size() == 0) return -1;
+  if (forward_stack_.empty()) return -1;
   int ref_idx = forward_stack_.back();
   int arf_global_order_idx = ref_frame_table_[ref_idx].global_order_idx;
   if (arf_global_order_idx == global_order_idx) {

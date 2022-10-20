@@ -43,6 +43,7 @@ class DatarateTest : public ::libaom_test::EncoderTest {
     denoiser_offon_test_ = 0;
     denoiser_offon_period_ = -1;
     tile_column_ = 0;
+    screen_mode_ = false;
   }
 
   virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
@@ -65,19 +66,21 @@ class DatarateTest : public ::libaom_test::EncoderTest {
         encoder->Control(AV1E_SET_MV_COST_UPD_FREQ, 2);
         encoder->Control(AV1E_SET_DV_COST_UPD_FREQ, 2);
       }
+      if (screen_mode_) {
+        encoder->Control(AV1E_SET_TUNE_CONTENT, AOM_CONTENT_SCREEN);
+        encoder->Control(AV1E_SET_ENABLE_PALETTE, 1);
+        encoder->Control(AV1E_SET_ENABLE_INTRABC, 0);
+      }
     }
 
     if (speed_change_test_) {
       if (video->frame() == 0) {
         encoder->Control(AOME_SET_CPUUSED, 8);
-      }
-      if (video->frame() == 30) {
+      } else if (video->frame() == 30) {
         encoder->Control(AOME_SET_CPUUSED, 7);
-      }
-      if (video->frame() == 60) {
+      } else if (video->frame() == 60) {
         encoder->Control(AOME_SET_CPUUSED, 6);
-      }
-      if (video->frame() == 90) {
+      } else if (video->frame() == 90) {
         encoder->Control(AOME_SET_CPUUSED, 7);
       }
     }
@@ -154,6 +157,7 @@ class DatarateTest : public ::libaom_test::EncoderTest {
   unsigned int aq_mode_;
   bool speed_change_test_;
   int tile_column_;
+  bool screen_mode_;
 };
 
 }  // namespace

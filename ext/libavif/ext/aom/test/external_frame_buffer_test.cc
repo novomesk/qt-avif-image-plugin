@@ -36,7 +36,7 @@ struct ExternalFrameBuffer {
 class ExternalFrameBufferList {
  public:
   ExternalFrameBufferList()
-      : num_buffers_(0), num_used_buffers_(0), ext_fb_list_(NULL) {}
+      : num_buffers_(0), num_used_buffers_(0), ext_fb_list_(nullptr) {}
 
   virtual ~ExternalFrameBufferList() {
     for (int i = 0; i < num_buffers_; ++i) {
@@ -93,7 +93,7 @@ class ExternalFrameBufferList {
 
     if (ext_fb_list_[idx].size < min_size) {
       delete[] ext_fb_list_[idx].data;
-      ext_fb_list_[idx].data = NULL;
+      ext_fb_list_[idx].data = nullptr;
       ext_fb_list_[idx].size = min_size;
     }
 
@@ -104,13 +104,13 @@ class ExternalFrameBufferList {
   // Marks the external frame buffer that |fb| is pointing to as free.
   // Returns < 0 on an error.
   int ReturnFrameBuffer(aom_codec_frame_buffer_t *fb) {
-    if (fb == NULL) {
+    if (fb == nullptr) {
       EXPECT_NE(fb, nullptr);
       return -1;
     }
     ExternalFrameBuffer *const ext_fb =
         reinterpret_cast<ExternalFrameBuffer *>(fb->priv);
-    if (ext_fb == NULL) {
+    if (ext_fb == nullptr) {
       EXPECT_NE(ext_fb, nullptr);
       return -1;
     }
@@ -212,10 +212,10 @@ class ExternalFrameBufferMD5Test
  protected:
   ExternalFrameBufferMD5Test()
       : DecoderTest(GET_PARAM(::libaom_test::kCodecFactoryParam)),
-        md5_file_(NULL), num_buffers_(0) {}
+        md5_file_(nullptr), num_buffers_(0) {}
 
   virtual ~ExternalFrameBufferMD5Test() {
-    if (md5_file_ != NULL) fclose(md5_file_);
+    if (md5_file_ != nullptr) fclose(md5_file_);
   }
 
   virtual void PreDecodeFrameHook(
@@ -253,7 +253,7 @@ class ExternalFrameBufferMD5Test
         (aom_img_fmt)(img.fmt & ~AOM_IMG_FMT_HIGHBITDEPTH);
     if (img.bit_depth == 8 && shifted_fmt != img.fmt) {
       aom_image_t *img_shifted =
-          aom_img_alloc(NULL, shifted_fmt, img.d_w, img.d_h, 16);
+          aom_img_alloc(nullptr, shifted_fmt, img.d_w, img.d_h, 16);
       img_shifted->bit_depth = img.bit_depth;
       img_shifted->monochrome = img.monochrome;
       aom_img_downshift(img_shifted, &img, 0);
@@ -312,7 +312,8 @@ const char kAV1NonRefTestFile[] = "av1-1-b8-01-size-226x226.ivf";
 // Class for testing passing in external frame buffers to libaom.
 class ExternalFrameBufferTest : public ::testing::Test {
  protected:
-  ExternalFrameBufferTest() : video_(NULL), decoder_(NULL), num_buffers_(0) {}
+  ExternalFrameBufferTest()
+      : video_(nullptr), decoder_(nullptr), num_buffers_(0) {}
 
   virtual void SetUp() {
     video_ = new libaom_test::WebMVideoSource(kAV1TestFile);
@@ -328,9 +329,9 @@ class ExternalFrameBufferTest : public ::testing::Test {
 
   virtual void TearDown() {
     delete decoder_;
-    decoder_ = NULL;
+    decoder_ = nullptr;
     delete video_;
-    video_ = NULL;
+    video_ = nullptr;
   }
 
   // Passes the external frame buffer information to libaom.
@@ -354,7 +355,7 @@ class ExternalFrameBufferTest : public ::testing::Test {
   }
 
   aom_codec_err_t DecodeRemainingFrames() {
-    for (; video_->cxdata() != NULL; video_->Next()) {
+    for (; video_->cxdata() != nullptr; video_->Next()) {
       const aom_codec_err_t res =
           decoder_->DecodeFrame(video_->cxdata(), video_->frame_size());
       if (res != AOM_CODEC_OK) return res;
@@ -366,10 +367,10 @@ class ExternalFrameBufferTest : public ::testing::Test {
  protected:
   void CheckDecodedFrames() {
     libaom_test::DxDataIterator dec_iter = decoder_->GetDxData();
-    const aom_image_t *img = NULL;
+    const aom_image_t *img = nullptr;
 
     // Get decompressed data
-    while ((img = dec_iter.Next()) != NULL) {
+    while ((img = dec_iter.Next()) != nullptr) {
       fb_list_.CheckImageFrameBuffer(img);
     }
   }
@@ -511,13 +512,14 @@ TEST_F(ExternalFrameBufferTest, NullGetFunction) {
   const int num_buffers = AOM_MAXIMUM_REF_BUFFERS + AOM_MAXIMUM_WORK_BUFFERS;
   ASSERT_EQ(
       AOM_CODEC_INVALID_PARAM,
-      SetFrameBufferFunctions(num_buffers, NULL, release_aom_frame_buffer));
+      SetFrameBufferFunctions(num_buffers, nullptr, release_aom_frame_buffer));
 }
 
 TEST_F(ExternalFrameBufferTest, NullReleaseFunction) {
   const int num_buffers = AOM_MAXIMUM_REF_BUFFERS + AOM_MAXIMUM_WORK_BUFFERS;
-  ASSERT_EQ(AOM_CODEC_INVALID_PARAM,
-            SetFrameBufferFunctions(num_buffers, get_aom_frame_buffer, NULL));
+  ASSERT_EQ(
+      AOM_CODEC_INVALID_PARAM,
+      SetFrameBufferFunctions(num_buffers, get_aom_frame_buffer, nullptr));
 }
 
 TEST_F(ExternalFrameBufferTest, SetAfterDecode) {

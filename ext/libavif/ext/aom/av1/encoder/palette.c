@@ -468,6 +468,62 @@ static AOM_INLINE void fill_data_and_get_bounds(
   }
 }
 
+/*! \brief Colors are sorted by their count: the higher the better.
+ */
+struct ColorCount {
+  //! Color index in the histogram.
+  int index;
+  //! Histogram count.
+  int count;
+};
+
+int color_count_comp(const void *c1, const void *c2) {
+  const struct ColorCount *color_count1 = (const struct ColorCount *)c1;
+  const struct ColorCount *color_count2 = (const struct ColorCount *)c2;
+  if (color_count1->count > color_count2->count) return -1;
+  if (color_count1->count < color_count2->count) return 1;
+  if (color_count1->index < color_count2->index) return -1;
+  return 1;
+}
+
+static void find_top_colors(const int *const count_buf, int bit_depth,
+                            int n_colors, int *top_colors) {
+  // Top color array, serving as a priority queue if more than n_colors are
+  // found.
+  struct ColorCount top_color_counts[PALETTE_MAX_SIZE] = { { 0 } };
+  int n_color_count = 0;
+  for (int i = 0; i < (1 << bit_depth); ++i) {
+    if (count_buf[i] > 0) {
+      if (n_color_count < n_colors) {
+        // Keep adding to the top colors.
+        top_color_counts[n_color_count].index = i;
+        top_color_counts[n_color_count].count = count_buf[i];
+        ++n_color_count;
+        if (n_color_count == n_colors) {
+          qsort(top_color_counts, n_colors, sizeof(top_color_counts[0]),
+                color_count_comp);
+        }
+      } else {
+        // Check the worst in the sorted top.
+        if (count_buf[i] > top_color_counts[n_colors - 1].count) {
+          int j = n_colors - 1;
+          // Move up to the best one.
+          while (j >= 1 && count_buf[i] > top_color_counts[j - 1].count) --j;
+          memmove(top_color_counts + j + 1, top_color_counts + j,
+                  (n_colors - j - 1) * sizeof(top_color_counts[0]));
+          top_color_counts[j].index = i;
+          top_color_counts[j].count = count_buf[i];
+        }
+      }
+    }
+  }
+  assert(n_color_count == n_colors);
+
+  for (int i = 0; i < n_colors; ++i) {
+    top_colors[i] = top_color_counts[i].index;
+  }
+}
+
 void av1_rd_pick_palette_intra_sby(
     const AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bsize, int dc_mode_cost,
     MB_MODE_INFO *best_mbmi, uint8_t *best_palette_color_map, int64_t *best_rd,
@@ -493,10 +549,10 @@ void av1_rd_pick_palette_intra_sby(
   const int discount_color_cost = cpi->sf.rt_sf.use_nonrd_pick_mode;
   int unused;
 
-  int count_buf[1 << 12];      // Maximum (1 << 12) color levels.
-  int count_buf_8bit[1 << 8];  // Maximum (1 << 8) bins for hbd path.
+  int count_buf[1 << 12];  // Maximum (1 << 12) color levels.
   int colors, colors_threshold = 0;
   if (is_hbd) {
+    int count_buf_8bit[1 << 8];  // Maximum (1 << 8) bins for hbd path.
     av1_count_colors_highbd(src, src_stride, rows, cols, bit_depth, count_buf,
                             count_buf_8bit, &colors_threshold, &colors);
   } else {
@@ -520,17 +576,8 @@ void av1_rd_pick_palette_intra_sby(
 
     // Find the dominant colors, stored in top_colors[].
     int top_colors[PALETTE_MAX_SIZE] = { 0 };
-    for (int i = 0; i < AOMMIN(colors, PALETTE_MAX_SIZE); ++i) {
-      int max_count = 0;
-      for (int j = 0; j < (1 << bit_depth); ++j) {
-        if (count_buf[j] > max_count) {
-          max_count = count_buf[j];
-          top_colors[i] = j;
-        }
-      }
-      assert(max_count > 0);
-      count_buf[top_colors[i]] = 0;
-    }
+    find_top_colors(count_buf, bit_depth, AOMMIN(colors, PALETTE_MAX_SIZE),
+                    top_colors);
 
     // The following are the approaches used for header rdcost based gating
     // for early termination for different values of prune_palette_search_level.
@@ -716,9 +763,9 @@ void av1_rd_pick_palette_intra_sbuv(const AV1_COMP *cpi, MACROBLOCK *x,
                            &plane_block_height, &rows, &cols);
 
   mbmi->uv_mode = UV_DC_PRED;
-  int count_buf[1 << 12];      // Maximum (1 << 12) color levels.
-  int count_buf_8bit[1 << 8];  // Maximum (1 << 8) bins for hbd path.
   if (seq_params->use_highbitdepth) {
+    int count_buf[1 << 12];      // Maximum (1 << 12) color levels.
+    int count_buf_8bit[1 << 8];  // Maximum (1 << 8) bins for hbd path.
     av1_count_colors_highbd(src_u, src_stride, rows, cols,
                             seq_params->bit_depth, count_buf, count_buf_8bit,
                             &colors_threshold_u, &colors_u);
@@ -726,6 +773,7 @@ void av1_rd_pick_palette_intra_sbuv(const AV1_COMP *cpi, MACROBLOCK *x,
                             seq_params->bit_depth, count_buf, count_buf_8bit,
                             &colors_threshold_v, &colors_v);
   } else {
+    int count_buf[1 << 8];
     av1_count_colors(src_u, src_stride, rows, cols, count_buf, &colors_u);
     av1_count_colors(src_v, src_stride, rows, cols, count_buf, &colors_v);
     colors_threshold_u = colors_u;

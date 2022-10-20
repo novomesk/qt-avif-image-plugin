@@ -15,9 +15,7 @@
 
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/encodeframe_utils.h"
-#include "av1/encoder/partition_strategy.h"
 #include "av1/encoder/rdopt.h"
-#include "av1/encoder/aq_variance.h"
 
 void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
                          const BLOCK_SIZE bsize, const int mi_row,
@@ -326,7 +324,8 @@ void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
 
     if (!dry_run && !mi_addr->skip_txfm) {
       int cdf_num;
-      const int spatial_pred = av1_get_spatial_seg_pred(cm, xd, &cdf_num);
+      const int spatial_pred = av1_get_spatial_seg_pred(
+          cm, xd, &cdf_num, cpi->cyclic_refresh->skip_over4x4);
       const int coded_id = av1_neg_interleave(mi_addr->segment_id, spatial_pred,
                                               seg->last_active_segid + 1);
       int64_t spatial_cost = x->mode_costs.spatial_pred_cost[cdf_num][coded_id];
@@ -1447,7 +1446,7 @@ void av1_backup_sb_state(SB_FIRST_PASS_STATS *sb_fp_stats, const AV1_COMP *cpi,
       xd->left_txfm_context_buffer + (mi_row & MAX_MIB_MASK);
   av1_save_context(x, &sb_fp_stats->x_ctx, mi_row, mi_col, sb_size, num_planes);
 
-  sb_fp_stats->rd_count = cpi->td.rd_counts;
+  sb_fp_stats->rd_count = td->rd_counts;
   sb_fp_stats->split_count = x->txfm_search_info.txb_split_count;
 
   sb_fp_stats->fc = *td->counts;
@@ -1480,7 +1479,7 @@ void av1_restore_sb_state(const SB_FIRST_PASS_STATS *sb_fp_stats, AV1_COMP *cpi,
   av1_restore_context(x, &sb_fp_stats->x_ctx, mi_row, mi_col, sb_size,
                       num_planes);
 
-  cpi->td.rd_counts = sb_fp_stats->rd_count;
+  td->rd_counts = sb_fp_stats->rd_count;
   x->txfm_search_info.txb_split_count = sb_fp_stats->split_count;
 
   *td->counts = sb_fp_stats->fc;
@@ -1577,6 +1576,10 @@ void av1_set_cost_upd_freq(AV1_COMP *cpi, ThreadData *td,
   const int num_planes = av1_num_planes(cm);
   MACROBLOCK *const x = &td->mb;
   MACROBLOCKD *const xd = &x->e_mbd;
+
+  if (cm->features.disable_cdf_update) {
+    return;
+  }
 
   switch (cpi->sf.inter_sf.coeff_cost_upd_level) {
     case INTERNAL_COST_UPD_OFF:

@@ -252,7 +252,7 @@ void AV1FwdTxfm2dMatchTest(TX_SIZE tx_size, lowbd_fwd_txfm_func target_func) {
     }
 
     FwdTxfm2dFunc ref_func = libaom_test::fwd_txfm_func_ls[tx_size];
-    if (ref_func != NULL) {
+    if (ref_func != nullptr) {
       DECLARE_ALIGNED(32, int16_t, input[64 * 64]) = { 0 };
       DECLARE_ALIGNED(32, int32_t, output[64 * 64]);
       DECLARE_ALIGNED(32, int32_t, ref_output[64 * 64]);
@@ -309,7 +309,7 @@ void AV1FwdTxfm2dSpeedTest(TX_SIZE tx_size, lowbd_fwd_txfm_func target_func) {
       }
 
       FwdTxfm2dFunc ref_func = libaom_test::fwd_txfm_func_ls[tx_size];
-      if (ref_func != NULL) {
+      if (ref_func != nullptr) {
         DECLARE_ALIGNED(32, int16_t, input[64 * 64]) = { 0 };
         DECLARE_ALIGNED(32, int32_t, output[64 * 64]);
         DECLARE_ALIGNED(32, int32_t, ref_output[64 * 64]);
@@ -528,7 +528,7 @@ void AV1HighbdFwdTxfm2dMatchTest(TX_SIZE tx_size,
       }
 
       FwdTxfm2dFunc ref_func = libaom_test::fwd_txfm_func_ls[tx_size];
-      if (ref_func != NULL) {
+      if (ref_func != nullptr) {
         DECLARE_ALIGNED(32, int16_t, input[64 * 64]) = { 0 };
         DECLARE_ALIGNED(32, int32_t, output[64 * 64]);
         DECLARE_ALIGNED(32, int32_t, ref_output[64 * 64]);
@@ -589,7 +589,7 @@ void AV1HighbdFwdTxfm2dSpeedTest(TX_SIZE tx_size,
       }
 
       FwdTxfm2dFunc ref_func = libaom_test::fwd_txfm_func_ls[tx_size];
-      if (ref_func != NULL) {
+      if (ref_func != nullptr) {
         DECLARE_ALIGNED(32, int16_t, input[64 * 64]) = { 0 };
         DECLARE_ALIGNED(32, int32_t, output[64 * 64]);
         DECLARE_ALIGNED(32, int32_t, ref_output[64 * 64]);

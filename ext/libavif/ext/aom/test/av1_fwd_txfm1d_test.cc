@@ -36,8 +36,8 @@ const TxfmFunc fwd_txfm_func_ls[][txfm_type_num] = {
   { av1_fdct4, av1_fadst4, av1_fidentity4_c },
   { av1_fdct8, av1_fadst8, av1_fidentity8_c },
   { av1_fdct16, av1_fadst16, av1_fidentity16_c },
-  { av1_fdct32, NULL, av1_fidentity32_c },
-  { av1_fdct64, NULL, NULL },
+  { av1_fdct32, nullptr, av1_fidentity32_c },
+  { av1_fdct64, nullptr, nullptr },
 };
 
 // the maximum stage number of fwd/inv 1d dct/adst txfm is 12
@@ -83,7 +83,7 @@ TEST(av1_fwd_txfm1d, accuracy) {
       int max_error = 7;
 
       const int count_test_block = 5000;
-      if (fwd_txfm_func != NULL) {
+      if (fwd_txfm_func != nullptr) {
         for (int ti = 0; ti < count_test_block; ++ti) {
           for (int ni = 0; ni < txfm_size; ++ni) {
             input[ni] = rnd.Rand16() % input_base - rnd.Rand16() % input_base;

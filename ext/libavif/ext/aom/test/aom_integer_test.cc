@@ -130,13 +130,13 @@ TEST(AomLeb128, DecodeFailTest) {
 
   // Test that decode fails when result would be valid 9 byte integer.
   ASSERT_EQ(aom_uleb_decode(&kAllPadBytesBuffer[0], kMaximumLeb128CodedSize + 1,
-                            &decoded_value, NULL),
+                            &decoded_value, nullptr),
             -1);
 
   // Test that encoded value missing terminator byte within available buffer
   // range causes decode error.
   ASSERT_EQ(aom_uleb_decode(&kAllPadBytesBuffer[0], kMaximumLeb128CodedSize,
-                            &decoded_value, NULL),
+                            &decoded_value, nullptr),
             -1);
 
   // Test that LEB128 input that decodes to a value larger than 32-bits fails.
@@ -153,10 +153,10 @@ TEST(AomLeb128, EncodeFailTest) {
   uint8_t write_buffer[kWriteBufferSize] = { 0 };
   size_t coded_size = 0;
   ASSERT_EQ(
-      aom_uleb_encode(kValidTestValue, kWriteBufferSize, NULL, &coded_size),
+      aom_uleb_encode(kValidTestValue, kWriteBufferSize, nullptr, &coded_size),
       -1);
   ASSERT_EQ(aom_uleb_encode(kValidTestValue, kWriteBufferSize, &write_buffer[0],
-                            NULL),
+                            nullptr),
             -1);
 
   const uint32_t kValueOutOfRangeForBuffer = 0xFFFFFFFF;

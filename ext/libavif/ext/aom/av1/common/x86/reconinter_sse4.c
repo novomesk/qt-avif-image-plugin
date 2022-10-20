@@ -46,8 +46,8 @@ void av1_build_compound_diffwtd_mask_sse4_1(uint8_t *mask,
       const __m128i m16 = calc_mask(mask_base, s0, s1);
       const __m128i m8 = _mm_packus_epi16(m16, m16);
 
-      *(uint32_t *)mask = _mm_cvtsi128_si32(m8);
-      *(uint32_t *)(mask + w) = _mm_extract_epi32(m8, 1);
+      *(int *)mask = _mm_cvtsi128_si32(m8);
+      *(int *)(mask + w) = _mm_extract_epi32(m8, 1);
       src0 += (stride0 << 1);
       src1 += (stride1 << 1);
       mask += 8;
@@ -146,7 +146,7 @@ void av1_build_compound_diffwtd_mask_d16_sse4_1(
       if ((w - j) > 4) {
         _mm_storel_epi64(dst, res_8);
       } else {  // w==4
-        *(uint32_t *)dst = _mm_cvtsi128_si32(res_8);
+        *(int *)dst = _mm_cvtsi128_si32(res_8);
       }
     }
   }

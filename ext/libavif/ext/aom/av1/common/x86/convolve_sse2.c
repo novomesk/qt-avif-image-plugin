@@ -199,7 +199,7 @@ void av1_convolve_y_sr_sse2(const uint8_t *src, int src_stride, uint8_t *dst,
 
     if (w <= 4) {
       __m128i s[8], src6, res, res_round, res16;
-      uint32_t res_int;
+      int res_int;
       src6 = _mm_cvtsi32_si128(*(uint32_t *)(src_ptr + 6 * src_stride));
       s[0] = _mm_unpacklo_epi8(
           _mm_cvtsi32_si128(*(uint32_t *)(src_ptr + 0 * src_stride)),
@@ -234,7 +234,7 @@ void av1_convolve_y_sr_sse2(const uint8_t *src, int src_stride, uint8_t *dst,
         if (w == 2)
           *(uint16_t *)dst = (uint16_t)res_int;
         else
-          *(uint32_t *)dst = res_int;
+          *(int *)dst = res_int;
 
         src_ptr += src_stride;
         dst += dst_stride;
@@ -247,7 +247,7 @@ void av1_convolve_y_sr_sse2(const uint8_t *src, int src_stride, uint8_t *dst,
         if (w == 2)
           *(uint16_t *)dst = (uint16_t)res_int;
         else
-          *(uint32_t *)dst = res_int;
+          *(int *)dst = res_int;
 
         src_ptr += src_stride;
         dst += dst_stride;
@@ -443,11 +443,11 @@ void av1_convolve_x_sr_sse2(const uint8_t *src, int src_stride, uint8_t *dst,
         const __m128i res16 = _mm_packs_epi32(res_lo_round, res_lo_round);
         const __m128i res = _mm_packus_epi16(res16, res16);
 
-        uint32_t r = _mm_cvtsi128_si32(res);
+        int r = _mm_cvtsi128_si32(res);
         if (w == 2)
           *(uint16_t *)dst = (uint16_t)r;
         else
-          *(uint32_t *)dst = r;
+          *(int *)dst = r;
 
         src_ptr += src_stride;
         dst += dst_stride;

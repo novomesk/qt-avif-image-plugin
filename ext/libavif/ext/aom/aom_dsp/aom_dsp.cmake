@@ -223,6 +223,7 @@ if(CONFIG_AV1_ENCODER)
               "${AOM_ROOT}/aom_dsp/x86/highbd_quantize_intrin_avx2.c"
               "${AOM_ROOT}/aom_dsp/x86/adaptive_quantize_avx2.c"
               "${AOM_ROOT}/aom_dsp/x86/highbd_adaptive_quantize_avx2.c"
+              "${AOM_ROOT}/aom_dsp/x86/quantize_avx2.c"
               "${AOM_ROOT}/aom_dsp/x86/sad4d_avx2.c"
               "${AOM_ROOT}/aom_dsp/x86/sad_avx2.c"
               "${AOM_ROOT}/aom_dsp/x86/highbd_sad_avx2.c"
@@ -308,12 +309,16 @@ if(CONFIG_AV1_ENCODER)
 
   if(CONFIG_REALTIME_ONLY)
     list(REMOVE_ITEM AOM_DSP_ENCODER_INTRIN_AVX2
+                     "${AOM_ROOT}/aom_dsp/x86/adaptive_quantize_avx2.c"
                      "${AOM_ROOT}/aom_dsp/x86/obmc_sad_avx2.c"
                      "${AOM_ROOT}/aom_dsp/x86/obmc_variance_avx2.c")
 
     list(REMOVE_ITEM AOM_DSP_ENCODER_INTRIN_SSE4_1
                      "${AOM_ROOT}/aom_dsp/x86/obmc_sad_sse4.c"
                      "${AOM_ROOT}/aom_dsp/x86/obmc_variance_sse4.c")
+
+    list(REMOVE_ITEM AOM_DSP_ENCODER_INTRIN_SSE2
+                     "${AOM_ROOT}/aom_dsp/x86/adaptive_quantize_sse2.c")
   endif()
 endif()
 

@@ -27,6 +27,10 @@ config("libyuv_config") {
   if (is_android && current_cpu != "arm64") {
     ldflags = [ "-Wl,--dynamic-linker,/system/bin/linker" ]
   }
+
+  if (!libyuv_use_neon) {
+    defines = [ "LIBYUV_DISABLE_NEON" ]
+  }
 }
 
 # This target is built when no specific target is specified on the command line.
@@ -94,6 +98,7 @@ static_library("libyuv_internal") {
     "include/libyuv/row.h",
     "include/libyuv/scale.h",
     "include/libyuv/scale_argb.h",
+    "include/libyuv/scale_rgb.h",
     "include/libyuv/scale_row.h",
     "include/libyuv/scale_uv.h",
     "include/libyuv/version.h",
@@ -130,6 +135,7 @@ static_library("libyuv_internal") {
     "source/scale_argb.cc",
     "source/scale_common.cc",
     "source/scale_gcc.cc",
+    "source/scale_rgb.cc",
     "source/scale_uv.cc",
     "source/scale_win.cc",
     "source/video_common.cc",
@@ -258,6 +264,7 @@ if (libyuv_include_tests) {
       "unit_test/rotate_argb_test.cc",
       "unit_test/rotate_test.cc",
       "unit_test/scale_argb_test.cc",
+      "unit_test/scale_rgb_test.cc",
       "unit_test/scale_test.cc",
       "unit_test/scale_uv_test.cc",
       "unit_test/unit_test.cc",

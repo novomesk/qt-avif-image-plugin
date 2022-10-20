@@ -147,28 +147,50 @@ static const uint16_t AV1_HIGH_VAR_OFFS_12[MAX_SB_SIZE] = {
 };
 /*!\endcond */
 
-unsigned int av1_get_sby_perpixel_variance(const AV1_COMP *cpi,
-                                           const struct buf_2d *ref,
-                                           BLOCK_SIZE bs) {
-  unsigned int sse;
-  const unsigned int var =
-      cpi->ppi->fn_ptr[bs].vf(ref->buf, ref->stride, AV1_VAR_OFFS, 0, &sse);
-  return ROUND_POWER_OF_TWO(var, num_pels_log2_lookup[bs]);
+void av1_init_rtc_counters(MACROBLOCK *const x) {
+  av1_init_cyclic_refresh_counters(x);
+  x->cnt_zeromv = 0;
 }
 
-unsigned int av1_high_get_sby_perpixel_variance(const AV1_COMP *cpi,
-                                                const struct buf_2d *ref,
-                                                BLOCK_SIZE bs, int bd) {
+void av1_accumulate_rtc_counters(AV1_COMP *cpi, const MACROBLOCK *const x) {
+  if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ)
+    av1_accumulate_cyclic_refresh_counters(cpi->cyclic_refresh, x);
+  cpi->rc.cnt_zeromv += x->cnt_zeromv;
+}
+
+unsigned int av1_get_perpixel_variance(const AV1_COMP *cpi,
+                                       const MACROBLOCKD *xd,
+                                       const struct buf_2d *ref,
+                                       BLOCK_SIZE bsize, int plane,
+                                       int use_hbd) {
+  const int subsampling_x = xd->plane[plane].subsampling_x;
+  const int subsampling_y = xd->plane[plane].subsampling_y;
+  const BLOCK_SIZE plane_bsize =
+      get_plane_block_size(bsize, subsampling_x, subsampling_y);
   unsigned int var, sse;
-  assert(bd == 8 || bd == 10 || bd == 12);
-  const int off_index = (bd - 8) >> 1;
-  const uint16_t *high_var_offs[3] = { AV1_HIGH_VAR_OFFS_8,
-                                       AV1_HIGH_VAR_OFFS_10,
-                                       AV1_HIGH_VAR_OFFS_12 };
-  var = cpi->ppi->fn_ptr[bs].vf(ref->buf, ref->stride,
-                                CONVERT_TO_BYTEPTR(high_var_offs[off_index]), 0,
-                                &sse);
-  return ROUND_POWER_OF_TWO(var, num_pels_log2_lookup[bs]);
+  if (use_hbd) {
+    const int bd = xd->bd;
+    assert(bd == 8 || bd == 10 || bd == 12);
+    const int off_index = (bd - 8) >> 1;
+    static const uint16_t *high_var_offs[3] = { AV1_HIGH_VAR_OFFS_8,
+                                                AV1_HIGH_VAR_OFFS_10,
+                                                AV1_HIGH_VAR_OFFS_12 };
+    var = cpi->ppi->fn_ptr[plane_bsize].vf(
+        ref->buf, ref->stride, CONVERT_TO_BYTEPTR(high_var_offs[off_index]), 0,
+        &sse);
+  } else {
+    var = cpi->ppi->fn_ptr[plane_bsize].vf(ref->buf, ref->stride, AV1_VAR_OFFS,
+                                           0, &sse);
+  }
+  return ROUND_POWER_OF_TWO(var, num_pels_log2_lookup[plane_bsize]);
+}
+
+unsigned int av1_get_perpixel_variance_facade(const AV1_COMP *cpi,
+                                              const MACROBLOCKD *xd,
+                                              const struct buf_2d *ref,
+                                              BLOCK_SIZE bsize, int plane) {
+  const int use_hbd = is_cur_buf_hbd(xd);
+  return av1_get_perpixel_variance(cpi, xd, ref, bsize, plane, use_hbd);
 }
 
 void av1_setup_src_planes(MACROBLOCK *x, const YV12_BUFFER_CONFIG *src,
@@ -465,7 +487,7 @@ static void get_estimated_pred(AV1_COMP *cpi, const TileInfo *const tile,
 static AOM_INLINE void encode_nonrd_sb(AV1_COMP *cpi, ThreadData *td,
                                        TileDataEnc *tile_data, TokenExtra **tp,
                                        const int mi_row, const int mi_col,
-                                       const int seg_skip, PC_TREE *pc_root) {
+                                       const int seg_skip) {
   AV1_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &td->mb;
   const SPEED_FEATURES *const sf = &cpi->sf;
@@ -473,6 +495,7 @@ static AOM_INLINE void encode_nonrd_sb(AV1_COMP *cpi, ThreadData *td,
   MB_MODE_INFO **mi = cm->mi_params.mi_grid_base +
                       get_mi_grid_idx(&cm->mi_params, mi_row, mi_col);
   const BLOCK_SIZE sb_size = cm->seq_params->sb_size;
+  PC_TREE *const pc_root = td->rt_pc_root;
 
 #if CONFIG_RT_ML_PARTITIONING
   if (sf->part_sf.partition_search_type == ML_BASED_PARTITION) {
@@ -832,11 +855,6 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
 
   reset_thresh_freq_fact(x);
 
-  // Preallocate the pc_tree for realtime coding to reduce the cost of memory
-  // allocation
-  PC_TREE *const rt_pc_root =
-      use_nonrd_mode ? av1_alloc_pc_tree_node(sb_size) : NULL;
-
   // Code each SB in the row
   for (int mi_col = tile_info->mi_col_start, sb_col_in_tile = 0;
        mi_col < tile_info->mi_col_end; mi_col += mib_size, sb_col_in_tile++) {
@@ -869,6 +887,8 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
     // Reset color coding related parameters
     x->color_sensitivity_sb[0] = 0;
     x->color_sensitivity_sb[1] = 0;
+    x->color_sensitivity_sb_g[0] = 0;
+    x->color_sensitivity_sb_g[1] = 0;
     x->color_sensitivity[0] = 0;
     x->color_sensitivity[1] = 0;
     x->content_state_sb.source_sad_nonrd = kMedSad;
@@ -908,8 +928,7 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
 
     // encode the superblock
     if (use_nonrd_mode) {
-      encode_nonrd_sb(cpi, td, tile_data, tp, mi_row, mi_col, seg_skip,
-                      rt_pc_root);
+      encode_nonrd_sb(cpi, td, tile_data, tp, mi_row, mi_col, seg_skip);
     } else {
       encode_rd_sb(cpi, td, tile_data, tp, mi_row, mi_col, seg_skip);
     }
@@ -926,7 +945,6 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
                                sb_cols_in_tile);
   }
 
-  av1_free_pc_tree_recursive(rt_pc_root, av1_num_planes(cm), 0, 0);
 #if CONFIG_COLLECT_COMPONENT_TIMING
   end_timing(cpi, encode_sb_row_time);
 #endif
@@ -1151,15 +1169,10 @@ static AOM_INLINE void encode_tiles(AV1_COMP *cpi) {
       cpi->td.rd_counts.seg_tmp_pred_cost[1] = 0;
       cpi->td.mb.e_mbd.tile_ctx = &this_tile->tctx;
       cpi->td.mb.tile_pb_ctx = &this_tile->tctx;
-      // Reset cyclic refresh counters.
-      av1_init_cyclic_refresh_counters(&cpi->td.mb);
-
+      av1_init_rtc_counters(&cpi->td.mb);
       av1_encode_tile(cpi, &cpi->td, tile_row, tile_col);
-      // Accumulate cyclic refresh params.
-      if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ &&
-          !frame_is_intra_only(&cpi->common))
-        av1_accumulate_cyclic_refresh_counters(cpi->cyclic_refresh,
-                                               &cpi->td.mb);
+      if (!frame_is_intra_only(&cpi->common))
+        av1_accumulate_rtc_counters(cpi, &cpi->td.mb);
       cpi->intrabc_used |= cpi->td.intrabc_used;
       cpi->deltaq_used |= cpi->td.deltaq_used;
     }
@@ -1370,7 +1383,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
   FeatureFlags *const features = &cm->features;
   MACROBLOCKD *const xd = &x->e_mbd;
   RD_COUNTS *const rdc = &cpi->td.rd_counts;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   FrameProbInfo *const temp_frame_probs = &cpi->ppi->temp_frame_probs;
   FrameProbInfo *const temp_frame_probs_simulation =
       &cpi->ppi->temp_frame_probs_simulation;
@@ -1409,11 +1422,11 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
     const FRAME_UPDATE_TYPE update_type =
         get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
     int warped_probability =
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
         cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE
             ? temp_frame_probs->warped_probs[update_type]
             :
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#endif  // CONFIG_FPMT_TEST
             frame_probs->warped_probs[update_type];
     if (warped_probability < cpi->sf.inter_sf.prune_warped_prob_thresh)
       features->allow_warped_motion = 0;
@@ -1558,13 +1571,13 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
   } else {
     cpi->cyclic_refresh->actual_num_seg1_blocks = 0;
     cpi->cyclic_refresh->actual_num_seg2_blocks = 0;
-    cpi->cyclic_refresh->cnt_zeromv = 0;
+    cpi->rc.cnt_zeromv = 0;
   }
 
   av1_frame_init_quantizer(cpi);
-
   init_encode_frame_mb_context(cpi);
   set_default_interp_skip_flags(cm, &cpi->interp_search_flags);
+
   if (cm->prev_frame && cm->prev_frame->seg.enabled)
     cm->last_frame_seg_map = cm->prev_frame->seg_map;
   else
@@ -1633,10 +1646,18 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
     enc_row_mt->sync_write_ptr = av1_row_mt_sync_write;
     av1_encode_tiles_row_mt(cpi);
   } else {
-    if (AOMMIN(mt_info->num_workers, cm->tiles.cols * cm->tiles.rows) > 1)
+    if (AOMMIN(mt_info->num_workers, cm->tiles.cols * cm->tiles.rows) > 1) {
       av1_encode_tiles_mt(cpi);
-    else
+    } else {
+      // Preallocate the pc_tree for realtime coding to reduce the cost of
+      // memory allocation.
+      const int use_nonrd_mode = cpi->sf.rt_sf.use_nonrd_pick_mode;
+      td->rt_pc_root = use_nonrd_mode
+                           ? av1_alloc_pc_tree_node(cm->seq_params->sb_size)
+                           : NULL;
       encode_tiles(cpi);
+      av1_free_pc_tree_recursive(td->rt_pc_root, av1_num_planes(cm), 0, 0);
+    }
   }
 
   // If intrabc is allowed but never selected, reset the allow_intrabc flag.
@@ -1698,7 +1719,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
         const int new_prob =
             sum ? MAX_TX_TYPE_PROB * cpi->td.rd_counts.tx_type_used[i][j] / sum
                 : (j ? 0 : MAX_TX_TYPE_PROB);
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
         if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
           if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] ==
               0) {
@@ -1720,7 +1741,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
           }
           update_txtype_frameprobs = 0;
         }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#endif  // CONFIG_FPMT_TEST
         // Track the frame probabilities of parallel encode frames to update
         // during postencode stage.
         if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0) {
@@ -1757,7 +1778,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
 
       const int new_prob =
           sum ? 128 * cpi->td.rd_counts.obmc_used[i][1] / sum : 0;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
       if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
         if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] == 0) {
           temp_frame_probs_simulation->obmc_probs[update_type][i] =
@@ -1773,7 +1794,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
         }
         update_obmc_frameprobs = 0;
       }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#endif  // CONFIG_FPMT_TEST
       // Track the frame probabilities of parallel encode frames to update
       // during postencode stage.
       if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0) {
@@ -1796,7 +1817,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
     int sum = 0;
     for (i = 0; i < 2; i++) sum += cpi->td.rd_counts.warped_used[i];
     const int new_prob = sum ? 128 * cpi->td.rd_counts.warped_used[1] / sum : 0;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
     if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
       if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] == 0) {
         temp_frame_probs_simulation->warped_probs[update_type] =
@@ -1812,7 +1833,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
       }
       update_warp_frameprobs = 0;
     }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#endif  // CONFIG_FPMT_TEST
     // Track the frame probabilities of parallel encode frames to update
     // during postencode stage.
     if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0) {
@@ -1846,7 +1867,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
         const int new_prob =
             sum ? 1536 * cpi->td.counts->switchable_interp[i][j] / sum
                 : (j ? 0 : 1536);
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
         if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
           if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] ==
               0) {
@@ -1868,7 +1889,7 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
           }
           update_interpfilter_frameprobs = 0;
         }
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#endif  // CONFIG_FPMT_TEST
         // Track the frame probabilities of parallel encode frames to update
         // during postencode stage.
         if (cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0) {

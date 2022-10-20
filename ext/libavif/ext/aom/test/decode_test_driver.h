@@ -27,7 +27,7 @@ class CompressedVideoSource;
 class DxDataIterator {
  public:
   explicit DxDataIterator(aom_codec_ctx_t *decoder)
-      : decoder_(decoder), iter_(NULL) {}
+      : decoder_(decoder), iter_(nullptr) {}
 
   const aom_image_t *Next() { return aom_codec_get_frame(decoder_, &iter_); }
 

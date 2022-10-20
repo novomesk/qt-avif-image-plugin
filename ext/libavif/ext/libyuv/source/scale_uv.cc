@@ -193,8 +193,8 @@ static void ScaleUVDown4Box(int src_width,
                             int dy) {
   int j;
   // Allocate 2 rows of UV.
-  const int kRowSize = (dst_width * 2 * 2 + 15) & ~15;
-  align_buffer_64(row, kRowSize * 2);
+  const int row_size = (dst_width * 2 * 2 + 15) & ~15;
+  align_buffer_64(row, row_size * 2);
   int row_stride = src_stride * (dy >> 16);
   void (*ScaleUVRowDown2)(const uint8_t* src_uv, ptrdiff_t src_stride,
                           uint8_t* dst_uv, int dst_width) =
@@ -234,9 +234,9 @@ static void ScaleUVDown4Box(int src_width,
 
   for (j = 0; j < dst_height; ++j) {
     ScaleUVRowDown2(src_uv, src_stride, row, dst_width * 2);
-    ScaleUVRowDown2(src_uv + src_stride * 2, src_stride, row + kRowSize,
+    ScaleUVRowDown2(src_uv + src_stride * 2, src_stride, row + row_size,
                     dst_width * 2);
-    ScaleUVRowDown2(row, kRowSize, dst_uv, dst_width);
+    ScaleUVRowDown2(row, row_size, dst_uv, dst_width);
     src_uv += row_stride;
     dst_uv += dst_stride;
   }
@@ -574,11 +574,11 @@ static void ScaleUVBilinearUp(int src_width,
     const uint8_t* src = src_uv + yi * (int64_t)src_stride;
 
     // Allocate 2 rows of UV.
-    const int kRowSize = (dst_width * 2 + 15) & ~15;
-    align_buffer_64(row, kRowSize * 2);
+    const int row_size = (dst_width * 2 + 15) & ~15;
+    align_buffer_64(row, row_size * 2);
 
     uint8_t* rowptr = row;
-    int rowstride = kRowSize;
+    int rowstride = row_size;
     int lasty = yi;
 
     ScaleUVFilterCols(rowptr, src, dst_width, x, dx);
@@ -586,7 +586,9 @@ static void ScaleUVBilinearUp(int src_width,
       src += src_stride;
     }
     ScaleUVFilterCols(rowptr + rowstride, src, dst_width, x, dx);
-    src += src_stride;
+    if (src_height > 2) {
+      src += src_stride;
+    }
 
     for (j = 0; j < dst_height; ++j) {
       yi = y >> 16;
@@ -601,7 +603,9 @@ static void ScaleUVBilinearUp(int src_width,
           rowptr += rowstride;
           rowstride = -rowstride;
           lasty = yi;
-          src += src_stride;
+          if ((y + 65536) < max_y) {
+            src += src_stride;
+          }
         }
       }
       if (filtering == kFilterLinear) {
@@ -747,9 +751,9 @@ void ScaleUVLinearUp2_16(int src_width,
   // This function can only scale up by 2 times horizontally.
   assert(src_width == ((dst_width + 1) / 2));
 
-#ifdef HAS_SCALEUVROWUP2LINEAR_16_SSE2
-  if (TestCpuFlag(kCpuHasSSE2)) {
-    ScaleRowUp = ScaleUVRowUp2_Linear_16_Any_SSE2;
+#ifdef HAS_SCALEUVROWUP2LINEAR_16_SSE41
+  if (TestCpuFlag(kCpuHasSSE41)) {
+    ScaleRowUp = ScaleUVRowUp2_Linear_16_Any_SSE41;
   }
 #endif
 
@@ -800,9 +804,9 @@ void ScaleUVBilinearUp2_16(int src_width,
   assert(src_width == ((dst_width + 1) / 2));
   assert(src_height == ((dst_height + 1) / 2));
 
-#ifdef HAS_SCALEUVROWUP2BILINEAR_16_SSE2
-  if (TestCpuFlag(kCpuHasSSE2)) {
-    Scale2RowUp = ScaleUVRowUp2_Bilinear_16_Any_SSE2;
+#ifdef HAS_SCALEUVROWUP2BILINEAR_16_SSE41
+  if (TestCpuFlag(kCpuHasSSE41)) {
+    Scale2RowUp = ScaleUVRowUp2_Bilinear_16_Any_SSE41;
   }
 #endif
 
@@ -1032,7 +1036,7 @@ static void ScaleUV(const uint8_t* src,
   if (dx == 0x10000 && (x & 0xffff) == 0) {
     // Arbitrary scale vertically, but unscaled horizontally.
     ScalePlaneVertical(src_height, clip_width, clip_height, src_stride,
-                       dst_stride, src, dst, x, y, dy, 4, filtering);
+                       dst_stride, src, dst, x, y, dy, /*bpp=*/2, filtering);
     return;
   }
   if (filtering && (dst_width + 1) / 2 == src_width) {

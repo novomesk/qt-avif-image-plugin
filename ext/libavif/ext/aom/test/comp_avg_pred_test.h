@@ -232,11 +232,11 @@ class AV1DISTWTDCOMPAVGUPSAMPLEDTest
               const int offset_c = 3 + rnd_.PseudoUniform(w - in_w - 7);
 
               aom_dist_wtd_comp_avg_upsampled_pred_c(
-                  NULL, NULL, 0, 0, NULL, output,
+                  nullptr, nullptr, 0, 0, nullptr, output,
                   pred8 + offset_r * w + offset_c, in_w, in_h, sub_x_q3,
                   sub_y_q3, ref8 + offset_r * w + offset_c, in_w,
                   &dist_wtd_comp_params, subpel_search);
-              test_impl(NULL, NULL, 0, 0, NULL, output2,
+              test_impl(nullptr, nullptr, 0, 0, nullptr, output2,
                         pred8 + offset_r * w + offset_c, in_w, in_h, sub_x_q3,
                         sub_y_q3, ref8 + offset_r * w + offset_c, in_w,
                         &dist_wtd_comp_params, subpel_search);
@@ -292,8 +292,8 @@ class AV1DISTWTDCOMPAVGUPSAMPLEDTest
 
     for (int i = 0; i < num_loops; ++i)
       aom_dist_wtd_comp_avg_upsampled_pred_c(
-          NULL, NULL, 0, 0, NULL, output, pred8, in_w, in_h, sub_x_q3, sub_y_q3,
-          ref8, in_w, &dist_wtd_comp_params, subpel_search);
+          nullptr, nullptr, 0, 0, nullptr, output, pred8, in_w, in_h, sub_x_q3,
+          sub_y_q3, ref8, in_w, &dist_wtd_comp_params, subpel_search);
 
     aom_usec_timer_mark(&timer);
     const int elapsed_time = static_cast<int>(aom_usec_timer_elapsed(&timer));
@@ -304,8 +304,9 @@ class AV1DISTWTDCOMPAVGUPSAMPLEDTest
     aom_usec_timer_start(&timer1);
 
     for (int i = 0; i < num_loops; ++i)
-      test_impl(NULL, NULL, 0, 0, NULL, output2, pred8, in_w, in_h, sub_x_q3,
-                sub_y_q3, ref8, in_w, &dist_wtd_comp_params, subpel_search);
+      test_impl(nullptr, nullptr, 0, 0, nullptr, output2, pred8, in_w, in_h,
+                sub_x_q3, sub_y_q3, ref8, in_w, &dist_wtd_comp_params,
+                subpel_search);
 
     aom_usec_timer_mark(&timer1);
     const int elapsed_time1 = static_cast<int>(aom_usec_timer_elapsed(&timer1));
@@ -468,12 +469,13 @@ class AV1HighBDDISTWTDCOMPAVGUPSAMPLEDTest
               const int offset_c = 3 + rnd_.PseudoUniform(w - in_w - 7);
 
               aom_highbd_dist_wtd_comp_avg_upsampled_pred_c(
-                  NULL, NULL, 0, 0, NULL, CONVERT_TO_BYTEPTR(output),
+                  nullptr, nullptr, 0, 0, nullptr, CONVERT_TO_BYTEPTR(output),
                   CONVERT_TO_BYTEPTR(pred8) + offset_r * w + offset_c, in_w,
                   in_h, sub_x_q3, sub_y_q3,
                   CONVERT_TO_BYTEPTR(ref8) + offset_r * w + offset_c, in_w, bd,
                   &dist_wtd_comp_params, subpel_search);
-              test_impl(NULL, NULL, 0, 0, NULL, CONVERT_TO_BYTEPTR(output2),
+              test_impl(nullptr, nullptr, 0, 0, nullptr,
+                        CONVERT_TO_BYTEPTR(output2),
                         CONVERT_TO_BYTEPTR(pred8) + offset_r * w + offset_c,
                         in_w, in_h, sub_x_q3, sub_y_q3,
                         CONVERT_TO_BYTEPTR(ref8) + offset_r * w + offset_c,
@@ -527,7 +529,7 @@ class AV1HighBDDISTWTDCOMPAVGUPSAMPLEDTest
     int subpel_search = USE_8_TAPS;  // set to USE_4_TAPS to test 4-tap filter.
     for (int i = 0; i < num_loops; ++i)
       aom_highbd_dist_wtd_comp_avg_upsampled_pred_c(
-          NULL, NULL, 0, 0, NULL, CONVERT_TO_BYTEPTR(output),
+          nullptr, nullptr, 0, 0, nullptr, CONVERT_TO_BYTEPTR(output),
           CONVERT_TO_BYTEPTR(pred8), in_w, in_h, sub_x_q3, sub_y_q3,
           CONVERT_TO_BYTEPTR(ref8), in_w, bd, &dist_wtd_comp_params,
           subpel_search);
@@ -541,7 +543,7 @@ class AV1HighBDDISTWTDCOMPAVGUPSAMPLEDTest
     aom_usec_timer_start(&timer1);
 
     for (int i = 0; i < num_loops; ++i)
-      test_impl(NULL, NULL, 0, 0, NULL, CONVERT_TO_BYTEPTR(output2),
+      test_impl(nullptr, nullptr, 0, 0, nullptr, CONVERT_TO_BYTEPTR(output2),
                 CONVERT_TO_BYTEPTR(pred8), in_w, in_h, sub_x_q3, sub_y_q3,
                 CONVERT_TO_BYTEPTR(ref8), in_w, bd, &dist_wtd_comp_params,
                 subpel_search);

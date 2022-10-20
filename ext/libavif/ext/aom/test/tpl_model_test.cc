@@ -509,11 +509,11 @@ TEST(TplModelTest, VbrRcInfoEstimateBaseQTest) {
     const int base_q = av1_vbr_rc_info_estimate_base_q(
         bit_budget, bit_depth, vbr_rc_info.scale_factors, gf_group.size,
         gf_group.update_type, vbr_rc_info.qstep_ratio_list, stats_list.data(),
-        vbr_rc_info.q_index_list, NULL);
+        vbr_rc_info.q_index_list, nullptr);
     const int ref_base_q = find_gop_q_iterative(
         bit_budget, bit_depth, vbr_rc_info.scale_factors, gf_group.size,
         gf_group.update_type, vbr_rc_info.qstep_ratio_list, stats_list.data(),
-        vbr_rc_info.q_index_list, NULL);
+        vbr_rc_info.q_index_list, nullptr);
     if (bit_budget == 0) {
       EXPECT_EQ(base_q, 255);
     } else if (bit_budget == DBL_MAX) {

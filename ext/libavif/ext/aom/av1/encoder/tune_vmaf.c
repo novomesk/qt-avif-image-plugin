@@ -94,6 +94,7 @@ static unsigned int residual_variance(const AV1_COMP *cpi,
 
 static double frame_average_variance(const AV1_COMP *const cpi,
                                      const YV12_BUFFER_CONFIG *const frame) {
+  const MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   const uint8_t *const y_buffer = frame->y_buffer;
   const int y_stride = frame->y_stride;
   const BLOCK_SIZE block_size = BLOCK_64X64;
@@ -101,8 +102,8 @@ static double frame_average_variance(const AV1_COMP *const cpi,
   const int block_w = mi_size_wide[block_size] * 4;
   const int block_h = mi_size_high[block_size] * 4;
   int row, col;
-  const int bit_depth = cpi->td.mb.e_mbd.bd;
   double var = 0.0, var_count = 0.0;
+  const int use_hbd = frame->flags & YV12_FLAG_HIGHBITDEPTH;
 
   // Loop through each block.
   for (row = 0; row < frame->y_height / block_h; ++row) {
@@ -114,13 +115,8 @@ static double frame_average_variance(const AV1_COMP *const cpi,
       buf.buf = (uint8_t *)y_buffer + row_offset_y * y_stride + col_offset_y;
       buf.stride = y_stride;
 
-      if (cpi->common.seq_params->use_highbitdepth) {
-        assert(frame->flags & YV12_FLAG_HIGHBITDEPTH);
-        var += av1_high_get_sby_perpixel_variance(cpi, &buf, block_size,
-                                                  bit_depth);
-      } else {
-        var += av1_get_sby_perpixel_variance(cpi, &buf, block_size);
-      }
+      var += av1_get_perpixel_variance(cpi, xd, &buf, block_size, AOM_PLANE_Y,
+                                       use_hbd);
       var_count += 1.0;
     }
   }

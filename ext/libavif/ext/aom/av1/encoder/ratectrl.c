@@ -269,7 +269,7 @@ static void update_buffer_level(AV1_COMP *cpi, int encoded_frame_size) {
   if (cpi->ppi->use_svc)
     update_layer_buffer_level(&cpi->svc, encoded_frame_size);
 
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   /* The variable temp_buffer_level is introduced for quality
    * simulation purpose, it retains the value previous to the parallel
    * encode frames. The variable is updated based on the update flag.
@@ -400,7 +400,7 @@ int av1_rc_drop_frame(AV1_COMP *cpi) {
   const AV1EncoderConfig *oxcf = &cpi->oxcf;
   RATE_CONTROL *const rc = &cpi->rc;
   PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   const int simulate_parallel_frame =
       cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
       cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -652,7 +652,7 @@ static void set_rate_correction_factor(AV1_COMP *cpi, int is_encode_stage,
 void av1_rc_update_rate_correction_factors(AV1_COMP *cpi, int is_encode_stage,
                                            int width, int height) {
   const AV1_COMMON *const cm = &cpi->common;
-  int correction_factor = 100;
+  double correction_factor = 1.0;
   double rate_correction_factor =
       get_rate_correction_factor(cpi, width, height);
   double adjustment_limit;
@@ -678,14 +678,21 @@ void av1_rc_update_rate_correction_factors(AV1_COMP *cpi, int is_encode_stage,
   }
   // Work out a size correction factor.
   if (projected_size_based_on_q > FRAME_OVERHEAD_BITS)
-    correction_factor = (int)((100 * (int64_t)cpi->rc.projected_frame_size) /
-                              projected_size_based_on_q);
+    correction_factor = (double)cpi->rc.projected_frame_size /
+                        (double)projected_size_based_on_q;
 
-  // More heavily damped adjustment used if we have been oscillating either side
-  // of target.
-  if (correction_factor > 0) {
-    adjustment_limit =
-        0.25 + 0.5 * AOMMIN(1, fabs(log10(0.01 * correction_factor)));
+  // Clamp correction factor to prevent anything too extreme
+  correction_factor = AOMMIN(AOMMAX(correction_factor, 0.25), 4.0);
+
+  // Decide how heavily to dampen the adjustment
+  if (correction_factor > 0.0) {
+    if (cpi->is_screen_content_type) {
+      adjustment_limit =
+          0.25 + 0.5 * AOMMIN(0.5, fabs(log10(correction_factor)));
+    } else {
+      adjustment_limit =
+          0.25 + 0.75 * AOMMIN(0.5, fabs(log10(correction_factor)));
+    }
   } else {
     adjustment_limit = 0.75;
   }
@@ -693,26 +700,27 @@ void av1_rc_update_rate_correction_factors(AV1_COMP *cpi, int is_encode_stage,
   cpi->rc.q_2_frame = cpi->rc.q_1_frame;
   cpi->rc.q_1_frame = cm->quant_params.base_qindex;
   cpi->rc.rc_2_frame = cpi->rc.rc_1_frame;
-  if (correction_factor > 110)
+  if (correction_factor > 1.1)
     cpi->rc.rc_1_frame = -1;
-  else if (correction_factor < 90)
+  else if (correction_factor < 0.9)
     cpi->rc.rc_1_frame = 1;
   else
     cpi->rc.rc_1_frame = 0;
 
-  if (correction_factor > 102) {
+  if (correction_factor > 1.01) {
     // We are not already at the worst allowable quality
-    correction_factor =
-        (int)(100 + ((correction_factor - 100) * adjustment_limit));
-    rate_correction_factor = (rate_correction_factor * correction_factor) / 100;
+    correction_factor = (1.0 + ((correction_factor - 1.0) * adjustment_limit));
+    rate_correction_factor = rate_correction_factor * correction_factor;
     // Keep rate_correction_factor within limits
     if (rate_correction_factor > MAX_BPB_FACTOR)
       rate_correction_factor = MAX_BPB_FACTOR;
-  } else if (correction_factor < 99) {
+  } else if (correction_factor < 0.99) {
     // We are not already at the best allowable quality
-    correction_factor =
-        (int)(100 - ((100 - correction_factor) * adjustment_limit));
-    rate_correction_factor = (rate_correction_factor * correction_factor) / 100;
+    correction_factor = 1.0 / correction_factor;
+    correction_factor = (1.0 + ((correction_factor - 1.0) * adjustment_limit));
+    correction_factor = 1.0 / correction_factor;
+
+    rate_correction_factor = rate_correction_factor * correction_factor;
 
     // Keep rate_correction_factor within limits
     if (rate_correction_factor < MIN_BPB_FACTOR)
@@ -873,7 +881,7 @@ static int calc_active_worst_quality_no_stats_vbr(const AV1_COMP *cpi) {
   int active_worst_quality;
   int last_q_key_frame;
   int last_q_inter_frame;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   const int simulate_parallel_frame =
       cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
       cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -1237,7 +1245,7 @@ static int rc_pick_q_and_bounds_no_stats(const AV1_COMP *cpi, int width,
           av1_compute_qdelta(rc, q_val, q_val * 0.25, bit_depth);
       active_best_quality = AOMMAX(qindex + delta_qindex, rc->best_quality);
     } else if (p_rc->this_key_frame_forced) {
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
       const int simulate_parallel_frame =
           cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
           cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -1352,7 +1360,7 @@ static int rc_pick_q_and_bounds_no_stats(const AV1_COMP *cpi, int width,
     // Special case code to try and match quality with forced key frames
   } else if ((current_frame->frame_type == KEY_FRAME) &&
              p_rc->this_key_frame_forced) {
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
     const int simulate_parallel_frame =
         cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
         cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -1448,7 +1456,7 @@ static void get_intra_q_and_bounds(const AV1_COMP *cpi, int width, int height,
     double last_boosted_q;
     int delta_qindex;
     int qindex;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
     const int simulate_parallel_frame =
         cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
         cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -1535,7 +1543,7 @@ static void adjust_active_best_and_worst_quality(const AV1_COMP *cpi,
   const int bit_depth = cpi->common.seq_params->bit_depth;
   int active_best_quality = *active_best;
   int active_worst_quality = *active_worst;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   const int simulate_parallel_frame =
       cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
       cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -1554,7 +1562,7 @@ static void adjust_active_best_and_worst_quality(const AV1_COMP *cpi,
         (!rc->is_src_frame_alt_ref &&
          (refresh_frame->golden_frame || is_intrl_arf_boost ||
           refresh_frame->alt_ref_frame))) {
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
       active_best_quality -= (extend_minq + extend_minq_fast);
       active_worst_quality += (extend_maxq / 2);
 #else
@@ -1563,7 +1571,7 @@ static void adjust_active_best_and_worst_quality(const AV1_COMP *cpi,
       active_worst_quality += (cpi->ppi->twopass.extend_maxq / 2);
 #endif
     } else {
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
       active_best_quality -= (extend_minq + extend_minq_fast) / 2;
       active_worst_quality += extend_maxq;
 #else
@@ -1625,7 +1633,7 @@ static int get_q(const AV1_COMP *cpi, const int width, const int height,
   const RATE_CONTROL *const rc = &cpi->rc;
   const PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
   int q;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   const int simulate_parallel_frame =
       cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
       cpi->ppi->fpmt_unit_test_cfg;
@@ -1872,7 +1880,7 @@ static int rc_pick_q_and_bounds(const AV1_COMP *cpi, int width, int height,
       active_best_quality = get_active_best_quality(cpi, active_worst_quality,
                                                     cq_level, gf_index);
     } else {
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
       const int simulate_parallel_frame =
           cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
           cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -2101,7 +2109,7 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
     // Update the Golden frame stats as appropriate.
     update_golden_frame_stats(cpi);
 
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   /*The variables temp_avg_frame_qindex, temp_last_q, temp_avg_q,
    * temp_last_boosted_qindex are introduced only for quality simulation
    * purpose, it retains the value previous to the parallel encode frames. The
@@ -2293,7 +2301,7 @@ void av1_rc_update_framerate(AV1_COMP *cpi, int width, int height) {
 static void vbr_rate_correction(AV1_COMP *cpi, int *this_frame_target) {
   RATE_CONTROL *const rc = &cpi->rc;
   PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   const int simulate_parallel_frame =
       cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0 &&
       cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE;
@@ -2320,7 +2328,7 @@ static void vbr_rate_correction(AV1_COMP *cpi, int *this_frame_target) {
     *this_frame_target += (vbr_bits_off_target >= 0) ? max_delta : -max_delta;
   }
 
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   int64_t vbr_bits_off_target_fast =
       simulate_parallel_frame ? cpi->ppi->p_rc.temp_vbr_bits_off_target_fast
                               : p_rc->vbr_bits_off_target_fast;
@@ -2328,7 +2336,7 @@ static void vbr_rate_correction(AV1_COMP *cpi, int *this_frame_target) {
   // Fast redistribution of bits arising from massive local undershoot.
   // Dont do it for kf,arf,gf or overlay frames.
   if (!frame_is_kf_gf_arf(cpi) &&
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
       vbr_bits_off_target_fast &&
 #else
       p_rc->vbr_bits_off_target_fast &&
@@ -2336,7 +2344,7 @@ static void vbr_rate_correction(AV1_COMP *cpi, int *this_frame_target) {
       !rc->is_src_frame_alt_ref) {
     int one_frame_bits = AOMMAX(rc->avg_frame_bandwidth, *this_frame_target);
     int fast_extra_bits;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
     fast_extra_bits = (int)AOMMIN(vbr_bits_off_target_fast, one_frame_bits);
     fast_extra_bits =
         (int)AOMMIN(fast_extra_bits,
@@ -2643,6 +2651,11 @@ void av1_set_reference_structure_one_pass_rt(AV1_COMP *cpi, int gf_update) {
     // Moving index for gld_ref, lag behind current by gld_interval frames.
     if (cm->current_frame.frame_number > lag_gld)
       gld_idx = ((cm->current_frame.frame_number - lag_gld) % sh);
+    // When golden is not long-term reference with fixed slot update but
+    // a reference with a moving slot with fixed lag behind last
+    // (i.e., gld_fixed_slot = 0), we should disable the
+    // gf_refresh_based_on_qp feature.
+    cpi->sf.rt_sf.gf_refresh_based_on_qp = 0;
   }
   // Moving index for alt_ref, lag behind LAST by lag_alt frames.
   if (cm->current_frame.frame_number > lag_alt)
@@ -2669,6 +2682,15 @@ void av1_set_reference_structure_one_pass_rt(AV1_COMP *cpi, int gf_update) {
     svc->refresh[gld_idx] = 1;
   }
   svc->gld_idx_1layer = gld_idx;
+  // Set the flag to reduce the number of reference frame buffers used.
+  // This assumes that slot 7 is never used.
+  cpi->rt_reduce_num_ref_buffers = 1;
+  cpi->rt_reduce_num_ref_buffers &= (svc->ref_idx[0] < 7);
+  cpi->rt_reduce_num_ref_buffers &= (svc->ref_idx[1] < 7);
+  cpi->rt_reduce_num_ref_buffers &= (svc->ref_idx[3] < 7);
+  cpi->rt_reduce_num_ref_buffers &= (svc->ref_idx[6] < 7);
+  if (cpi->sf.rt_sf.ref_frame_comp_nonrd[1])
+    cpi->rt_reduce_num_ref_buffers &= (svc->ref_idx[2] < 7);
 }
 
 /*!\brief Check for scene detection, for 1 pass real-time mode.
@@ -2679,15 +2701,17 @@ void av1_set_reference_structure_one_pass_rt(AV1_COMP *cpi, int gf_update) {
  *
  * \ingroup rate_control
  * \param[in]       cpi          Top level encoder structure
+ * \param[in]       frame_input  Current and last input source frames
  *
  * \return Nothing is returned. Instead the flag \c cpi->rc.high_source_sad
  * is set if scene change is detected, and \c cpi->rc.avg_source_sad is updated.
  */
-static void rc_scene_detection_onepass_rt(AV1_COMP *cpi) {
+static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
+                                          const EncodeFrameInput *frame_input) {
   AV1_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
-  YV12_BUFFER_CONFIG const *unscaled_src = cpi->unscaled_source;
-  YV12_BUFFER_CONFIG const *unscaled_last_src = cpi->unscaled_last_source;
+  YV12_BUFFER_CONFIG const *const unscaled_src = frame_input->source;
+  YV12_BUFFER_CONFIG const *const unscaled_last_src = frame_input->last_source;
   uint8_t *src_y;
   int src_ystride;
   int src_width;
@@ -2697,14 +2721,14 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi) {
   int last_src_width;
   int last_src_height;
   if (cm->spatial_layer_id != 0 || cm->width != cm->render_width ||
-      cm->height != cm->render_height || cpi->unscaled_source == NULL ||
-      cpi->unscaled_last_source == NULL) {
+      cm->height != cm->render_height || unscaled_src == NULL ||
+      unscaled_last_src == NULL) {
     if (cpi->src_sad_blk_64x64) {
       aom_free(cpi->src_sad_blk_64x64);
       cpi->src_sad_blk_64x64 = NULL;
     }
   }
-  if (cpi->unscaled_source == NULL || cpi->unscaled_last_source == NULL) return;
+  if (unscaled_src == NULL || unscaled_last_src == NULL) return;
   src_y = unscaled_src->y_buffer;
   src_ystride = unscaled_src->y_stride;
   src_width = unscaled_src->y_width;
@@ -3020,6 +3044,7 @@ static INLINE int set_key_frame(AV1_COMP *cpi, unsigned int frame_flags) {
 
 void av1_get_one_pass_rt_params(AV1_COMP *cpi,
                                 EncodeFrameParams *const frame_params,
+                                const EncodeFrameInput *frame_input,
                                 unsigned int frame_flags) {
   RATE_CONTROL *const rc = &cpi->rc;
   PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
@@ -3084,7 +3109,7 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi,
   }
   // Check for scene change: for SVC check on base spatial layer only.
   if (cpi->sf.rt_sf.check_scene_detection && svc->spatial_layer_id == 0)
-    rc_scene_detection_onepass_rt(cpi);
+    rc_scene_detection_onepass_rt(cpi, frame_input);
   // Check for dynamic resize, for single spatial layer for now.
   // For temporal layers only check on base temporal layer.
   if (cpi->oxcf.resize_cfg.resize_mode == RESIZE_DYNAMIC) {

@@ -12,6 +12,7 @@
 #include "aom_dsp/quantize.h"
 #include "aom_mem/aom_mem.h"
 
+#if !CONFIG_REALTIME_ONLY
 void aom_quantize_b_adaptive_helper_c(
     const tran_low_t *coeff_ptr, intptr_t n_coeffs, const int16_t *zbin_ptr,
     const int16_t *round_ptr, const int16_t *quant_ptr,
@@ -102,6 +103,7 @@ void aom_quantize_b_adaptive_helper_c(
 #endif  // SKIP_EOB_FACTOR_ADJUST
   *eob_ptr = eob + 1;
 }
+#endif  // !CONFIG_REALTIME_ONLY
 
 void aom_quantize_b_helper_c(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
                              const int16_t *zbin_ptr, const int16_t *round_ptr,
@@ -167,6 +169,7 @@ void aom_quantize_b_helper_c(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
 }
 
 #if CONFIG_AV1_HIGHBITDEPTH
+#if !CONFIG_REALTIME_ONLY
 void aom_highbd_quantize_b_adaptive_helper_c(
     const tran_low_t *coeff_ptr, intptr_t n_coeffs, const int16_t *zbin_ptr,
     const int16_t *round_ptr, const int16_t *quant_ptr,
@@ -253,6 +256,7 @@ void aom_highbd_quantize_b_adaptive_helper_c(
 #endif  // SKIP_EOB_FACTOR_ADJUST
   *eob_ptr = eob + 1;
 }
+#endif  // !CONFIG_REALTIME_ONLY
 
 void aom_highbd_quantize_b_helper_c(
     const tran_low_t *coeff_ptr, intptr_t n_coeffs, const int16_t *zbin_ptr,
@@ -312,6 +316,7 @@ void aom_highbd_quantize_b_helper_c(
 }
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
+#if !CONFIG_REALTIME_ONLY
 /* These functions should only be called when quantisation matrices
    are not used. */
 void aom_quantize_b_adaptive_c(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
@@ -389,6 +394,7 @@ void aom_highbd_quantize_b_64x64_adaptive_c(
                                           eob_ptr, scan, iscan, NULL, NULL, 2);
 }
 #endif  // CONFIG_AV1_HIGHBITDEPTH
+#endif  // !CONFIG_REALTIME_ONLY
 
 void aom_quantize_b_c(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
                       const int16_t *zbin_ptr, const int16_t *round_ptr,

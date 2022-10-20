@@ -163,7 +163,7 @@ class EndToEndTest
 
     ASSERT_NO_FATAL_FAILURE(RunLoop(video.get()));
     const double psnr = GetAveragePsnr();
-    EXPECT_GT(psnr, GetPsnrThreshold())
+    EXPECT_GT(psnr, GetPsnrThreshold() * 0.98)
         << "cpu used = " << cpu_used_ << ", encoding mode = " << encoding_mode_;
   }
 

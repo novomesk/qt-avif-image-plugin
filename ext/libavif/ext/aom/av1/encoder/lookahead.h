@@ -76,6 +76,10 @@ struct lookahead_ctx *av1_lookahead_init(
  */
 void av1_lookahead_destroy(struct lookahead_ctx *ctx);
 
+/**\brief Check if lookahead buffer is full
+ */
+int av1_lookahead_full(const struct lookahead_ctx *ctx);
+
 /**\brief Enqueue a source buffer
  *
  * This function will copy the source image into a new framebuffer with

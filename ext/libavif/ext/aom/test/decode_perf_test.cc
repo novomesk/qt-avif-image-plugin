@@ -71,7 +71,7 @@ TEST_P(DecodePerfTest, PerfTest) {
   aom_usec_timer t;
   aom_usec_timer_start(&t);
 
-  for (video.Begin(); video.cxdata() != NULL; video.Next()) {
+  for (video.Begin(); video.cxdata() != nullptr; video.Next()) {
     decoder.DecodeFrame(video.cxdata(), video.frame_size());
   }
 
@@ -139,11 +139,11 @@ class AV1NewEncodeDecodePerfTest
   }
 
   virtual void EndPassHook() {
-    if (outfile_ != NULL) {
+    if (outfile_ != nullptr) {
       if (!fseek(outfile_, 0, SEEK_SET))
         ivf_write_file_header(outfile_, &cfg_, AV1_FOURCC, out_frames_);
       fclose(outfile_);
-      outfile_ = NULL;
+      outfile_ = nullptr;
     }
   }
 
@@ -220,7 +220,7 @@ TEST_P(AV1NewEncodeDecodePerfTest, PerfTest) {
   aom_usec_timer t;
   aom_usec_timer_start(&t);
 
-  for (decode_video.Begin(); decode_video.cxdata() != NULL;
+  for (decode_video.Begin(); decode_video.cxdata() != nullptr;
        decode_video.Next()) {
     decoder.DecodeFrame(decode_video.cxdata(), decode_video.frame_size());
   }

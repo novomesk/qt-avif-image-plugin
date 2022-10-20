@@ -1644,10 +1644,13 @@ static float get_dev(float mean, double x2_sum, int num) {
   return dev;
 }
 
-// Feature used by the model to predict tx split: the mean and standard
-// deviation values of the block and sub-blocks.
-static AOM_INLINE void get_mean_dev_features(const int16_t *data, int stride,
-                                             int bw, int bh, float *feature) {
+// Writes the features required by the ML model to predict tx split based on
+// mean and standard deviation values of the block and sub-blocks.
+// Returns the number of elements written to the output array which is at most
+// 12 currently. Hence 'features' buffer should be able to accommodate at least
+// 12 elements.
+static AOM_INLINE int get_mean_dev_features(const int16_t *data, int stride,
+                                            int bw, int bh, float *features) {
   const int16_t *const data_ptr = &data[0];
   const int subh = (bh >= bw) ? (bh >> 1) : bh;
   const int subw = (bw >= bh) ? (bw >> 1) : bw;
@@ -1656,7 +1659,7 @@ static AOM_INLINE void get_mean_dev_features(const int16_t *data, int stride,
   int feature_idx = 2;
   int total_x_sum = 0;
   int64_t total_x2_sum = 0;
-  int blk_idx = 0;
+  int num_sub_blks = 0;
   double mean2_sum = 0.0f;
   float dev_sum = 0.0f;
 
@@ -1672,24 +1675,24 @@ static AOM_INLINE void get_mean_dev_features(const int16_t *data, int stride,
 
       const float mean = (float)x_sum / sub_num;
       const float dev = get_dev(mean, (double)x2_sum, sub_num);
-      feature[feature_idx++] = mean;
-      feature[feature_idx++] = dev;
+      features[feature_idx++] = mean;
+      features[feature_idx++] = dev;
       mean2_sum += (double)(mean * mean);
       dev_sum += dev;
-      blk_idx++;
+      num_sub_blks++;
     }
   }
 
   const float lvl0_mean = (float)total_x_sum / num;
-  feature[0] = lvl0_mean;
-  feature[1] = get_dev(lvl0_mean, (double)total_x2_sum, num);
+  features[0] = lvl0_mean;
+  features[1] = get_dev(lvl0_mean, (double)total_x2_sum, num);
 
-  if (blk_idx > 1) {
-    // Deviation of means.
-    feature[feature_idx++] = get_dev(lvl0_mean, mean2_sum, blk_idx);
-    // Mean of deviations.
-    feature[feature_idx++] = dev_sum / blk_idx;
-  }
+  // Deviation of means.
+  features[feature_idx++] = get_dev(lvl0_mean, mean2_sum, num_sub_blks);
+  // Mean of deviations.
+  features[feature_idx++] = dev_sum / num_sub_blks;
+
+  return feature_idx;
 }
 
 static int ml_predict_tx_split(MACROBLOCK *x, BLOCK_SIZE bsize, int blk_row,
@@ -1732,7 +1735,7 @@ get_tx_mask(const AV1_COMP *cpi, MACROBLOCK *x, int plane, int block,
       get_frame_update_type(&cpi->ppi->gf_group, cpi->gf_frame_index);
   int use_actual_frame_probs = 1;
   const int *tx_type_probs;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
   use_actual_frame_probs =
       (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) ? 0 : 1;
   if (!use_actual_frame_probs) {
@@ -1966,10 +1969,14 @@ static INLINE void predict_dc_only_block(
   uint64_t var_threshold = (uint64_t)(1.8 * qstep * qstep);
   if (is_cur_buf_hbd(xd))
     block_var = ROUND_POWER_OF_TWO(block_var, (xd->bd - 8) * 2);
-  // Early prediction of skip block if residual mean and variance are less
+
+  if (block_var >= var_threshold) return;
+  const unsigned int predict_dc_level = x->txfm_search_params.predict_dc_level;
+  assert(predict_dc_level != 0);
+
+  // Prediction of skip block if residual mean and variance are less
   // than qstep based threshold
-  if (((llabs(*per_px_mean) * dc_coeff_scale[tx_size]) < (dc_qstep << 12)) &&
-      (block_var < var_threshold)) {
+  if ((llabs(*per_px_mean) * dc_coeff_scale[tx_size]) < (dc_qstep << 12)) {
     // If the normalized mean of residual block is less than the dc qstep and
     // the  normalized block variance is less than ac qstep, then the block is
     // assumed to be a skip block and its rdcost is updated accordingly.
@@ -2000,9 +2007,9 @@ static INLINE void predict_dc_only_block(
         RDCOST(x->rdmult, best_rd_stats->rate, best_rd_stats->sse);
 
     x->plane[plane].txb_entropy_ctx[block] = 0;
-  } else if (block_var < var_threshold) {
+  } else if (predict_dc_level > 1) {
     // Predict DC only blocks based on residual variance.
-    // For chroma plane, this early prediction is disabled for intra blocks.
+    // For chroma plane, this prediction is disabled for intra blocks.
     if ((plane == 0) || (plane > 0 && is_inter_block(mbmi))) *dc_only_blk = 1;
   }
 }
@@ -2052,7 +2059,7 @@ static void search_tx_type(const AV1_COMP *cpi, MACROBLOCK *x, int plane,
   unsigned int block_mse_q8;
   int dc_only_blk = 0;
   const bool predict_dc_block =
-      txfm_params->predict_dc_level && txw != 64 && txh != 64;
+      txfm_params->predict_dc_level >= 1 && txw != 64 && txh != 64;
   int64_t per_px_mean = INT64_MAX;
   if (predict_dc_block) {
     predict_dc_only_block(x, plane, plane_bsize, tx_size, block, blk_row,
@@ -2758,6 +2765,72 @@ static AOM_INLINE void choose_smallest_tx_size(const AV1_COMP *const cpi,
                        FTXS_NONE, skip_trellis);
 }
 
+#if !CONFIG_REALTIME_ONLY
+static void ml_predict_intra_tx_depth_prune(MACROBLOCK *x, int blk_row,
+                                            int blk_col, BLOCK_SIZE bsize,
+                                            TX_SIZE tx_size) {
+  const MACROBLOCKD *const xd = &x->e_mbd;
+  const MB_MODE_INFO *const mbmi = xd->mi[0];
+
+  // Disable the pruning logic using NN model for the following cases:
+  // 1) Lossless coding as only 4x4 transform is evaluated in this case
+  // 2) When transform and current block sizes do not match as the features are
+  // obtained over the current block
+  // 3) When operating bit-depth is not 8-bit as the input features are not
+  // scaled according to bit-depth.
+  if (xd->lossless[mbmi->segment_id] || txsize_to_bsize[tx_size] != bsize ||
+      xd->bd != 8)
+    return;
+
+  // Currently NN model based pruning is supported only when largest transform
+  // size is 8x8
+  if (tx_size != TX_8X8) return;
+
+  // Neural network model is a sequential neural net and was trained using SGD
+  // optimizer. The model can be further improved in terms of speed/quality by
+  // considering the following experiments:
+  // 1) Generate ML model by training with balanced data for different learning
+  // rates and optimizers.
+  // 2) Experiment with ML model by adding features related to the statistics of
+  // top and left pixels to capture the accuracy of reconstructed neighbouring
+  // pixels for 4x4 blocks numbered 1, 2, 3 in 8x8 block, source variance of 4x4
+  // sub-blocks, etc.
+  // 3) Generate ML models for transform blocks other than 8x8.
+  const NN_CONFIG *const nn_config = &av1_intra_tx_split_nnconfig_8x8;
+  const float *const intra_tx_prune_thresh = av1_intra_tx_prune_nn_thresh_8x8;
+
+  float features[NUM_INTRA_TX_SPLIT_FEATURES] = { 0.0f };
+  const int diff_stride = block_size_wide[bsize];
+
+  const int16_t *diff = x->plane[0].src_diff + MI_SIZE * blk_row * diff_stride +
+                        MI_SIZE * blk_col;
+  const int bw = tx_size_wide[tx_size];
+  const int bh = tx_size_high[tx_size];
+
+  int feature_idx = get_mean_dev_features(diff, diff_stride, bw, bh, features);
+
+  features[feature_idx++] = logf(1.0f + (float)x->source_variance);
+
+  const int dc_q = av1_dc_quant_QTX(x->qindex, 0, xd->bd) >> (xd->bd - 8);
+  const float log_dc_q_square = logf(1.0f + (float)(dc_q * dc_q) / 256.0f);
+  features[feature_idx++] = log_dc_q_square;
+  assert(feature_idx == NUM_INTRA_TX_SPLIT_FEATURES);
+  for (int i = 0; i < NUM_INTRA_TX_SPLIT_FEATURES; i++) {
+    features[i] = (features[i] - av1_intra_tx_split_8x8_mean[i]) /
+                  av1_intra_tx_split_8x8_std[i];
+  }
+
+  float score;
+  av1_nn_predict(features, nn_config, 1, &score);
+
+  TxfmSearchParams *const txfm_params = &x->txfm_search_params;
+  if (score <= intra_tx_prune_thresh[0])
+    txfm_params->nn_prune_depths_for_intra_tx = TX_PRUNE_SPLIT;
+  else if (score > intra_tx_prune_thresh[1])
+    txfm_params->nn_prune_depths_for_intra_tx = TX_PRUNE_LARGEST;
+}
+#endif  // !CONFIG_REALTIME_ONLY
+
 // Search for the best uniform transform size and type for current coding block.
 static AOM_INLINE void choose_tx_size_type_from_rd(const AV1_COMP *const cpi,
                                                    MACROBLOCK *x,
@@ -2768,7 +2841,7 @@ static AOM_INLINE void choose_tx_size_type_from_rd(const AV1_COMP *const cpi,
 
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
-  const TxfmSearchParams *txfm_params = &x->txfm_search_params;
+  TxfmSearchParams *const txfm_params = &x->txfm_search_params;
   const TX_SIZE max_rect_tx_size = max_txsize_rect_lookup[bs];
   const int tx_select = txfm_params->tx_mode_search_type == TX_MODE_SELECT;
   int start_tx;
@@ -2810,6 +2883,17 @@ static AOM_INLINE void choose_tx_size_type_from_rd(const AV1_COMP *const cpi,
       continue;
     }
 
+#if !CONFIG_REALTIME_ONLY
+    if (txfm_params->nn_prune_depths_for_intra_tx == TX_PRUNE_SPLIT) break;
+
+    // Set the flag to enable the evaluation of NN classifier to prune transform
+    // depths. As the features are based on intra residual information of
+    // largest transform, the evaluation of NN model is enabled only for this
+    // case.
+    txfm_params->enable_nn_prune_intra_tx_depths =
+        (cpi->sf.tx_sf.prune_intra_tx_depths_using_nn && tx_size == start_tx);
+#endif
+
     RD_STATS this_rd_stats;
     rd[depth] = av1_uniform_txfm_yrd(cpi, x, &this_rd_stats, ref_best_rd, bs,
                                      tx_size, FTXS_NONE, skip_trellis);
@@ -2834,6 +2918,13 @@ static AOM_INLINE void choose_tx_size_type_from_rd(const AV1_COMP *const cpi,
     av1_copy_array(xd->tx_type_map, best_txk_type_map, num_blks);
     av1_copy_array(txfm_info->blk_skip, best_blk_skip, num_blks);
   }
+
+#if !CONFIG_REALTIME_ONLY
+  // Reset the flags to avoid any unintentional evaluation of NN model and
+  // consumption of prune depths.
+  txfm_params->enable_nn_prune_intra_tx_depths = false;
+  txfm_params->nn_prune_depths_for_intra_tx = TX_PRUNE_NONE;
+#endif
 }
 
 // Search for the best transform type for the given transform block in the
@@ -2860,6 +2951,18 @@ static AOM_INLINE void block_rd_txfm(int plane, int block, int blk_row,
   if (!is_inter) {
     av1_predict_intra_block_facade(cm, xd, plane, blk_col, blk_row, tx_size);
     av1_subtract_txb(x, plane, plane_bsize, blk_col, blk_row, tx_size);
+#if !CONFIG_REALTIME_ONLY
+    const TxfmSearchParams *const txfm_params = &x->txfm_search_params;
+    if (txfm_params->enable_nn_prune_intra_tx_depths) {
+      ml_predict_intra_tx_depth_prune(x, blk_row, blk_col, plane_bsize,
+                                      tx_size);
+      if (txfm_params->nn_prune_depths_for_intra_tx == TX_PRUNE_LARGEST) {
+        av1_invalid_rd_stats(&args->rd_stats);
+        args->exit_early = 1;
+        return;
+      }
+    }
+#endif
   }
 
   TXB_CTX txb_ctx;

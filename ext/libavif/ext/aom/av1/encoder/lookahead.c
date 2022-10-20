@@ -82,14 +82,20 @@ struct lookahead_ctx *av1_lookahead_init(
       if (aom_realloc_frame_buffer(
               &ctx->buf[i].img, width, height, subsampling_x, subsampling_y,
               use_highbitdepth, border_in_pixels, byte_alignment, NULL, NULL,
-              NULL, enable_global_motion, 0))
+              NULL, enable_global_motion, 0)) {
         goto fail;
+      }
     }
   }
   return ctx;
 fail:
   av1_lookahead_destroy(ctx);
   return NULL;
+}
+
+int av1_lookahead_full(const struct lookahead_ctx *ctx) {
+  // TODO(angiebird): Test this function.
+  return ctx->read_ctxs[ENCODE_STAGE].sz >= ctx->read_ctxs[ENCODE_STAGE].pop_sz;
 }
 
 int av1_lookahead_push(struct lookahead_ctx *ctx, const YV12_BUFFER_CONFIG *src,
@@ -104,12 +110,14 @@ int av1_lookahead_push(struct lookahead_ctx *ctx, const YV12_BUFFER_CONFIG *src,
   int larger_dimensions, new_dimensions;
 
   assert(ctx->read_ctxs[ENCODE_STAGE].valid == 1);
-  if (ctx->read_ctxs[ENCODE_STAGE].sz + 1 + ctx->max_pre_frames > ctx->max_sz)
+  if (ctx->read_ctxs[ENCODE_STAGE].sz + ctx->max_pre_frames > ctx->max_sz)
     return 1;
+
   ctx->read_ctxs[ENCODE_STAGE].sz++;
   if (ctx->read_ctxs[LAP_STAGE].valid) {
     ctx->read_ctxs[LAP_STAGE].sz++;
   }
+
   struct lookahead_entry *buf = pop(ctx, &ctx->write_idx);
 
   new_dimensions = width != buf->img.y_crop_width ||

@@ -448,7 +448,7 @@ static INLINE void find_best_non_dual_interp_filter(
     int use_actual_frame_probs = 1;
     const int *switchable_interp_p0;
     const int *switchable_interp_p1;
-#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+#if CONFIG_FPMT_TEST
     use_actual_frame_probs =
         (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) ? 0 : 1;
     if (!use_actual_frame_probs) {

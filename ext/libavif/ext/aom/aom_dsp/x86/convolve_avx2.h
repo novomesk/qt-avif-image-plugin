@@ -576,9 +576,8 @@ DECLARE_ALIGNED(32, static const uint8_t, filt4_global_avx2[32]) = {
           const __m128i res_0 = _mm256_castsi256_si128(res_8);                 \
           const __m128i res_1 = _mm256_extracti128_si256(res_8, 1);            \
                                                                                \
-          *(uint32_t *)(&dst0[i * dst_stride0 + j]) =                          \
-              _mm_cvtsi128_si32(res_0);                                        \
-          *(uint32_t *)(&dst0[i * dst_stride0 + j + dst_stride0]) =            \
+          *(int *)(&dst0[i * dst_stride0 + j]) = _mm_cvtsi128_si32(res_0);     \
+          *(int *)(&dst0[i * dst_stride0 + j + dst_stride0]) =                 \
               _mm_cvtsi128_si32(res_1);                                        \
                                                                                \
         } else {                                                               \

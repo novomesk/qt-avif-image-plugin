@@ -32,12 +32,12 @@ template <typename Pixel>
 class AverageTestBase : public ::testing::Test {
  public:
   AverageTestBase(int width, int height, int bit_depth = 8)
-      : width_(width), height_(height), source_data_(NULL), source_stride_(0),
-        bit_depth_(bit_depth) {}
+      : width_(width), height_(height), source_data_(nullptr),
+        source_stride_(0), bit_depth_(bit_depth) {}
 
   virtual void TearDown() {
     aom_free(source_data_);
-    source_data_ = NULL;
+    source_data_ = nullptr;
   }
 
  protected:
@@ -353,7 +353,8 @@ class IntProRowTest : public AverageTestBase<uint8_t>,
                       public ::testing::WithParamInterface<IntProRowParam> {
  public:
   IntProRowTest()
-      : AverageTestBase(16, GET_PARAM(0)), hbuf_asm_(NULL), hbuf_c_(NULL) {
+      : AverageTestBase(16, GET_PARAM(0)), hbuf_asm_(nullptr),
+        hbuf_c_(nullptr) {
     asm_func_ = GET_PARAM(1);
     c_func_ = GET_PARAM(2);
   }
@@ -374,11 +375,11 @@ class IntProRowTest : public AverageTestBase<uint8_t>,
 
   virtual void TearDown() {
     aom_free(source_data_);
-    source_data_ = NULL;
+    source_data_ = nullptr;
     aom_free(hbuf_c_);
-    hbuf_c_ = NULL;
+    hbuf_c_ = nullptr;
     aom_free(hbuf_asm_);
-    hbuf_asm_ = NULL;
+    hbuf_asm_ = nullptr;
   }
 
   void RunComparison() {
@@ -544,9 +545,9 @@ class VectorVarTestBase : public ::testing::Test {
   }
   virtual void TearDown() {
     aom_free(ref_vector);
-    ref_vector = NULL;
+    ref_vector = nullptr;
     aom_free(src_vector);
-    src_vector = NULL;
+    src_vector = nullptr;
   }
 
   void FillConstant(int16_t fill_constant_ref, int16_t fill_constant_src) {

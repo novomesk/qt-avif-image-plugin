@@ -52,7 +52,7 @@ static THREADFN thread_loop(void *ptr) {
     thread_name[sizeof(thread_name) - 1] = '\0';
     pthread_setname_np(thread_name);
   }
-#elif defined(__GLIBC__) || defined(__BIONIC__)
+#elif (defined(__GLIBC__) && !defined(__GNU__)) || defined(__BIONIC__)
   if (worker->thread_name != NULL) {
     // Linux and Android require names (with nul) fit in 16 chars, otherwise
     // pthread_setname_np() returns ERANGE (34).

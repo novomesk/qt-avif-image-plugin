@@ -30,8 +30,8 @@ typedef void (*QuantizeFpFunc)(
     const int16_t *scan, const int16_t *iscan, int log_scale);
 
 struct QuantizeFuncParams {
-  QuantizeFuncParams(QuantizeFpFunc qF = NULL, QuantizeFpFunc qRefF = NULL,
-                     int count = 16)
+  QuantizeFuncParams(QuantizeFpFunc qF = nullptr,
+                     QuantizeFpFunc qRefF = nullptr, int count = 16)
       : qFunc(qF), qFuncRef(qRefF), coeffCount(count) {}
   QuantizeFpFunc qFunc;
   QuantizeFpFunc qFuncRef;

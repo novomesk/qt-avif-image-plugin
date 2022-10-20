@@ -187,7 +187,7 @@ static void vfilter8(const int16_t *src, int src_stride, uint8_t *dst,
           const __m128i subbed = _mm_sub_epi16(shifted_16, sub);
           result = _mm_sra_epi16(_mm_add_epi16(subbed, bits_const), bits_shift);
           const __m128i result_8 = _mm_packus_epi16(result, result);
-          *(uint32_t *)dst_x = _mm_cvtsi128_si32(result_8);
+          *(int *)dst_x = _mm_cvtsi128_si32(result_8);
         } else {
           _mm_storel_epi64((__m128i *)dst_16_x, shifted_16);
         }
@@ -195,7 +195,7 @@ static void vfilter8(const int16_t *src, int src_stride, uint8_t *dst,
         const __m128i subbed = _mm_sub_epi16(shifted_16, sub);
         result = _mm_sra_epi16(_mm_add_epi16(subbed, bits_const), bits_shift);
         const __m128i result_8 = _mm_packus_epi16(result, result);
-        *(uint32_t *)dst_x = _mm_cvtsi128_si32(result_8);
+        *(int *)dst_x = _mm_cvtsi128_si32(result_8);
       }
     }
     for (; x < w; ++x) {

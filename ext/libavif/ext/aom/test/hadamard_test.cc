@@ -385,24 +385,24 @@ TEST_P(HadamardLowbdLP8x8DualTest, DISABLED_SpeedTest) { SpeedTest(1000000); }
 
 INSTANTIATE_TEST_SUITE_P(C, HadamardLowbdLP8x8DualTest,
                          ::testing::Values(HadamardLP8x8DualFuncWithSize(
-                             &aom_hadamard_8x8_dual_c, 8, 16)));
+                             &aom_hadamard_lp_8x8_dual_c, 8, 16)));
 
 #if HAVE_SSE2
 INSTANTIATE_TEST_SUITE_P(SSE2, HadamardLowbdLP8x8DualTest,
                          ::testing::Values(HadamardLP8x8DualFuncWithSize(
-                             &aom_hadamard_8x8_dual_sse2, 8, 16)));
+                             &aom_hadamard_lp_8x8_dual_sse2, 8, 16)));
 #endif  // HAVE_SSE2
 
 #if HAVE_AVX2
 INSTANTIATE_TEST_SUITE_P(AVX2, HadamardLowbdLP8x8DualTest,
                          ::testing::Values(HadamardLP8x8DualFuncWithSize(
-                             &aom_hadamard_8x8_dual_avx2, 8, 16)));
+                             &aom_hadamard_lp_8x8_dual_avx2, 8, 16)));
 #endif  // HAVE_AVX2
 
 #if HAVE_NEON
 INSTANTIATE_TEST_SUITE_P(NEON, HadamardLowbdLP8x8DualTest,
                          ::testing::Values(HadamardLP8x8DualFuncWithSize(
-                             &aom_hadamard_8x8_dual_neon, 8, 16)));
+                             &aom_hadamard_lp_8x8_dual_neon, 8, 16)));
 #endif  // HAVE_NEON
 
 }  // namespace

@@ -32,7 +32,7 @@ unsigned int aom_get_mb_ss_sse2(const int16_t *src) {
 
   vsum = _mm_add_epi32(vsum, _mm_srli_si128(vsum, 8));
   vsum = _mm_add_epi32(vsum, _mm_srli_si128(vsum, 4));
-  return _mm_cvtsi128_si32(vsum);
+  return (unsigned int)_mm_cvtsi128_si32(vsum);
 }
 
 static INLINE __m128i load4x2_sse2(const uint8_t *const p, const int stride) {
@@ -50,7 +50,7 @@ static INLINE __m128i load8_8to16_sse2(const uint8_t *const p) {
 static INLINE unsigned int add32x4_sse2(__m128i val) {
   val = _mm_add_epi32(val, _mm_srli_si128(val, 8));
   val = _mm_add_epi32(val, _mm_srli_si128(val, 4));
-  return _mm_cvtsi128_si32(val);
+  return (unsigned int)_mm_cvtsi128_si32(val);
 }
 
 // Accumulate 8 16bit in sum to 4 32bit number

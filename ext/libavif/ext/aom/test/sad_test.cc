@@ -117,25 +117,25 @@ class SADTestBase : public ::testing::Test {
 
   static void TearDownTestSuite() {
     aom_free(source_data8_);
-    source_data8_ = NULL;
+    source_data8_ = nullptr;
     aom_free(reference_data8_);
-    reference_data8_ = NULL;
+    reference_data8_ = nullptr;
     aom_free(second_pred8_);
-    second_pred8_ = NULL;
+    second_pred8_ = nullptr;
     aom_free(comp_pred8_);
-    comp_pred8_ = NULL;
+    comp_pred8_ = nullptr;
     aom_free(comp_pred8_test_);
-    comp_pred8_test_ = NULL;
+    comp_pred8_test_ = nullptr;
     aom_free(source_data16_);
-    source_data16_ = NULL;
+    source_data16_ = nullptr;
     aom_free(reference_data16_);
-    reference_data16_ = NULL;
+    reference_data16_ = nullptr;
     aom_free(second_pred16_);
-    second_pred16_ = NULL;
+    second_pred16_ = nullptr;
     aom_free(comp_pred16_);
-    comp_pred16_ = NULL;
+    comp_pred16_ = nullptr;
     aom_free(comp_pred16_test_);
-    comp_pred16_test_ = NULL;
+    comp_pred16_test_ = nullptr;
   }
 
   virtual void TearDown() {}
@@ -655,21 +655,21 @@ class DistWtdSADavgTest
   }
 };
 
-uint8_t *SADTestBase::source_data_ = NULL;
-uint8_t *SADTestBase::reference_data_ = NULL;
-uint8_t *SADTestBase::second_pred_ = NULL;
-uint8_t *SADTestBase::comp_pred_ = NULL;
-uint8_t *SADTestBase::comp_pred_test_ = NULL;
-uint8_t *SADTestBase::source_data8_ = NULL;
-uint8_t *SADTestBase::reference_data8_ = NULL;
-uint8_t *SADTestBase::second_pred8_ = NULL;
-uint8_t *SADTestBase::comp_pred8_ = NULL;
-uint8_t *SADTestBase::comp_pred8_test_ = NULL;
-uint16_t *SADTestBase::source_data16_ = NULL;
-uint16_t *SADTestBase::reference_data16_ = NULL;
-uint16_t *SADTestBase::second_pred16_ = NULL;
-uint16_t *SADTestBase::comp_pred16_ = NULL;
-uint16_t *SADTestBase::comp_pred16_test_ = NULL;
+uint8_t *SADTestBase::source_data_ = nullptr;
+uint8_t *SADTestBase::reference_data_ = nullptr;
+uint8_t *SADTestBase::second_pred_ = nullptr;
+uint8_t *SADTestBase::comp_pred_ = nullptr;
+uint8_t *SADTestBase::comp_pred_test_ = nullptr;
+uint8_t *SADTestBase::source_data8_ = nullptr;
+uint8_t *SADTestBase::reference_data8_ = nullptr;
+uint8_t *SADTestBase::second_pred8_ = nullptr;
+uint8_t *SADTestBase::comp_pred8_ = nullptr;
+uint8_t *SADTestBase::comp_pred8_test_ = nullptr;
+uint16_t *SADTestBase::source_data16_ = nullptr;
+uint16_t *SADTestBase::reference_data16_ = nullptr;
+uint16_t *SADTestBase::second_pred16_ = nullptr;
+uint16_t *SADTestBase::comp_pred16_ = nullptr;
+uint16_t *SADTestBase::comp_pred16_test_ = nullptr;
 
 TEST_P(SADTest, MaxRef) {
   FillConstant(source_data_, source_stride_, 0);

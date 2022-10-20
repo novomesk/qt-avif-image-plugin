@@ -944,14 +944,10 @@ BLOCK_SIZE av1_predict_max_partition(const AV1_COMP *const cpi,
   } else if (cpi->sf.part_sf.auto_max_partition_based_on_simple_motion ==
              ADAPT_PRED) {
     const BLOCK_SIZE sb_size = cpi->common.seq_params->sb_size;
-    const MACROBLOCKD *const xd = &x->e_mbd;
     // TODO(debargha): x->source_variance is unavailable at this point,
     // so compute. The redundant recomputation later can be removed.
-    const unsigned int source_variance =
-        is_cur_buf_hbd(xd)
-            ? av1_high_get_sby_perpixel_variance(cpi, &x->plane[0].src, sb_size,
-                                                 xd->bd)
-            : av1_get_sby_perpixel_variance(cpi, &x->plane[0].src, sb_size);
+    const unsigned int source_variance = av1_get_perpixel_variance_facade(
+        cpi, &x->e_mbd, &x->plane[0].src, sb_size, AOM_PLANE_Y);
     if (source_variance > 16) {
       const double thresh = source_variance < 128 ? 0.05 : 0.1;
       for (result = MAX_NUM_CLASSES_MAX_MIN_PART_PRED - 1; result >= 0;
@@ -1165,13 +1161,8 @@ void av1_ml_prune_rect_partition(AV1_COMP *const cpi, const MACROBLOCK *const x,
   // Variance ratios
   const MACROBLOCKD *const xd = &x->e_mbd;
   int whole_block_variance;
-  if (is_cur_buf_hbd(xd)) {
-    whole_block_variance = av1_high_get_sby_perpixel_variance(
-        cpi, &x->plane[0].src, bsize, xd->bd);
-  } else {
-    whole_block_variance =
-        av1_get_sby_perpixel_variance(cpi, &x->plane[0].src, bsize);
-  }
+  whole_block_variance = av1_get_perpixel_variance_facade(
+      cpi, xd, &x->plane[0].src, bsize, AOM_PLANE_Y);
   whole_block_variance = AOMMAX(whole_block_variance, 1);
 
   int split_variance[SUB_PARTITIONS_SPLIT];
@@ -1183,12 +1174,8 @@ void av1_ml_prune_rect_partition(AV1_COMP *const cpi, const MACROBLOCK *const x,
     const int x_idx = (i & 1) * bw / 2;
     const int y_idx = (i >> 1) * bw / 2;
     buf.buf = x->plane[0].src.buf + x_idx + y_idx * buf.stride;
-    if (is_cur_buf_hbd(xd)) {
-      split_variance[i] =
-          av1_high_get_sby_perpixel_variance(cpi, &buf, subsize, xd->bd);
-    } else {
-      split_variance[i] = av1_get_sby_perpixel_variance(cpi, &buf, subsize);
-    }
+    split_variance[i] =
+        av1_get_perpixel_variance_facade(cpi, xd, &buf, subsize, AOM_PLANE_Y);
   }
 
   for (int i = 0; i < SUB_PARTITIONS_SPLIT; i++)
@@ -1404,17 +1391,10 @@ void av1_ml_prune_4_partition(AV1_COMP *const cpi, MACROBLOCK *const x,
       horz_4_src.buf = src + i * block_size_high[horz_4_bs] * src_stride;
       vert_4_src.buf = src + i * block_size_wide[vert_4_bs];
 
-      if (is_cur_buf_hbd(xd)) {
-        horz_4_source_var[i] = av1_high_get_sby_perpixel_variance(
-            cpi, &horz_4_src, horz_4_bs, xd->bd);
-        vert_4_source_var[i] = av1_high_get_sby_perpixel_variance(
-            cpi, &vert_4_src, vert_4_bs, xd->bd);
-      } else {
-        horz_4_source_var[i] =
-            av1_get_sby_perpixel_variance(cpi, &horz_4_src, horz_4_bs);
-        vert_4_source_var[i] =
-            av1_get_sby_perpixel_variance(cpi, &vert_4_src, vert_4_bs);
-      }
+      horz_4_source_var[i] = av1_get_perpixel_variance_facade(
+          cpi, xd, &horz_4_src, horz_4_bs, AOM_PLANE_Y);
+      vert_4_source_var[i] = av1_get_perpixel_variance_facade(
+          cpi, xd, &vert_4_src, vert_4_bs, AOM_PLANE_Y);
     }
   }
 
@@ -2003,17 +1983,10 @@ static void prepare_features_after_part_ab(
       horz_4_src.buf = src + i * block_size_high[horz_4_bs] * src_stride;
       vert_4_src.buf = src + i * block_size_wide[vert_4_bs];
 
-      if (is_cur_buf_hbd(xd)) {
-        horz_4_source_var[i] = av1_high_get_sby_perpixel_variance(
-            cpi, &horz_4_src, horz_4_bs, xd->bd);
-        vert_4_source_var[i] = av1_high_get_sby_perpixel_variance(
-            cpi, &vert_4_src, vert_4_bs, xd->bd);
-      } else {
-        horz_4_source_var[i] =
-            av1_get_sby_perpixel_variance(cpi, &horz_4_src, horz_4_bs);
-        vert_4_source_var[i] =
-            av1_get_sby_perpixel_variance(cpi, &vert_4_src, vert_4_bs);
-      }
+      horz_4_source_var[i] = av1_get_perpixel_variance_facade(
+          cpi, xd, &horz_4_src, horz_4_bs, AOM_PLANE_Y);
+      vert_4_source_var[i] = av1_get_perpixel_variance_facade(
+          cpi, xd, &vert_4_src, vert_4_bs, AOM_PLANE_Y);
     }
   }
 

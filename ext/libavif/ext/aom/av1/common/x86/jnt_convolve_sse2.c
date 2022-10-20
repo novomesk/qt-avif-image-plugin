@@ -79,7 +79,7 @@ void av1_dist_wtd_convolve_x_sse2(const uint8_t *src, int src_stride,
             &comp_avg_res, &offset_const, &rounding_const, rounding_shift);
 
         const __m128i res_8 = _mm_packus_epi16(round_result, round_result);
-        *(uint32_t *)(&dst0[0]) = _mm_cvtsi128_si32(res_8);
+        *(int *)(&dst0[0]) = _mm_cvtsi128_si32(res_8);
       } else {
         _mm_store_si128((__m128i *)(&dst[0]), res_unsigned);
       }
@@ -223,7 +223,7 @@ void av1_dist_wtd_convolve_y_sse2(const uint8_t *src, int src_stride,
             &comp_avg_res, &offset_const, &rounding_const, rounding_shift);
 
         const __m128i res_8 = _mm_packus_epi16(round_result, round_result);
-        *(uint32_t *)(&dst0[0]) = _mm_cvtsi128_si32(res_8);
+        *(int *)(&dst0[0]) = _mm_cvtsi128_si32(res_8);
 
       } else {
         _mm_store_si128((__m128i *)dst, res_unsigned);
@@ -252,7 +252,7 @@ void av1_dist_wtd_convolve_y_sse2(const uint8_t *src, int src_stride,
             &comp_avg_res, &offset_const, &rounding_const, rounding_shift);
 
         const __m128i res_8 = _mm_packus_epi16(round_result, round_result);
-        *(uint32_t *)(&dst0[0]) = _mm_cvtsi128_si32(res_8);
+        *(int *)(&dst0[0]) = _mm_cvtsi128_si32(res_8);
 
       } else {
         _mm_store_si128((__m128i *)dst, res_unsigned);
@@ -596,8 +596,7 @@ void av1_dist_wtd_convolve_2d_sse2(const uint8_t *src, int src_stride,
           if (w > 4)
             _mm_storel_epi64((__m128i *)(&dst0[i * dst_stride0 + j]), res_8);
           else
-            *(uint32_t *)(&dst0[i * dst_stride0 + j]) =
-                _mm_cvtsi128_si32(res_8);
+            *(int *)(&dst0[i * dst_stride0 + j]) = _mm_cvtsi128_si32(res_8);
         } else {
           _mm_store_si128((__m128i *)(&dst[i * dst_stride + j]), res_unsigned);
         }
