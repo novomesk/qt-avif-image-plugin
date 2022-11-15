@@ -46,12 +46,26 @@ public:
 
 QImageIOPlugin::Capabilities QAVIFPlugin::capabilities(QIODevice *device, const QByteArray &format) const
 {
+    static const bool isAvifDecoderAvailable(avifCodecName(AVIF_CODEC_CHOICE_AUTO, AVIF_CODEC_FLAG_CAN_DECODE) != nullptr);
+    static const bool isAvifEncoderAvailable(avifCodecName(AVIF_CODEC_CHOICE_AUTO, AVIF_CODEC_FLAG_CAN_ENCODE) != nullptr);
+
     if (format == "avif") {
-        return Capabilities(CanRead | CanWrite);
+        Capabilities format_cap;
+        if (isAvifDecoderAvailable) {
+            format_cap |= CanRead;
+        }
+        if (isAvifEncoderAvailable) {
+            format_cap |= CanWrite;
+        }
+        return format_cap;
     }
 
     if (format == "avifs") {
-        return Capabilities(CanRead);
+        Capabilities format_cap;
+        if (isAvifDecoderAvailable) {
+            format_cap |= CanRead;
+        }
+        return format_cap;
     }
 
     if (!format.isEmpty()) {
@@ -62,10 +76,10 @@ QImageIOPlugin::Capabilities QAVIFPlugin::capabilities(QIODevice *device, const 
     }
 
     Capabilities cap;
-    if (device->isReadable() && QAVIFHandler::canRead(device)) {
+    if (device->isReadable() && QAVIFHandler::canRead(device) && isAvifDecoderAvailable) {
         cap |= CanRead;
     }
-    if (device->isWritable()) {
+    if (device->isWritable() && isAvifEncoderAvailable) {
         cap |= CanWrite;
     }
     return cap;
