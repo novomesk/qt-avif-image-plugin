@@ -76,8 +76,7 @@ extern "C" {
  *
  *  The available flags are specified by AOM_CODEC_USE_* defines.
  */
-#define AOM_CODEC_USE_PSNR 0x10000 /**< Calculate PSNR on each frame */
-/*!\brief Make the encoder output one  partition at a time. */
+#define AOM_CODEC_USE_PSNR 0x10000         /**< Calculate PSNR on each frame */
 #define AOM_CODEC_USE_HIGHBITDEPTH 0x40000 /**< Use high bitdepth */
 
 /*!\brief Generic fixed size buffer structure
@@ -435,6 +434,11 @@ typedef struct aom_codec_enc_cfg {
 
   /*!\brief Max number of frames to encode
    *
+   * If force video mode is off (the default) and g_limit is 1, the encoder
+   * will encode a still picture (still_picture is set to 1 in the sequence
+   * header OBU). If in addition full_still_picture_hdr is 0 (the default),
+   * the encoder will use a reduced header (reduced_still_picture_header is
+   * set to 1 in the sequence header OBU) for the still picture.
    */
   unsigned int g_limit;
 
@@ -817,10 +821,12 @@ typedef struct aom_codec_enc_cfg {
 
   /*!\brief full_still_picture_hdr
    *
-   * If this is nonzero, the encoder will generate a full header even for
-   * still picture encoding. if zero, a reduced header is used for still
-   * picture. This flag has no effect when a regular video with more than
-   * a single frame is encoded.
+   * If this is nonzero, the encoder will generate a full header
+   * (reduced_still_picture_header is set to 0 in the sequence header OBU) even
+   * for still picture encoding. If this is zero (the default), a reduced
+   * header (reduced_still_picture_header is set to 1 in the sequence header
+   * OBU) is used for still picture encoding. This flag has no effect when a
+   * regular video with more than a single frame is encoded.
    */
   unsigned int full_still_picture_hdr;
 

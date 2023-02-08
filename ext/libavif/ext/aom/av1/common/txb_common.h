@@ -78,71 +78,6 @@ static INLINE int get_padded_idx(const int idx, const int bwl) {
   return idx + ((idx >> bwl) << TX_PAD_HOR_LOG2);
 }
 
-static INLINE int get_base_ctx_from_count_mag(int row, int col, int count,
-                                              int sig_mag) {
-  const int ctx = base_level_count_to_index[count];
-  int ctx_idx = -1;
-
-  if (row == 0 && col == 0) {
-    if (sig_mag >= 2) return 0;
-
-    if (sig_mag == 1) {
-      if (count >= 2)
-        ctx_idx = 1;
-      else
-        ctx_idx = 2;
-
-      return ctx_idx;
-    }
-
-    ctx_idx = 3 + ctx;
-    assert(ctx_idx <= 6);
-    return ctx_idx;
-  } else if (row == 0) {
-    if (sig_mag >= 2) return 6;
-    if (sig_mag == 1) {
-      if (count >= 2)
-        ctx_idx = 7;
-      else
-        ctx_idx = 8;
-      return ctx_idx;
-    }
-
-    ctx_idx = 9 + ctx;
-    assert(ctx_idx <= 11);
-    return ctx_idx;
-  } else if (col == 0) {
-    if (sig_mag >= 2) return 12;
-    if (sig_mag == 1) {
-      if (count >= 2)
-        ctx_idx = 13;
-      else
-        ctx_idx = 14;
-
-      return ctx_idx;
-    }
-
-    ctx_idx = 15 + ctx;
-    assert(ctx_idx <= 17);
-    // TODO(angiebird): turn this on once the optimization is finalized
-    // assert(ctx_idx < 28);
-  } else {
-    if (sig_mag >= 2) return 18;
-    if (sig_mag == 1) {
-      if (count >= 2)
-        ctx_idx = 19;
-      else
-        ctx_idx = 20;
-      return ctx_idx;
-    }
-
-    ctx_idx = 21 + ctx;
-
-    assert(ctx_idx <= 24);
-  }
-  return ctx_idx;
-}
-
 static INLINE int get_br_ctx_2d(const uint8_t *const levels,
                                 const int c,  // raster order
                                 const int bwl) {
@@ -351,11 +286,11 @@ static INLINE void set_dc_sign(int *cul_level, int dc_val) {
     *cul_level += 2 << COEFF_CONTEXT_BITS;
 }
 
-static INLINE void get_txb_ctx(const BLOCK_SIZE plane_bsize,
-                               const TX_SIZE tx_size, const int plane,
-                               const ENTROPY_CONTEXT *const a,
-                               const ENTROPY_CONTEXT *const l,
-                               TXB_CTX *const txb_ctx) {
+static void get_txb_ctx_general(const BLOCK_SIZE plane_bsize,
+                                const TX_SIZE tx_size, const int plane,
+                                const ENTROPY_CONTEXT *const a,
+                                const ENTROPY_CONTEXT *const l,
+                                TXB_CTX *const txb_ctx) {
 #define MAX_TX_SIZE_UNIT 16
   static const int8_t signs[3] = { 0, -1, 1 };
   static const int8_t dc_sign_contexts[4 * MAX_TX_SIZE_UNIT + 1] = {
@@ -437,7 +372,100 @@ static INLINE void get_txb_ctx(const BLOCK_SIZE plane_bsize,
                                : 7;
     txb_ctx->txb_skip_ctx = ctx_base + ctx_offset;
   }
-#undef MAX_TX_SIZE_UNIT
 }
+
+#define SPECIALIZE_GET_TXB_CTX(w, h)                                          \
+  static void get_txb_ctx_##w##x##h(                                          \
+      const BLOCK_SIZE plane_bsize, const int plane,                          \
+      const ENTROPY_CONTEXT *const a, const ENTROPY_CONTEXT *const l,         \
+      TXB_CTX *const txb_ctx) {                                               \
+    static const int8_t signs[3] = { 0, -1, 1 };                              \
+    static const int8_t dc_sign_contexts[4 * MAX_TX_SIZE_UNIT + 1] = {        \
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,       \
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,       \
+      2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2           \
+    };                                                                        \
+    const TX_SIZE tx_size = TX_##w##X##h;                                     \
+    const int txb_w_unit = tx_size_wide_unit[tx_size];                        \
+    const int txb_h_unit = tx_size_high_unit[tx_size];                        \
+    int dc_sign = 0;                                                          \
+    int k = 0;                                                                \
+                                                                              \
+    do {                                                                      \
+      const unsigned int sign = ((uint8_t)a[k]) >> COEFF_CONTEXT_BITS;        \
+      assert(sign <= 2);                                                      \
+      dc_sign += signs[sign];                                                 \
+    } while (++k < txb_w_unit);                                               \
+                                                                              \
+    k = 0;                                                                    \
+    do {                                                                      \
+      const unsigned int sign = ((uint8_t)l[k]) >> COEFF_CONTEXT_BITS;        \
+      assert(sign <= 2);                                                      \
+      dc_sign += signs[sign];                                                 \
+    } while (++k < txb_h_unit);                                               \
+                                                                              \
+    txb_ctx->dc_sign_ctx = dc_sign_contexts[dc_sign + 2 * MAX_TX_SIZE_UNIT];  \
+                                                                              \
+    if (plane == 0) {                                                         \
+      if (plane_bsize == txsize_to_bsize[tx_size]) {                          \
+        txb_ctx->txb_skip_ctx = 0;                                            \
+      } else {                                                                \
+        static const uint8_t skip_contexts[5][5] = { { 1, 2, 2, 2, 3 },       \
+                                                     { 2, 4, 4, 4, 5 },       \
+                                                     { 2, 4, 4, 4, 5 },       \
+                                                     { 2, 4, 4, 4, 5 },       \
+                                                     { 3, 5, 5, 5, 6 } };     \
+        int top = 0;                                                          \
+        int left = 0;                                                         \
+                                                                              \
+        k = 0;                                                                \
+        do {                                                                  \
+          top |= a[k];                                                        \
+        } while (++k < txb_w_unit);                                           \
+        top &= COEFF_CONTEXT_MASK;                                            \
+        top = AOMMIN(top, 4);                                                 \
+                                                                              \
+        k = 0;                                                                \
+        do {                                                                  \
+          left |= l[k];                                                       \
+        } while (++k < txb_h_unit);                                           \
+        left &= COEFF_CONTEXT_MASK;                                           \
+        left = AOMMIN(left, 4);                                               \
+                                                                              \
+        txb_ctx->txb_skip_ctx = skip_contexts[top][left];                     \
+      }                                                                       \
+    } else {                                                                  \
+      const int ctx_base = get_entropy_context(tx_size, a, l);                \
+      const int ctx_offset = (num_pels_log2_lookup[plane_bsize] >             \
+                              num_pels_log2_lookup[txsize_to_bsize[tx_size]]) \
+                                 ? 10                                         \
+                                 : 7;                                         \
+      txb_ctx->txb_skip_ctx = ctx_base + ctx_offset;                          \
+    }                                                                         \
+  }
+
+SPECIALIZE_GET_TXB_CTX(4, 4)
+SPECIALIZE_GET_TXB_CTX(8, 8)
+SPECIALIZE_GET_TXB_CTX(16, 16)
+SPECIALIZE_GET_TXB_CTX(32, 32)
+
+// Wrapper for get_txb_ctx that calls the specialized version of get_txb_ctc_*
+// so that the compiler can compile away the while loops.
+static INLINE void get_txb_ctx(const BLOCK_SIZE plane_bsize,
+                               const TX_SIZE tx_size, const int plane,
+                               const ENTROPY_CONTEXT *const a,
+                               const ENTROPY_CONTEXT *const l,
+                               TXB_CTX *const txb_ctx) {
+  switch (tx_size) {
+    case TX_4X4: get_txb_ctx_4x4(plane_bsize, plane, a, l, txb_ctx); break;
+    case TX_8X8: get_txb_ctx_8x8(plane_bsize, plane, a, l, txb_ctx); break;
+    case TX_16X16: get_txb_ctx_16x16(plane_bsize, plane, a, l, txb_ctx); break;
+    case TX_32X32: get_txb_ctx_32x32(plane_bsize, plane, a, l, txb_ctx); break;
+    default:
+      get_txb_ctx_general(plane_bsize, tx_size, plane, a, l, txb_ctx);
+      break;
+  }
+}
+#undef MAX_TX_SIZE_UNIT
 
 #endif  // AOM_AV1_COMMON_TXB_COMMON_H_

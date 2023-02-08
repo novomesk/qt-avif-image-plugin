@@ -705,8 +705,9 @@ static int construct_multi_layer_gf_structure(
       }
     } else {
       // Set layer depth threshold for reordering as per the gf length.
-      int depth_thr =
-          (actual_gf_length == 16) ? 3 : (actual_gf_length == 32) ? 4 : INT_MAX;
+      int depth_thr = (actual_gf_length == 16)   ? 3
+                      : (actual_gf_length == 32) ? 4
+                                                 : INT_MAX;
 
       set_multi_layer_params_for_fp(
           twopass, &cpi->twopass_frame, gf_group, p_rc, rc, frame_info,
@@ -824,10 +825,15 @@ void av1_gop_setup_structure(AV1_COMP *cpi) {
   const int key_frame = rc->frames_since_key == 0;
   FRAME_UPDATE_TYPE first_frame_update_type = ARF_UPDATE;
 
-  if (key_frame)
+  if (key_frame) {
     first_frame_update_type = KF_UPDATE;
-  else if (!cpi->ppi->gf_state.arf_gf_boost_lst)
+    if (cpi->oxcf.kf_max_pyr_height != -1) {
+      gf_group->max_layer_depth_allowed = AOMMIN(
+          cpi->oxcf.kf_max_pyr_height, gf_group->max_layer_depth_allowed);
+    }
+  } else if (!cpi->ppi->gf_state.arf_gf_boost_lst) {
     first_frame_update_type = GF_UPDATE;
+  }
 
   gf_group->size = construct_multi_layer_gf_structure(
       cpi, twopass, gf_group, rc, frame_info, p_rc->baseline_gf_interval,

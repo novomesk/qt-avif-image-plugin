@@ -154,21 +154,27 @@ void aom_hadamard_lp_16x16_neon(const int16_t *src_diff, ptrdiff_t src_stride,
 
 void aom_hadamard_16x16_neon(const int16_t *src_diff, ptrdiff_t src_stride,
                              tran_low_t *coeff) {
+  DECLARE_ALIGNED(32, tran_low_t, temp_coeff[16 * 16]);
   /* Rearrange 16x16 to 8x32 and remove stride.
    * Top left first. */
-  aom_hadamard_8x8_neon(src_diff + 0 + 0 * src_stride, src_stride, coeff + 0);
+  aom_hadamard_8x8_neon(src_diff + 0 + 0 * src_stride, src_stride,
+                        temp_coeff + 0);
   /* Top right. */
-  aom_hadamard_8x8_neon(src_diff + 8 + 0 * src_stride, src_stride, coeff + 64);
+  aom_hadamard_8x8_neon(src_diff + 8 + 0 * src_stride, src_stride,
+                        temp_coeff + 64);
   /* Bottom left. */
-  aom_hadamard_8x8_neon(src_diff + 0 + 8 * src_stride, src_stride, coeff + 128);
+  aom_hadamard_8x8_neon(src_diff + 0 + 8 * src_stride, src_stride,
+                        temp_coeff + 128);
   /* Bottom right. */
-  aom_hadamard_8x8_neon(src_diff + 8 + 8 * src_stride, src_stride, coeff + 192);
+  aom_hadamard_8x8_neon(src_diff + 8 + 8 * src_stride, src_stride,
+                        temp_coeff + 192);
 
+  tran_low_t *t_coeff = temp_coeff;
   for (int i = 0; i < 64; i += 8) {
-    const int16x8_t a0 = load_tran_low_to_s16q(coeff + 0);
-    const int16x8_t a1 = load_tran_low_to_s16q(coeff + 64);
-    const int16x8_t a2 = load_tran_low_to_s16q(coeff + 128);
-    const int16x8_t a3 = load_tran_low_to_s16q(coeff + 192);
+    const int16x8_t a0 = load_tran_low_to_s16q(t_coeff + 0);
+    const int16x8_t a1 = load_tran_low_to_s16q(t_coeff + 64);
+    const int16x8_t a2 = load_tran_low_to_s16q(t_coeff + 128);
+    const int16x8_t a3 = load_tran_low_to_s16q(t_coeff + 192);
 
     const int16x8_t b0 = vhaddq_s16(a0, a1);
     const int16x8_t b1 = vhsubq_s16(a0, a1);
@@ -180,11 +186,12 @@ void aom_hadamard_16x16_neon(const int16_t *src_diff, ptrdiff_t src_stride,
     const int16x8_t c2 = vsubq_s16(b0, b2);
     const int16x8_t c3 = vsubq_s16(b1, b3);
 
-    store_s16q_to_tran_low(coeff + 0, c0);
-    store_s16q_to_tran_low(coeff + 64, c1);
-    store_s16q_to_tran_low(coeff + 128, c2);
-    store_s16q_to_tran_low(coeff + 192, c3);
+    store_s16q_to_tran_low_offset_4(coeff + 0, c0);
+    store_s16q_to_tran_low_offset_4(coeff + 64, c1);
+    store_s16q_to_tran_low_offset_4(coeff + 128, c2);
+    store_s16q_to_tran_low_offset_4(coeff + 192, c3);
 
-    coeff += 8;
+    t_coeff += 8;
+    coeff += (4 + (((i >> 3) & 1) << 3));
   }
 }

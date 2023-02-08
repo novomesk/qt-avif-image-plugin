@@ -12,14 +12,14 @@
 #include <new>
 #include <tuple>
 
-#include "config/av1_rtcd.h"
+#include "config/aom_dsp_rtcd.h"
 
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 #include "test/acm_random.h"
 #include "test/util.h"
 #include "test/register_state_check.h"
 
-#include "av1/encoder/corner_match.h"
+#include "aom_dsp/flow_estimation/corner_match.h"
 
 namespace test_libaom {
 

@@ -89,58 +89,55 @@ int aom_satd_lp_neon(const int16_t *coeff, int length) {
   return horizontal_add_s32x4(accum);
 }
 
-void aom_int_pro_row_neon(int16_t hbuf[16], const uint8_t *ref,
-                          const int ref_stride, const int height) {
-  int i;
+void aom_int_pro_row_neon(int16_t *hbuf, const uint8_t *ref,
+                          const int ref_stride, const int width,
+                          const int height, int norm_factor) {
   const uint8_t *idx = ref;
-  uint16x8_t vec0 = vdupq_n_u16(0);
-  uint16x8_t vec1 = vec0;
-  uint8x16_t tmp;
+  const uint16x8_t zero = vdupq_n_u16(0);
+  const int16x8_t neg_norm_factor = vdupq_n_s16(-norm_factor);
 
-  for (i = 0; i < height; ++i) {
-    tmp = vld1q_u8(idx);
-    idx += ref_stride;
-    vec0 = vaddw_u8(vec0, vget_low_u8(tmp));
-    vec1 = vaddw_u8(vec1, vget_high_u8(tmp));
+  for (int wd = 0; wd < width; wd += 16) {
+    uint16x8_t vec0 = zero;
+    uint16x8_t vec1 = zero;
+    idx = ref + wd;
+    for (int ht = 0; ht < height; ++ht) {
+      const uint8x16_t tmp = vld1q_u8(idx);
+      idx += ref_stride;
+      vec0 = vaddw_u8(vec0, vget_low_u8(tmp));
+      vec1 = vaddw_u8(vec1, vget_high_u8(tmp));
+    }
+
+    const int16x8_t result0 =
+        vshlq_s16(vreinterpretq_s16_u16(vec0), neg_norm_factor);
+    const int16x8_t result1 =
+        vshlq_s16(vreinterpretq_s16_u16(vec1), neg_norm_factor);
+
+    vst1q_s16(hbuf + wd, result0);
+    vst1q_s16(hbuf + wd + 8, result1);
   }
-
-  if (128 == height) {
-    vec0 = vshrq_n_u16(vec0, 6);
-    vec1 = vshrq_n_u16(vec1, 6);
-  } else if (64 == height) {
-    vec0 = vshrq_n_u16(vec0, 5);
-    vec1 = vshrq_n_u16(vec1, 5);
-  } else if (32 == height) {
-    vec0 = vshrq_n_u16(vec0, 4);
-    vec1 = vshrq_n_u16(vec1, 4);
-  } else if (16 == height) {
-    vec0 = vshrq_n_u16(vec0, 3);
-    vec1 = vshrq_n_u16(vec1, 3);
-  }
-
-  vst1q_s16(hbuf, vreinterpretq_s16_u16(vec0));
-  hbuf += 8;
-  vst1q_s16(hbuf, vreinterpretq_s16_u16(vec1));
 }
 
-int16_t aom_int_pro_col_neon(const uint8_t *ref, const int width) {
-  const uint8_t *idx;
-  uint16x8_t sum = vdupq_n_u16(0);
-
-  for (idx = ref; idx < (ref + width); idx += 16) {
-    uint8x16_t vec = vld1q_u8(idx);
-    sum = vaddq_u16(sum, vpaddlq_u8(vec));
-  }
+void aom_int_pro_col_neon(int16_t *vbuf, const uint8_t *ref,
+                          const int ref_stride, const int width,
+                          const int height, int norm_factor) {
+  for (int ht = 0; ht < height; ++ht) {
+    uint16x8_t sum = vdupq_n_u16(0);
+    for (int wd = 0; wd < width; wd += 16) {
+      const uint8x16_t vec = vld1q_u8(ref + wd);
+      sum = vaddq_u16(sum, vpaddlq_u8(vec));
+    }
 
 #if defined(__aarch64__)
-  return (int16_t)vaddvq_u16(sum);
+    vbuf[ht] = ((int16_t)vaddvq_u16(sum)) >> norm_factor;
 #else
-  const uint32x4_t a = vpaddlq_u16(sum);
-  const uint64x2_t b = vpaddlq_u32(a);
-  const uint32x2_t c = vadd_u32(vreinterpret_u32_u64(vget_low_u64(b)),
-                                vreinterpret_u32_u64(vget_high_u64(b)));
-  return (int16_t)vget_lane_u32(c, 0);
+    const uint32x4_t a = vpaddlq_u16(sum);
+    const uint64x2_t b = vpaddlq_u32(a);
+    const uint32x2_t c = vadd_u32(vreinterpret_u32_u64(vget_low_u64(b)),
+                                  vreinterpret_u32_u64(vget_high_u64(b)));
+    vbuf[ht] = ((int16_t)vget_lane_u32(c, 0)) >> norm_factor;
 #endif
+    ref += ref_stride;
+  }
 }
 
 // coeff: 16 bits, dynamic range [-32640, 32640].
@@ -165,7 +162,7 @@ int aom_satd_neon(const tran_low_t *coeff, int length) {
   return horizontal_add_s32x4(accum);
 }
 
-int aom_vector_var_neon(const int16_t *ref, const int16_t *src, const int bwl) {
+int aom_vector_var_neon(const int16_t *ref, const int16_t *src, int bwl) {
   int32x4_t v_mean = vdupq_n_s32(0);
   int32x4_t v_sse = v_mean;
   int16x8_t v_ref, v_src;
@@ -187,10 +184,11 @@ int aom_vector_var_neon(const int16_t *ref, const int16_t *src, const int bwl) {
     v_sse = vmlal_s16(v_sse, v_high, v_high);
 #endif
   }
-  int mean = horizontal_add_s32x4(v_mean);
-  int sse = horizontal_add_s32x4(v_sse);
+  const int mean = horizontal_add_s32x4(v_mean);
+  const int sse = horizontal_add_s32x4(v_sse);
+  const unsigned int mean_abs = mean >= 0 ? mean : -mean;
   // (mean * mean): dynamic range 31 bits.
-  int var = sse - ((mean * mean) >> (bwl + 2));
+  const int var = sse - ((mean_abs * mean_abs) >> (bwl + 2));
   return var;
 }
 

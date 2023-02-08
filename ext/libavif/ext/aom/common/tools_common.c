@@ -556,3 +556,72 @@ void aom_img_write_nv12(const aom_image_t *img, FILE *file) {
     vbuf += (stride - w * size);
   }
 }
+
+size_t read_from_input(struct AvxInputContext *input_ctx, size_t n,
+                       unsigned char *buf) {
+  const size_t buffered_bytes =
+      input_ctx->detect.buf_read - input_ctx->detect.position;
+  size_t read_n;
+  if (buffered_bytes == 0) {
+    read_n = fread(buf, 1, n, input_ctx->file);
+  } else if (n <= buffered_bytes) {
+    memcpy(buf, input_ctx->detect.buf + input_ctx->detect.position, n);
+    input_ctx->detect.position += n;
+    read_n = n;
+  } else {
+    memcpy(buf, input_ctx->detect.buf + input_ctx->detect.position,
+           buffered_bytes);
+    input_ctx->detect.position += buffered_bytes;
+    read_n = buffered_bytes;
+    read_n +=
+        fread(buf + buffered_bytes, 1, n - buffered_bytes, input_ctx->file);
+  }
+  return read_n;
+}
+
+size_t input_to_detect_buf(struct AvxInputContext *input_ctx, size_t n) {
+  if (n + input_ctx->detect.position > DETECT_BUF_SZ) {
+    die("Failed to store in the detect buffer, maximum size exceeded.");
+  }
+  const size_t buffered_bytes =
+      input_ctx->detect.buf_read - input_ctx->detect.position;
+  size_t read_n;
+  if (buffered_bytes == 0) {
+    read_n = fread(input_ctx->detect.buf + input_ctx->detect.buf_read, 1, n,
+                   input_ctx->file);
+    input_ctx->detect.buf_read += read_n;
+  } else if (n <= buffered_bytes) {
+    // In this case, don't need to do anything as the data is already in
+    // the detect buffer
+    read_n = n;
+  } else {
+    read_n = fread(input_ctx->detect.buf + input_ctx->detect.buf_read, 1,
+                   n - buffered_bytes, input_ctx->file);
+    input_ctx->detect.buf_read += read_n;
+    read_n += buffered_bytes;
+  }
+  return read_n;
+}
+
+// Read from detect buffer to a buffer. If not enough, read from input and also
+// buffer them first.
+size_t buffer_input(struct AvxInputContext *input_ctx, size_t n,
+                    unsigned char *buf, bool buffered) {
+  if (!buffered) {
+    return read_from_input(input_ctx, n, buf);
+  }
+  const size_t buf_n = input_to_detect_buf(input_ctx, n);
+  if (buf_n < n) {
+    return buf_n;
+  }
+  return read_from_input(input_ctx, n, buf);
+}
+
+void rewind_detect(struct AvxInputContext *input_ctx) {
+  input_ctx->detect.position = 0;
+}
+
+bool input_eof(struct AvxInputContext *input_ctx) {
+  return feof(input_ctx->file) &&
+         input_ctx->detect.position == input_ctx->detect.buf_read;
+}

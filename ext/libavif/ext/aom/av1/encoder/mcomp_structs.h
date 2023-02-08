@@ -74,6 +74,8 @@ enum {
   FAST_DIAMOND = 8,
   // BIGDIA search with up to 3 stages.
   FAST_BIGDIA = 9,
+  // BIGDIA search with up to 1 stage.
+  VFAST_DIAMOND = 10,
   // Total number of search methods.
   NUM_SEARCH_METHODS,
   // Number of distinct search methods.

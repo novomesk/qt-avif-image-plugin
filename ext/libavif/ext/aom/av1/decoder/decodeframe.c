@@ -377,8 +377,8 @@ static AOM_INLINE void decode_mbmi_block(AV1Decoder *const pbi,
   if (bsize >= BLOCK_8X8 &&
       (seq_params->subsampling_x || seq_params->subsampling_y)) {
     const BLOCK_SIZE uv_subsize =
-        ss_size_lookup[bsize][seq_params->subsampling_x]
-                      [seq_params->subsampling_y];
+        av1_ss_size_lookup[bsize][seq_params->subsampling_x]
+                          [seq_params->subsampling_y];
     if (uv_subsize == BLOCK_INVALID)
       aom_internal_error(xd->error_info, AOM_CODEC_CORRUPT_FRAME,
                          "Invalid block size.");
@@ -543,13 +543,11 @@ static INLINE void extend_mc_border(const struct scale_factors *const sf,
   }
 }
 
-static void dec_calc_subpel_params(const MV *const src_mv,
-                                   InterPredParams *const inter_pred_params,
-                                   const MACROBLOCKD *const xd, int mi_x,
-                                   int mi_y, uint8_t **pre,
-                                   SubpelParams *subpel_params, int *src_stride,
-                                   PadBlock *block, MV32 *scaled_mv,
-                                   int *subpel_x_mv, int *subpel_y_mv) {
+static AOM_INLINE void dec_calc_subpel_params(
+    const MV *const src_mv, InterPredParams *const inter_pred_params,
+    const MACROBLOCKD *const xd, int mi_x, int mi_y, uint8_t **pre,
+    SubpelParams *subpel_params, int *src_stride, PadBlock *block,
+    MV32 *scaled_mv, int *subpel_x_mv, int *subpel_y_mv) {
   const struct scale_factors *sf = inter_pred_params->scale_factors;
   struct buf_2d *pre_buf = &inter_pred_params->ref_frame_buf;
   const int bw = inter_pred_params->block_width;
@@ -562,8 +560,8 @@ static void dec_calc_subpel_params(const MV *const src_mv,
     orig_pos_y += src_mv->row * (1 << (1 - ssy));
     int orig_pos_x = inter_pred_params->pix_col << SUBPEL_BITS;
     orig_pos_x += src_mv->col * (1 << (1 - ssx));
-    int pos_y = sf->scale_value_y(orig_pos_y, sf);
-    int pos_x = sf->scale_value_x(orig_pos_x, sf);
+    int pos_y = av1_scaled_y(orig_pos_y, sf);
+    int pos_x = av1_scaled_x(orig_pos_x, sf);
     pos_x += SCALE_EXTRA_OFF;
     pos_y += SCALE_EXTRA_OFF;
 
@@ -631,7 +629,7 @@ static void dec_calc_subpel_params(const MV *const src_mv,
   *src_stride = pre_buf->stride;
 }
 
-static void dec_calc_subpel_params_and_extend(
+static AOM_INLINE void dec_calc_subpel_params_and_extend(
     const MV *const src_mv, InterPredParams *const inter_pred_params,
     MACROBLOCKD *const xd, int mi_x, int mi_y, int ref, uint8_t **mc_buf,
     uint8_t **pre, SubpelParams *subpel_params, int *src_stride) {
@@ -648,14 +646,17 @@ static void dec_calc_subpel_params_and_extend(
       inter_pred_params->use_hbd_buf, mc_buf[ref], pre, src_stride);
 }
 
+#define IS_DEC 1
+#include "av1/common/reconinter_template.inc"
+#undef IS_DEC
+
 static void dec_build_inter_predictors(const AV1_COMMON *cm,
                                        DecoderCodingBlock *dcb, int plane,
                                        const MB_MODE_INFO *mi,
                                        int build_for_obmc, int bw, int bh,
                                        int mi_x, int mi_y) {
-  av1_build_inter_predictors(cm, &dcb->xd, plane, mi, build_for_obmc, bw, bh,
-                             mi_x, mi_y, dcb->mc_buf,
-                             dec_calc_subpel_params_and_extend);
+  build_inter_predictors(cm, &dcb->xd, plane, mi, build_for_obmc, bw, bh, mi_x,
+                         mi_y, dcb->mc_buf);
 }
 
 static AOM_INLINE void dec_build_inter_predictor(const AV1_COMMON *cm,
@@ -3470,12 +3471,11 @@ static AOM_INLINE void decode_mt_init(AV1Decoder *pbi) {
     CHECK_MEM_ERROR(cm, pbi->tile_workers,
                     aom_malloc(num_threads * sizeof(*pbi->tile_workers)));
     CHECK_MEM_ERROR(cm, pbi->thread_data,
-                    aom_malloc(num_threads * sizeof(*pbi->thread_data)));
+                    aom_calloc(num_threads, sizeof(*pbi->thread_data)));
 
     for (worker_idx = 0; worker_idx < num_threads; ++worker_idx) {
       AVxWorker *const worker = &pbi->tile_workers[worker_idx];
       DecWorkerData *const thread_data = pbi->thread_data + worker_idx;
-      ++pbi->num_workers;
 
       winterface->init(worker);
       worker->thread_name = "aom tile worker";
@@ -3483,6 +3483,7 @@ static AOM_INLINE void decode_mt_init(AV1Decoder *pbi) {
         aom_internal_error(&pbi->error, AOM_CODEC_ERROR,
                            "Tile decoder thread creation failed");
       }
+      ++pbi->num_workers;
 
       if (worker_idx != 0) {
         // Allocate thread data.
@@ -5280,6 +5281,9 @@ void av1_decode_tg_tiles_and_wrapup(AV1Decoder *pbi, const uint8_t *data,
         cm->rst_info[0].frame_restoration_type != RESTORE_NONE ||
         cm->rst_info[1].frame_restoration_type != RESTORE_NONE ||
         cm->rst_info[2].frame_restoration_type != RESTORE_NONE;
+    // Frame border extension is not required in the decoder
+    // as it happens in extend_mc_border().
+    int do_extend_border_mt = 0;
     if (!optimized_loop_restoration) {
       if (do_loop_restoration)
         av1_loop_restoration_save_boundary_lines(&pbi->common.cur_frame->buf,
@@ -5289,7 +5293,8 @@ void av1_decode_tg_tiles_and_wrapup(AV1Decoder *pbi, const uint8_t *data,
         if (pbi->num_workers > 1) {
           av1_cdef_frame_mt(cm, &pbi->dcb.xd, pbi->cdef_worker,
                             pbi->tile_workers, &pbi->cdef_sync,
-                            pbi->num_workers, av1_cdef_init_fb_row_mt);
+                            pbi->num_workers, av1_cdef_init_fb_row_mt,
+                            do_extend_border_mt);
         } else {
           av1_cdef_frame(&pbi->common.cur_frame->buf, cm, &pbi->dcb.xd,
                          av1_cdef_init_fb_row);
@@ -5305,7 +5310,7 @@ void av1_decode_tg_tiles_and_wrapup(AV1Decoder *pbi, const uint8_t *data,
           av1_loop_restoration_filter_frame_mt(
               (YV12_BUFFER_CONFIG *)xd->cur_buf, cm, optimized_loop_restoration,
               pbi->tile_workers, pbi->num_workers, &pbi->lr_row_sync,
-              &pbi->lr_ctxt);
+              &pbi->lr_ctxt, do_extend_border_mt);
         } else {
           av1_loop_restoration_filter_frame((YV12_BUFFER_CONFIG *)xd->cur_buf,
                                             cm, optimized_loop_restoration,
@@ -5320,7 +5325,7 @@ void av1_decode_tg_tiles_and_wrapup(AV1Decoder *pbi, const uint8_t *data,
           av1_loop_restoration_filter_frame_mt(
               (YV12_BUFFER_CONFIG *)xd->cur_buf, cm, optimized_loop_restoration,
               pbi->tile_workers, pbi->num_workers, &pbi->lr_row_sync,
-              &pbi->lr_ctxt);
+              &pbi->lr_ctxt, do_extend_border_mt);
         } else {
           av1_loop_restoration_filter_frame((YV12_BUFFER_CONFIG *)xd->cur_buf,
                                             cm, optimized_loop_restoration,

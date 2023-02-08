@@ -12,6 +12,13 @@
 #ifndef AOM_AOM_DSP_X86_CONVOLVE_AVX2_H_
 #define AOM_AOM_DSP_X86_CONVOLVE_AVX2_H_
 
+#include <immintrin.h>
+
+#include "aom_ports/mem.h"
+
+#include "av1/common/convolve.h"
+#include "av1/common/filter.h"
+
 // filters for 16
 DECLARE_ALIGNED(32, static const uint8_t, filt_global_avx2[]) = {
   0,  1,  1,  2,  2, 3,  3,  4,  4,  5,  5,  6,  6,  7,  7,  8,  0,  1,  1,

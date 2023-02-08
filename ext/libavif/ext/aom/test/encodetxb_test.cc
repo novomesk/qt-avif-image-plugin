@@ -229,7 +229,7 @@ void EncodeTxbInitLevelTest::RunTest(av1_txb_init_levels_func test_func,
 
   ACMRandom rnd(ACMRandom::DeterministicSeed());
   for (int i = 0; i < width * height; i++) {
-    coeff[i] = rnd.Rand15Signed() + rnd.Rand15Signed();
+    coeff[i] = rnd.Rand16Signed();
   }
   for (int i = 0; i < TX_PAD_2D; i++) {
     levels_buf[0][i] = rnd.Rand8();

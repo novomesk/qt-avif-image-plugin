@@ -28,6 +28,8 @@ extern "C" {
   100  // Use increased thresholds for midres for speed 9 when qindex is above
        // this threshold
 
+#define CALC_CHROMA_THRESH_FOR_ZEROMV_SKIP(thresh_exit_part) \
+  ((3 * (thresh_exit_part)) >> 2)
 /*!\brief Set the thresholds for variance based partition.
  *
  * Set the variance split thresholds for following the block sizes:
@@ -44,7 +46,7 @@ extern "C" {
  * \param[in]      q                  q index
  * \param[in]      content_lowsumdiff Low sumdiff flag for superblock
  *
- * \return Returns the set of thresholds in \c cpi->vbp_info.thresholds.
+ * \remark Returns the set of thresholds in \c cpi->vbp_info.thresholds.
  */
 void av1_set_variance_partition_thresholds(AV1_COMP *cpi, int q,
                                            int content_lowsumdiff);

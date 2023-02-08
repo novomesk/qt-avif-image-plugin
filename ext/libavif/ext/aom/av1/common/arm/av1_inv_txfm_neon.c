@@ -250,8 +250,7 @@ static INLINE void btf_16_half_neon(int16x8_t *const x, const int16x4_t c) {
 
 static INLINE int16x4_t set_s16x4_neon(const int16_t c0, const int16_t c1,
                                        const int16_t c2, const int16_t c3) {
-  int16x4_t val = vdup_n_s16((int16_t)0);
-  val = vset_lane_s16(c0, val, 0);
+  int16x4_t val = vdup_n_s16(c0);
   val = vset_lane_s16(c1, val, 1);
   val = vset_lane_s16(c2, val, 2);
   val = vset_lane_s16(c3, val, 3);

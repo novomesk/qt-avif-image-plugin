@@ -32,6 +32,7 @@
 #include "av1/encoder/cost.h"
 #include "av1/encoder/encodemv.h"
 #include "av1/encoder/encoder.h"
+#include "av1/encoder/nonrd_opt.h"
 #include "av1/encoder/ratectrl.h"
 #include "av1/encoder/rd.h"
 
@@ -407,22 +408,18 @@ int av1_compute_rd_mult_based_on_qindex(aom_bit_depth_t bit_depth,
   return rdmult > 0 ? (int)AOMMIN(rdmult, INT_MAX) : 1;
 }
 
-int av1_compute_rd_mult(const AV1_COMP *cpi, int qindex) {
-  const aom_bit_depth_t bit_depth = cpi->common.seq_params->bit_depth;
-  const FRAME_UPDATE_TYPE update_type =
-      cpi->ppi->gf_group.update_type[cpi->gf_frame_index];
+int av1_compute_rd_mult(const int qindex, const aom_bit_depth_t bit_depth,
+                        const FRAME_UPDATE_TYPE update_type,
+                        const int layer_depth, const int boost_index,
+                        const FRAME_TYPE frame_type,
+                        const int use_fixed_qp_offsets,
+                        const int is_stat_consumption_stage) {
   int64_t rdmult =
       av1_compute_rd_mult_based_on_qindex(bit_depth, update_type, qindex);
-  if (is_stat_consumption_stage(cpi) && !cpi->oxcf.q_cfg.use_fixed_qp_offsets &&
-      (cpi->common.current_frame.frame_type != KEY_FRAME)) {
-    const GF_GROUP *const gf_group = &cpi->ppi->gf_group;
-    const int boost_index = AOMMIN(15, (cpi->ppi->p_rc.gfu_boost / 100));
-    const int layer_depth =
-        AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], 6);
-
+  if (is_stat_consumption_stage && !use_fixed_qp_offsets &&
+      (frame_type != KEY_FRAME)) {
     // Layer depth adjustment
     rdmult = (rdmult * rd_layer_depth_factor[layer_depth]) >> 7;
-
     // ARF boost adjustment
     rdmult += ((rdmult * rd_boost_factor[boost_index]) >> 7);
   }
@@ -473,10 +470,20 @@ int av1_adjust_q_from_delta_q_res(int delta_q_res, int prev_qindex,
 int av1_get_adaptive_rdmult(const AV1_COMP *cpi, double beta) {
   assert(beta > 0.0);
   const AV1_COMMON *cm = &cpi->common;
-  int q = av1_dc_quant_QTX(cm->quant_params.base_qindex, 0,
-                           cm->seq_params->bit_depth);
 
-  return (int)(av1_compute_rd_mult(cpi, q) / beta);
+  const GF_GROUP *const gf_group = &cpi->ppi->gf_group;
+  const int boost_index = AOMMIN(15, (cpi->ppi->p_rc.gfu_boost / 100));
+  const int layer_depth = AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], 6);
+  const FRAME_TYPE frame_type = cm->current_frame.frame_type;
+
+  const int qindex_rdmult = cm->quant_params.base_qindex;
+  return (int)(av1_compute_rd_mult(
+                   qindex_rdmult, cm->seq_params->bit_depth,
+                   cpi->ppi->gf_group.update_type[cpi->gf_frame_index],
+                   layer_depth, boost_index, frame_type,
+                   cpi->oxcf.q_cfg.use_fixed_qp_offsets,
+                   is_stat_consumption_stage(cpi)) /
+               beta);
 }
 
 static int compute_rd_thresh_factor(int qindex, aom_bit_depth_t bit_depth) {
@@ -507,8 +514,26 @@ void av1_set_sad_per_bit(const AV1_COMP *cpi, int *sadperbit, int qindex) {
   }
 }
 
-static void set_block_thresholds(const AV1_COMMON *cm, RD_OPT *rd) {
+static void set_block_thresholds(const AV1_COMMON *cm, RD_OPT *rd,
+                                 int use_nonrd_pick_mode) {
   int i, bsize, segment_id;
+  THR_MODES mode_indices[RTC_REFS * RTC_MODES] = { 0 };
+  int num_modes_count = use_nonrd_pick_mode ? 0 : MAX_MODES;
+
+  if (use_nonrd_pick_mode) {
+    for (int r_idx = 0; r_idx < RTC_REFS; r_idx++) {
+      const MV_REFERENCE_FRAME ref = real_time_ref_combos[r_idx][0];
+      if (ref != INTRA_FRAME) {
+        for (i = 0; i < RTC_INTER_MODES; i++)
+          mode_indices[num_modes_count++] =
+              mode_idx[ref][mode_offset(inter_mode_list[i])];
+      } else {
+        for (i = 0; i < RTC_INTRA_MODES; i++)
+          mode_indices[num_modes_count++] =
+              mode_idx[ref][mode_offset(intra_mode_list[i])];
+      }
+    }
+  }
 
   for (segment_id = 0; segment_id < MAX_SEGMENTS; ++segment_id) {
     const int qindex = clamp(
@@ -523,10 +548,13 @@ static void set_block_thresholds(const AV1_COMMON *cm, RD_OPT *rd) {
       const int t = q * rd_thresh_block_size_factor[bsize];
       const int thresh_max = INT_MAX / t;
 
-      for (i = 0; i < MAX_MODES; ++i)
-        rd->threshes[segment_id][bsize][i] = rd->thresh_mult[i] < thresh_max
-                                                 ? rd->thresh_mult[i] * t / 4
-                                                 : INT_MAX;
+      for (i = 0; i < num_modes_count; ++i) {
+        const int mode_index = use_nonrd_pick_mode ? mode_indices[i] : i;
+        rd->threshes[segment_id][bsize][mode_index] =
+            rd->thresh_mult[mode_index] < thresh_max
+                ? rd->thresh_mult[mode_index] * t / 4
+                : INT_MAX;
+      }
     }
   }
 }
@@ -734,8 +762,18 @@ void av1_initialize_rd_consts(AV1_COMP *cpi) {
   int use_nonrd_pick_mode = cpi->sf.rt_sf.use_nonrd_pick_mode;
   int frames_since_key = cpi->rc.frames_since_key;
 
+  const GF_GROUP *const gf_group = &cpi->ppi->gf_group;
+  const int boost_index = AOMMIN(15, (cpi->ppi->p_rc.gfu_boost / 100));
+  const int layer_depth = AOMMIN(gf_group->layer_depth[cpi->gf_frame_index], 6);
+  const FRAME_TYPE frame_type = cm->current_frame.frame_type;
+
+  const int qindex_rdmult =
+      cm->quant_params.base_qindex + cm->quant_params.y_dc_delta_q;
   rd->RDMULT = av1_compute_rd_mult(
-      cpi, cm->quant_params.base_qindex + cm->quant_params.y_dc_delta_q);
+      qindex_rdmult, cm->seq_params->bit_depth,
+      cpi->ppi->gf_group.update_type[cpi->gf_frame_index], layer_depth,
+      boost_index, frame_type, cpi->oxcf.q_cfg.use_fixed_qp_offsets,
+      is_stat_consumption_stage(cpi));
 #if CONFIG_RD_COMMAND
   if (cpi->oxcf.pass == 2) {
     const RD_COMMAND *rd_command = &cpi->rd_command;
@@ -748,7 +786,7 @@ void av1_initialize_rd_consts(AV1_COMP *cpi) {
 
   av1_set_error_per_bit(&x->errorperbit, rd->RDMULT);
 
-  set_block_thresholds(cm, rd);
+  set_block_thresholds(cm, rd, cpi->sf.rt_sf.use_nonrd_pick_mode);
 
   populate_unified_cost_update_freq(cpi->oxcf.cost_upd_freq, sf);
   const INTER_MODE_SPEED_FEATURES *const inter_sf = &cpi->sf.inter_sf;

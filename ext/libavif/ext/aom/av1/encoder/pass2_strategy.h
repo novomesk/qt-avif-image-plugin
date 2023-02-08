@@ -21,7 +21,6 @@ struct EncodeFrameParams;
 
 #include "av1/encoder/encoder.h"
 
-/*!\endcond */
 /*!
  * \brief accumulated stats and features in a gf group
  */
@@ -60,7 +59,7 @@ typedef struct {
   double frame_sr_coded_error;
   /*!\endcond */
 } GF_FRAME_STATS;
-/*!cond */
+/*!\cond */
 
 void av1_init_second_pass(struct AV1_COMP *cpi);
 
@@ -83,7 +82,7 @@ void av1_init_single_pass_lap(AV1_COMP *cpi);
  * \param[in]    frame_params  Per frame encoding parameters
  * \param[in]    frame_flags   Frame type and coding flags
  *
- * \return No return but analyses first pass stats and assigns a target
+ * \remark No return but analyses first pass stats and assigns a target
  *         number of bits to the current frame and a target Q range.
  */
 void av1_get_second_pass_params(struct AV1_COMP *cpi,
@@ -99,7 +98,7 @@ void av1_get_second_pass_params(struct AV1_COMP *cpi,
  *
  * \param[in]    cpi       Top - level encoder instance structure
  *
- * \return No return value but this function updates various rate control
+ * \remark No return value but this function updates various rate control
  *         related data structures that for example track overshoot and
  *         undershoot.
  */
@@ -121,7 +120,7 @@ void av1_twopass_postencode_update(struct AV1_COMP *cpi);
  *                            uni-directional group.
  * \param[in]   gf_group_bits Bits available to be allocated.
  *
- * \return No return but updates the rate control and group data structures
+ * \remark No return but updates the rate control and group data structures
  *         to reflect the allocation of bits.
  */
 void av1_gop_bit_allocation(const AV1_COMP *cpi, RATE_CONTROL *const rc,
@@ -148,6 +147,13 @@ void av1_accumulate_next_frame_stats(const FIRSTPASS_STATS *stats,
 void av1_identify_regions(const FIRSTPASS_STATS *const stats_start,
                           int total_frames, int offset, REGIONS *regions,
                           int *total_regions);
+
+void av1_mark_flashes(FIRSTPASS_STATS *first_stats,
+                      FIRSTPASS_STATS *last_stats);
+void av1_estimate_noise(FIRSTPASS_STATS *first_stats,
+                        FIRSTPASS_STATS *last_stats);
+void av1_estimate_coeff(FIRSTPASS_STATS *first_stats,
+                        FIRSTPASS_STATS *last_stats);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -40,6 +40,10 @@ if(FORCE_HIGHBITDEPTH_DECODING AND NOT CONFIG_AV1_HIGHBITDEPTH)
                          "FORCE_HIGHBITDEPTH_DECODING")
 endif()
 
+if(CONFIG_THREE_PASS AND NOT CONFIG_AV1_DECODER)
+  change_config_and_warn(CONFIG_THREE_PASS 0 "CONFIG_AV1_DECODER=0")
+endif()
+
 # Generate the user config settings.
 list(APPEND aom_build_vars ${AOM_CONFIG_VARS} ${AOM_OPTION_VARS})
 foreach(cache_var ${aom_build_vars})
@@ -67,7 +71,7 @@ if(NOT AOM_TARGET_CPU)
     endif()
   elseif(cpu_lowercase STREQUAL "i386" OR cpu_lowercase STREQUAL "x86")
     set(AOM_TARGET_CPU "x86")
-  elseif(cpu_lowercase MATCHES "^arm" OR cpu_lowercase MATCHES "^mips")
+  elseif(cpu_lowercase MATCHES "^arm")
     set(AOM_TARGET_CPU "${cpu_lowercase}")
   elseif(cpu_lowercase MATCHES "aarch64")
     set(AOM_TARGET_CPU "arm64")
@@ -300,7 +304,17 @@ else()
   add_compiler_flag_if_supported("-Wall")
   add_compiler_flag_if_supported("-Wdisabled-optimization")
   add_compiler_flag_if_supported("-Wextra")
-  add_compiler_flag_if_supported("-Wextra-semi")
+  # Prior to version 3.19.0 cmake would fail to parse the warning emitted by gcc
+  # with this flag. Note the order of this check and -Wextra-semi-stmt is
+  # important due to is_flag_present() matching substrings with string(FIND
+  # ...).
+  if(CMAKE_VERSION VERSION_LESS "3.19"
+     AND CMAKE_C_COMPILER_ID STREQUAL "GNU"
+     AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 10)
+    add_cxx_flag_if_supported("-Wextra-semi")
+  else()
+    add_compiler_flag_if_supported("-Wextra-semi")
+  endif()
   add_compiler_flag_if_supported("-Wextra-semi-stmt")
   add_compiler_flag_if_supported("-Wfloat-conversion")
   add_compiler_flag_if_supported("-Wformat=2")
@@ -314,6 +328,7 @@ else()
   add_compiler_flag_if_supported("-Wuninitialized")
   add_compiler_flag_if_supported("-Wunused")
   add_compiler_flag_if_supported("-Wvla")
+  add_cxx_flag_if_supported("-Wc++14-extensions")
   add_cxx_flag_if_supported("-Wc++17-extensions")
   add_cxx_flag_if_supported("-Wc++20-extensions")
 

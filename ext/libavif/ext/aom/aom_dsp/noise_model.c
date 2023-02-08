@@ -610,8 +610,9 @@ int aom_flat_block_finder_run(const aom_flat_block_finder_t *block_finder,
           Gxy += gx * gy;
           Gyy += gy * gy;
 
-          mean += block[yi * block_size + xi];
-          var += block[yi * block_size + xi] * block[yi * block_size + xi];
+          const double value = block[yi * block_size + xi];
+          mean += value;
+          var += value * value;
         }
       }
       mean /= (block_size - 2) * (block_size - 2);

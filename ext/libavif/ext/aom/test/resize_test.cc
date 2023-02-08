@@ -868,4 +868,114 @@ AV1_INSTANTIATE_TEST_SUITE(ResizeRealtimeTest,
 AV1_INSTANTIATE_TEST_SUITE(ResizeCspTest,
                            ::testing::Values(::libaom_test::kRealTime));
 
+// A test that reproduces crbug.com/1393384. In realtime usage mode, encode
+// frames of sizes 202x202, 1x202, and 202x202. ASan should report no memory
+// errors.
+TEST(ResizeSimpleTest, TemporarySmallerFrameSize) {
+  constexpr int kWidth = 202;
+  constexpr int kHeight = 202;
+  // Dummy buffer of zero samples.
+  constexpr size_t kBufferSize =
+      kWidth * kHeight + 2 * (kWidth + 1) / 2 * (kHeight + 1) / 2;
+  std::vector<unsigned char> buffer(kBufferSize);
+
+  aom_image_t img;
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I420, kWidth, kHeight, 1,
+                               buffer.data()));
+  aom_image_t img2;
+  EXPECT_EQ(&img2, aom_img_wrap(&img2, AOM_IMG_FMT_I420, 1, kHeight, 1,
+                                buffer.data()));
+
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME));
+  cfg.g_w = kWidth;
+  cfg.g_h = kHeight;
+  aom_codec_ctx_t enc;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_init(&enc, iface, &cfg, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_control(&enc, AOME_SET_CPUUSED, 5));
+
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
+
+  cfg.g_w = 1;
+  cfg.g_h = kHeight;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img2, 1, 1, 0));
+
+  cfg.g_w = kWidth;
+  cfg.g_h = kHeight;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 2, 1, 0));
+
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, nullptr, 0, 0, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&enc));
+}
+
+// A test that reproduces crbug.com/1410766. In realtime usage mode
+// for SVC with temporal layers, encode frames of sizes 600x600,
+// 600x600, and 100x480. ASan should report no memory errors.
+TEST(ResizeSimpleTest, SmallerFrameSizeSVC) {
+  constexpr int kWidth = 600;
+  constexpr int kHeight = 600;
+  // Dummy buffer of zero samples.
+  constexpr size_t kBufferSize =
+      kWidth * kHeight + 2 * (kWidth + 1) / 2 * (kHeight + 1) / 2;
+  std::vector<unsigned char> buffer(kBufferSize);
+
+  aom_image_t img;
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I420, kWidth, kHeight, 1,
+                               buffer.data()));
+  aom_image_t img2;
+  EXPECT_EQ(&img2,
+            aom_img_wrap(&img2, AOM_IMG_FMT_I420, 100, 480, 1, buffer.data()));
+
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME));
+  cfg.g_w = kWidth;
+  cfg.g_h = kHeight;
+  aom_codec_ctx_t enc;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_init(&enc, iface, &cfg, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_control(&enc, AOME_SET_CPUUSED, 5));
+
+  aom_svc_params_t svc_params = {};
+  aom_svc_layer_id_t layer_id;
+  svc_params.number_spatial_layers = 1;
+  svc_params.framerate_factor[0] = 2;
+  svc_params.framerate_factor[1] = 1;
+  svc_params.number_temporal_layers = 2;
+  // Bitrate allocation L0: 60% L1: 40%
+  svc_params.layer_target_bitrate[0] = 60 * cfg.rc_target_bitrate / 100;
+  svc_params.layer_target_bitrate[1] = cfg.rc_target_bitrate;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AV1E_SET_SVC_PARAMS, &svc_params));
+
+  layer_id.spatial_layer_id = 0;
+  layer_id.temporal_layer_id = 0;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AV1E_SET_SVC_LAYER_ID, &layer_id));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
+
+  cfg.g_w = kWidth;
+  cfg.g_h = kHeight;
+  layer_id.temporal_layer_id = 1;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AV1E_SET_SVC_LAYER_ID, &layer_id));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 1, 1, 0));
+
+  cfg.g_w = 100;
+  cfg.g_h = 480;
+  layer_id.temporal_layer_id = 0;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AV1E_SET_SVC_LAYER_ID, &layer_id));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img2, 2, 1, 0));
+
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, nullptr, 0, 0, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&enc));
+}
+
 }  // namespace

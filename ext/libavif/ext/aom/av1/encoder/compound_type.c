@@ -465,7 +465,8 @@ static INLINE void compute_best_interintra_mode(
     INTERINTRA_MODE *best_interintra_mode, int64_t *best_interintra_rd,
     INTERINTRA_MODE interintra_mode, BLOCK_SIZE bsize) {
   const AV1_COMMON *const cm = &cpi->common;
-  int rate, skip_txfm_sb;
+  int rate;
+  uint8_t skip_txfm_sb;
   int64_t dist, skip_sse_sb;
   const int bw = block_size_wide[bsize];
   mbmi->interintra_mode = interintra_mode;
@@ -688,7 +689,8 @@ static int handle_wedge_inter_intra_mode(
   const int_mv mv0 = mbmi->mv[0];
   // Refine motion vector for NEWMV case.
   if (have_newmv_in_inter_mode(mbmi->mode)) {
-    int rate_sum, skip_txfm_sb;
+    int rate_sum;
+    uint8_t skip_txfm_sb;
     int64_t dist_sum, skip_sse_sb;
     // get negative of mask
     const uint8_t *mask =
@@ -1048,7 +1050,8 @@ static int64_t masked_compound_type_rd(
   const COMPOUND_TYPE compound_type = mbmi->interinter_comp.type;
   // This function will be called only for COMPOUND_WEDGE and COMPOUND_DIFFWTD
   assert(compound_type == COMPOUND_WEDGE || compound_type == COMPOUND_DIFFWTD);
-  int rate_sum, tmp_skip_txfm_sb;
+  int rate_sum;
+  uint8_t tmp_skip_txfm_sb;
   int64_t dist_sum, tmp_skip_sse_sb;
   pick_interinter_mask_type pick_interinter_mask[2] = { pick_interinter_wedge,
                                                         pick_interinter_seg };
@@ -1300,7 +1303,8 @@ int av1_compound_type_rd(const AV1_COMP *const cpi, MACROBLOCK *x,
     // Case COMPOUND_AVERAGE and COMPOUND_DISTWTD
     if (cur_type < COMPOUND_WEDGE) {
       if (cpi->sf.inter_sf.enable_fast_compound_mode_search == 2) {
-        int rate_sum, tmp_skip_txfm_sb;
+        int rate_sum;
+        uint8_t tmp_skip_txfm_sb;
         int64_t dist_sum, tmp_skip_sse_sb;
 
         // Reuse data if matching record is found

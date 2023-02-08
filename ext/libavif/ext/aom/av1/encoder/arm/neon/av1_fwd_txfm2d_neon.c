@@ -274,23 +274,32 @@ static INLINE void store_rect_16bit_to_32bit(const int16x8_t a,
   vst1q_s32((b + 4), b_hi);
 }
 
-static INLINE void load_buffer_16bit_to_16bit_w4(const int16_t *const in,
+static INLINE void load_buffer_16bit_to_16bit_w4(const int16_t *in,
                                                  const int stride,
                                                  int16x8_t *const out,
                                                  const int out_size) {
-  for (int i = 0; i < out_size; ++i)
-    out[i] = vreinterpretq_s16_u64(vld1q_lane_u64(
-        (uint64_t *)(in + i * stride), vreinterpretq_u64_s16(out[i]), 0));
+  for (int i = 0; i < out_size; ++i) {
+    // vld1q_dup_u64 is used rather than vld1q_lane_u64(lane=0) to avoid
+    // -Wmaybe-uninitialized warnings with some versions of gcc. This assumes
+    // the upper lane is unused or further modified after this call. The
+    // latency should be similar between the two.
+    out[i] = vreinterpretq_s16_u64(vld1q_dup_u64((uint64_t *)in));
+    in += stride;
+  }
 }
 
-static INLINE void load_buffer_16bit_to_16bit_w4_flip(const int16_t *const in,
+static INLINE void load_buffer_16bit_to_16bit_w4_flip(const int16_t *in,
                                                       const int stride,
                                                       int16x8_t *const out,
                                                       const int out_size) {
-  for (int i = 0; i < out_size; ++i)
-    out[out_size - i - 1] = vreinterpretq_s16_u64(
-        vld1q_lane_u64((uint64_t *)(in + i * stride),
-                       vreinterpretq_u64_s16(out[out_size - i - 1]), 0));
+  for (int i = out_size - 1; i >= 0; --i) {
+    // vld1q_dup_u64 is used rather than vld1q_lane_u64(lane=0) to avoid
+    // -Wmaybe-uninitialized warnings with some versions of gcc. This assumes
+    // the upper lane is unused or further modified after this call. The
+    // latency should be similar between the two.
+    out[i] = vreinterpretq_s16_u64(vld1q_dup_u64((uint64_t *)in));
+    in += stride;
+  }
 }
 
 static INLINE void load_buffer_16bit_to_16bit(const int16_t *in, int stride,
@@ -2298,10 +2307,9 @@ void av1_lowbd_fwd_txfm2d_4x4_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   if (ud_flip) {
     load_buffer_16bit_to_16bit_w4_flip(input, stride, buf0, height);
   } else {
@@ -2342,10 +2350,9 @@ void av1_lowbd_fwd_txfm2d_4x8_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   if (ud_flip) {
     load_buffer_16bit_to_16bit_w4_flip(input, stride, buf0, height);
   } else {
@@ -2384,10 +2391,9 @@ void av1_lowbd_fwd_txfm2d_4x16_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   if (ud_flip) {
     load_buffer_16bit_to_16bit_w4_flip(input, stride, buf0, height);
   } else {
@@ -2430,10 +2436,9 @@ void av1_lowbd_fwd_txfm2d_8x4_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   if (ud_flip)
     load_buffer_16bit_to_16bit_flip(input, stride, buf0, height);
   else
@@ -2471,10 +2476,9 @@ void av1_lowbd_fwd_txfm2d_8x8_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   if (ud_flip)
     load_buffer_16bit_to_16bit_flip(input, stride, buf0, height);
   else
@@ -2512,10 +2516,9 @@ void av1_lowbd_fwd_txfm2d_8x16_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   if (ud_flip) {
     load_buffer_16bit_to_16bit_flip(input, stride, buf0, height);
   } else {
@@ -2558,10 +2561,9 @@ void av1_lowbd_fwd_txfm2d_8x32_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   if (ud_flip) {
     load_buffer_16bit_to_16bit_flip(input, stride, buf0, height);
   } else {
@@ -2607,10 +2609,9 @@ void av1_lowbd_fwd_txfm2d_16x4_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   for (int i = 0; i < 2; i++) {
     if (ud_flip) {
       load_buffer_16bit_to_16bit_flip(input + 8 * i, stride, buf0, height);
@@ -2654,10 +2655,9 @@ void av1_lowbd_fwd_txfm2d_16x8_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
   for (int i = 0; i < 2; i++) {
     if (ud_flip) {
       load_buffer_16bit_to_16bit_flip(input + 8 * i, stride, buf0, height);
@@ -2700,10 +2700,9 @@ void av1_lowbd_fwd_txfm2d_16x16_neon(const int16_t *input, int32_t *output,
   int ud_flip, lr_flip;
 
   get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-  const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-  const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-  const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-  const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+  const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+  const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+  const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
 
   for (int i = 0; i < 2; i++) {
     if (ud_flip) {
@@ -2753,10 +2752,9 @@ void av1_lowbd_fwd_txfm2d_16x32_neon(const int16_t *input, int32_t *output,
   if (col_txfm != NULL && row_txfm != NULL) {
     int ud_flip, lr_flip;
     get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-    const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-    const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-    const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-    const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+    const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+    const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+    const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
 
     for (int i = 0; i < 2; i++) {
       if (ud_flip) {
@@ -2812,10 +2810,9 @@ void av1_lowbd_fwd_txfm2d_32x8_neon(const int16_t *input, int32_t *output,
   if (col_txfm != NULL && row_txfm != NULL) {
     int ud_flip, lr_flip;
     get_flip_cfg(tx_type, &ud_flip, &lr_flip);
-    const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-    const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-    const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-    const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+    const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+    const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+    const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
 
     for (int i = 0; i < 4; i++) {
       if (ud_flip) {
@@ -2872,10 +2869,9 @@ void av1_lowbd_fwd_txfm2d_32x16_neon(const int16_t *input, int32_t *output,
   const transform_1d_lbd_neon row_txfm = row_txfm8x32_arr[tx_type];
 
   if (col_txfm != NULL && row_txfm != NULL) {
-    const int16x4_t v_shifts = vget_low_s16(vmovl_s8(vld1_s8(&shift[0])));
-    const int16x8_t v_shift0 = vdupq_lane_s16(v_shifts, 0);
-    const int16x8_t v_shift1 = vdupq_lane_s16(v_shifts, 1);
-    const int16x8_t v_shift2 = vdupq_lane_s16(v_shifts, 2);
+    const int16x8_t v_shift0 = vdupq_n_s16(shift[0]);
+    const int16x8_t v_shift1 = vdupq_n_s16(shift[1]);
+    const int16x8_t v_shift2 = vdupq_n_s16(shift[2]);
     int ud_flip, lr_flip;
     get_flip_cfg(tx_type, &ud_flip, &lr_flip);
 

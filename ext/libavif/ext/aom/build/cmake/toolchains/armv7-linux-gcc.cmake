@@ -25,9 +25,15 @@ if(NOT ${CROSS} MATCHES hf-$)
   set(AOM_EXTRA_TOOLCHAIN_FLAGS "-mfloat-abi=softfp")
 endif()
 
-set(CMAKE_C_COMPILER ${CROSS}gcc)
-set(CMAKE_CXX_COMPILER ${CROSS}g++)
-set(AS_EXECUTABLE ${CROSS}as)
+if(NOT CMAKE_C_COMPILER)
+  set(CMAKE_C_COMPILER ${CROSS}gcc)
+endif()
+if(NOT CMAKE_CXX_COMPILER)
+  set(CMAKE_CXX_COMPILER ${CROSS}g++)
+endif()
+if(NOT AS_EXECUTABLE)
+  set(AS_EXECUTABLE ${CROSS}as)
+endif()
 set(CMAKE_C_FLAGS_INIT "-march=armv7-a -mfpu=vfpv3 \
                           ${AOM_EXTRA_TOOLCHAIN_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "-march=armv7-a -mfpu=vfpv3 \

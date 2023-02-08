@@ -137,13 +137,14 @@ typedef struct {
   // sdf in vfp (e.g. downsampled sad and not sad) to allow speed up.
   aom_sad_fn_t sdf;
   aom_sad_multi_d_fn_t sdx4df;
+  aom_sad_multi_d_fn_t sdx3df;
 } FULLPEL_MOTION_SEARCH_PARAMS;
 
 void av1_init_obmc_buffer(OBMCBuffer *obmc_buffer);
 
 void av1_make_default_fullpel_ms_params(
     FULLPEL_MOTION_SEARCH_PARAMS *ms_params, const struct AV1_COMP *cpi,
-    const MACROBLOCK *x, BLOCK_SIZE bsize, const MV *ref_mv,
+    MACROBLOCK *x, BLOCK_SIZE bsize, const MV *ref_mv,
     const search_site_config search_sites[NUM_DISTINCT_SEARCH_METHODS],
     int fine_search_interval);
 
@@ -196,8 +197,20 @@ static const SEARCH_METHODS search_method_lookup[NUM_SEARCH_METHODS] = {
   SQUARE,           // SQUARE
   HEX,              // FAST_HEX
   BIGDIA,           // FAST_DIAMOND
-  BIGDIA            // FAST_BIGDIA
+  BIGDIA,           // FAST_BIGDIA
+  BIGDIA            // VFAST_DIAMOND
 };
+
+// Reinitialize the search site config.
+static AOM_INLINE void av1_refresh_search_site_config(
+    search_site_config *ss_cfg_buf, SEARCH_METHODS search_method,
+    const int ref_stride) {
+  const int level =
+      search_method == NSTEP_8PT || search_method == CLAMPED_DIAMOND;
+  search_method = search_method_lookup[search_method];
+  av1_init_motion_compensation[search_method](&ss_cfg_buf[search_method],
+                                              ref_stride, level);
+}
 
 // Mv beyond the range do not produce new/different prediction block.
 static INLINE void av1_set_mv_search_method(
@@ -362,6 +375,15 @@ static INLINE int av1_is_subpelmv_in_range(const SubpelMvLimits *mv_limits,
                                            MV mv) {
   return (mv.col >= mv_limits->col_min) && (mv.col <= mv_limits->col_max) &&
          (mv.row >= mv_limits->row_min) && (mv.row <= mv_limits->row_max);
+}
+
+static INLINE int get_offset_from_fullmv(const FULLPEL_MV *mv, int stride) {
+  return mv->row * stride + mv->col;
+}
+
+static INLINE const uint8_t *get_buf_from_fullmv(const struct buf_2d *buf,
+                                                 const FULLPEL_MV *mv) {
+  return &buf->buf[get_offset_from_fullmv(mv, buf->stride)];
 }
 
 #ifdef __cplusplus

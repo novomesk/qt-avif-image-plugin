@@ -450,7 +450,9 @@ const arg_def_t *av1_key_val_args[] = {
   &g_av1_codec_arg_defs.second_pass_log,
   &g_av1_codec_arg_defs.fwd_kf_dist,
   &g_av1_codec_arg_defs.strict_level_conformance,
+  &g_av1_codec_arg_defs.sb_qp_sweep,
   &g_av1_codec_arg_defs.dist_metric,
+  &g_av1_codec_arg_defs.kf_max_pyr_height,
   NULL,
 };
 
@@ -2583,11 +2585,18 @@ int main(int argc, const char **argv_) {
 
         for (int i = 0; i < num_operating_points; i++) {
           if (levels[i] > target_levels[i]) {
-            aom_tools_warn(
-                "Failed to encode to target level %d.%d for operating point "
-                "%d. The output level is %d.%d",
-                2 + (target_levels[i] >> 2), target_levels[i] & 3, i,
-                2 + (levels[i] >> 2), levels[i] & 3);
+            if (levels[i] == 31) {
+              aom_tools_warn(
+                  "Failed to encode to target level %d.%d for operating point "
+                  "%d. The output level is SEQ_LEVEL_MAX",
+                  2 + (target_levels[i] >> 2), target_levels[i] & 3, i);
+            } else {
+              aom_tools_warn(
+                  "Failed to encode to target level %d.%d for operating point "
+                  "%d. The output level is %d.%d",
+                  2 + (target_levels[i] >> 2), target_levels[i] & 3, i,
+                  2 + (levels[i] >> 2), levels[i] & 3);
+            }
           }
         }
       }

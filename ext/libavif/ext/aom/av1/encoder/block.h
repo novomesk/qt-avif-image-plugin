@@ -326,7 +326,7 @@ typedef struct {
   //! The best color map found.
   uint8_t best_palette_color_map[MAX_PALETTE_SQUARE];
   //! A temporary buffer used for k-means clustering.
-  int kmeans_data_buf[2 * MAX_PALETTE_SQUARE];
+  int16_t kmeans_data_buf[2 * MAX_PALETTE_SQUARE];
 } PALETTE_BUFFER;
 
 /*! \brief Contains buffers used by av1_compound_type_rd()
@@ -496,7 +496,7 @@ typedef struct {
  */
 typedef struct {
   //! Whether to skip transform and quantization on a partition block level.
-  int skip_txfm;
+  uint8_t skip_txfm;
 
   /*! \brief Whether to skip transform and quantization on a txfm block level.
    *
@@ -801,13 +801,14 @@ typedef struct {
 /*!\cond */
 typedef enum {
   kZeroSad = 0,
-  kLowSad = 1,
-  kMedSad = 2,
-  kHighSad = 3
+  kVeryLowSad = 1,
+  kLowSad = 2,
+  kMedSad = 3,
+  kHighSad = 4
 } SOURCE_SAD;
 
 typedef struct {
-  //! SAD levels in non-rd path for var-based part and inter-mode search
+  //! SAD levels in non-rd path
   SOURCE_SAD source_sad_nonrd;
   //! SAD levels in rd-path for var-based part qindex thresholds
   SOURCE_SAD source_sad_rd;
@@ -942,6 +943,21 @@ typedef struct macroblock {
    */
   int delta_qindex;
 
+  /*! \brief Difference between frame-level qindex and qindex used to
+   * compute rdmult (lambda).
+   *
+   * rdmult_delta_qindex is assigned the same as delta_qindex before qp sweep.
+   * During qp sweep, delta_qindex is changed and used to calculate the actual
+   * quant params, while rdmult_delta_qindex remains the same, and is used to
+   * calculate the rdmult in "set_deltaq_rdmult".
+   */
+  int rdmult_delta_qindex;
+
+  /*! \brief Current qindex (before being adjusted by delta_q_res) used to
+   * derive rdmult_delta_qindex.
+   */
+  int rdmult_cur_qindex;
+
   /*! \brief Rate-distortion multiplier.
    *
    * The rd multiplier used to determine the rate-distortion trade-off. This is
@@ -1016,9 +1032,16 @@ typedef struct macroblock {
    */
   int cnt_zeromv;
 
-  /*!\brief Flag to force zeromv-skip block, for nonrd path.
+  /*!\brief Flag to force zeromv-skip at superblock level, for nonrd path.
+   *
+   * 0/1 imply zeromv-skip is disabled/enabled. 2 implies that the blocks
+   * in the superblock may be marked as zeromv-skip at block level.
    */
-  int force_zeromv_skip;
+  int force_zeromv_skip_for_sb;
+
+  /*!\brief Flag to force zeromv-skip at block level, for nonrd path.
+   */
+  int force_zeromv_skip_for_blk;
 
   /*! \brief Previous segment id for which qmatrices were updated.
    * This is used to bypass setting of qmatrices if no change in qindex.
@@ -1207,6 +1230,9 @@ typedef struct macroblock {
   PixelLevelGradientInfo *pixel_gradient_info;
   /*! \brief Flags indicating the availability of cached gradient info. */
   bool is_sb_gradient_cached[PLANE_TYPES];
+
+  /*! \brief Flag to reuse predicted samples of inter block. */
+  bool reuse_inter_pred;
   /**@}*/
 
   /*****************************************************************************

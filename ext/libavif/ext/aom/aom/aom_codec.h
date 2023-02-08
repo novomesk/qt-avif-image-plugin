@@ -14,7 +14,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 //
 // There are two levels of interfaces used to access the AOM codec: the
-// the aom_codec_iface and the aom_codec_ctx.
+// aom_codec_iface and the aom_codec_ctx.
 //
 // 1. aom_codec_iface_t
 //    (Related files: aom/aom_codec.h, aom/src/aom_codec.c,
@@ -244,7 +244,7 @@ typedef int64_t aom_codec_pts_t;
  *   - aom_codec_get_caps(aom_codec_iface_t *iface): returns
  *     the capabilities of the codec
  *   - aom_codec_enc_config_default: generate the default config for
- *     initializing the encoder (see documention in aom_encoder.h)
+ *     initializing the encoder (see documentation in aom_encoder.h)
  *   - aom_codec_dec_init, aom_codec_enc_init: initialize the codec context
  *     structure (see documentation on aom_codec_ctx).
  *
@@ -268,18 +268,18 @@ typedef struct aom_codec_priv aom_codec_priv_t;
  * support frame types that are codec specific (MPEG-1 D-frames for example)
  */
 typedef uint32_t aom_codec_frame_flags_t;
-#define AOM_FRAME_IS_KEY 0x1 /**< frame is the start of a GOP */
+#define AOM_FRAME_IS_KEY 0x1u /**< frame is the start of a GOP */
 /*!\brief frame can be dropped without affecting the stream (no future frame
  * depends on this one) */
-#define AOM_FRAME_IS_DROPPABLE 0x2
+#define AOM_FRAME_IS_DROPPABLE 0x2u
 /*!\brief this is an INTRA_ONLY frame */
-#define AOM_FRAME_IS_INTRAONLY 0x10
+#define AOM_FRAME_IS_INTRAONLY 0x10u
 /*!\brief this is an S-frame */
-#define AOM_FRAME_IS_SWITCH 0x20
+#define AOM_FRAME_IS_SWITCH 0x20u
 /*!\brief this is an error-resilient frame */
-#define AOM_FRAME_IS_ERROR_RESILIENT 0x40
+#define AOM_FRAME_IS_ERROR_RESILIENT 0x40u
 /*!\brief this is a key-frame dependent recovery-point frame */
-#define AOM_FRAME_IS_DELAYED_RANDOM_ACCESS_POINT 0x80
+#define AOM_FRAME_IS_DELAYED_RANDOM_ACCESS_POINT 0x80u
 
 /*!\brief Iterator
  *
@@ -365,7 +365,7 @@ int aom_codec_version(void);
  *
  * Returns a printable string containing the full library version number. This
  * may contain additional text following the three digit version number, as to
- * indicate release candidates, prerelease versions, etc.
+ * indicate release candidates, pre-release versions, etc.
  *
  */
 const char *aom_codec_version_str(void);
@@ -521,7 +521,7 @@ aom_codec_err_t aom_codec_set_option(aom_codec_ctx_t *ctx, const char *name,
 #define AOM_CODEC_CONTROL_TYPECHECKED(ctx, id, data) \
   aom_codec_control_typechecked_##id(ctx, id, data) /**<\hideinitializer*/
 
-/*!\brief Creates typechecking mechanisms for aom_codec_control
+/*!\brief Creates type checking mechanisms for aom_codec_control
  *
  * It defines a static function with the correctly typed arguments as a wrapper
  * to the type-unsafe aom_codec_control function. It also creates a typedef

@@ -228,7 +228,7 @@ static double intra_rd_variance_factor(const AV1_COMP *cpi, MACROBLOCK *x,
  */
 static int rd_pick_filter_intra_sby(const AV1_COMP *const cpi, MACROBLOCK *x,
                                     int *rate, int *rate_tokenonly,
-                                    int64_t *distortion, int *skippable,
+                                    int64_t *distortion, uint8_t *skippable,
                                     BLOCK_SIZE bsize, int mode_cost,
                                     PREDICTION_MODE best_mode_so_far,
                                     int64_t *best_rd, int64_t *best_model_rd,
@@ -812,7 +812,7 @@ static bool should_prune_chroma_smooth_pred_based_on_source_variance(
 
 int64_t av1_rd_pick_intra_sbuv_mode(const AV1_COMP *const cpi, MACROBLOCK *x,
                                     int *rate, int *rate_tokenonly,
-                                    int64_t *distortion, int *skippable,
+                                    int64_t *distortion, uint8_t *skippable,
                                     BLOCK_SIZE bsize, TX_SIZE max_tx_size) {
   const AV1_COMMON *const cm = &cpi->common;
   MACROBLOCKD *xd = &x->e_mbd;
@@ -1137,7 +1137,8 @@ static AOM_INLINE int intra_block_yrd(const AV1_COMP *const cpi, MACROBLOCK *x,
                                       BLOCK_SIZE bsize, const int *bmode_costs,
                                       int64_t *best_rd, int *rate,
                                       int *rate_tokenonly, int64_t *distortion,
-                                      int *skippable, MB_MODE_INFO *best_mbmi,
+                                      uint8_t *skippable,
+                                      MB_MODE_INFO *best_mbmi,
                                       PICK_MODE_CONTEXT *ctx) {
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = xd->mi[0];
@@ -1179,7 +1180,7 @@ static AOM_INLINE int intra_block_yrd(const AV1_COMP *const cpi, MACROBLOCK *x,
  * \callergraph
  * This function loops through all filter_intra modes to find the best one.
  *
- * \return Returns nothing, but updates the mbmi and rd_stats.
+ * \remark Returns nothing, but updates the mbmi and rd_stats.
  */
 static INLINE void handle_filter_intra_mode(const AV1_COMP *cpi, MACROBLOCK *x,
                                             BLOCK_SIZE bsize,
@@ -1431,7 +1432,7 @@ static AOM_INLINE int prune_luma_odd_delta_angles_using_rd_cost(
 // Finds the best non-intrabc mode on an intra frame.
 int64_t av1_rd_pick_intra_sby_mode(const AV1_COMP *const cpi, MACROBLOCK *x,
                                    int *rate, int *rate_tokenonly,
-                                   int64_t *distortion, int *skippable,
+                                   int64_t *distortion, uint8_t *skippable,
                                    BLOCK_SIZE bsize, int64_t best_rd,
                                    PICK_MODE_CONTEXT *ctx) {
   MACROBLOCKD *const xd = &x->e_mbd;

@@ -355,6 +355,7 @@ typedef struct GF_GROUP {
   int max_layer_depth_allowed;
   // This is currently only populated for AOM_Q mode
   int q_val[MAX_STATIC_GF_GROUP_LENGTH];
+  int rdmult_val[MAX_STATIC_GF_GROUP_LENGTH];
   int bit_allocation[MAX_STATIC_GF_GROUP_LENGTH];
   // The frame coding type - inter/intra frame
   FRAME_TYPE frame_type[MAX_STATIC_GF_GROUP_LENGTH];
@@ -578,7 +579,7 @@ void av1_accumulate_stats(FIRSTPASS_STATS *section,
  * \param[in]    cpi            Top-level encoder structure
  * \param[in]    ts_duration    Duration of the frame / collection of frames
  *
- * \return Nothing is returned. Instead, the "TWO_PASS" structure inside "cpi"
+ * \remark Nothing is returned. Instead, the "TWO_PASS" structure inside "cpi"
  * is modified to store information computed in this function.
  */
 void av1_first_pass(struct AV1_COMP *cpi, const int64_t ts_duration);

@@ -37,6 +37,34 @@ static INLINE int horizontal_add_s32x4(const int32x4_t a) {
 #endif
 }
 
+static INLINE uint64_t horizontal_add_u64x2(const uint64x2_t a) {
+#if defined(__aarch64__)
+  return vaddvq_u64(a);
+#else
+  return vgetq_lane_u64(a, 0) + vgetq_lane_u64(a, 1);
+#endif
+}
+
+static INLINE uint64_t horizontal_long_add_u32x4(const uint32x4_t a) {
+#if defined(__aarch64__)
+  return vaddlvq_u32(a);
+#else
+  const uint64x2_t b = vpaddlq_u32(a);
+  return vgetq_lane_u64(b, 0) + vgetq_lane_u64(b, 1);
+#endif
+}
+
+static INLINE unsigned int horizontal_add_u32x4(const uint32x4_t a) {
+#if defined(__aarch64__)
+  return vaddvq_u32(a);
+#else
+  const uint64x2_t b = vpaddlq_u32(a);
+  const uint32x2_t c = vadd_u32(vreinterpret_u32_u64(vget_low_u64(b)),
+                                vreinterpret_u32_u64(vget_high_u64(b)));
+  return vget_lane_u32(c, 0);
+#endif
+}
+
 static INLINE uint32_t horizontal_long_add_u16x8(const uint16x8_t vec_lo,
                                                  const uint16x8_t vec_hi) {
 #if defined(__aarch64__)
@@ -63,6 +91,15 @@ static INLINE uint32_t horizontal_add_u16x8(const uint16x8_t a) {
   const uint32x2_t d = vadd_u32(vreinterpret_u32_u64(vget_low_u64(c)),
                                 vreinterpret_u32_u64(vget_high_u64(c)));
   return vget_lane_u32(d, 0);
+#endif
+}
+
+static INLINE uint32_t horizontal_add_u32x2(const uint32x2_t a) {
+#if defined(__aarch64__)
+  return vaddv_u32(a);
+#else
+  const uint64x1_t b = vpaddl_u32(a);
+  return vget_lane_u32(vreinterpret_u32_u64(b), 0);
 #endif
 }
 

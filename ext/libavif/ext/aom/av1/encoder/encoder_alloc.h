@@ -269,6 +269,7 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
   aom_free_frame_buffer(&cpi->scaled_source);
   aom_free_frame_buffer(&cpi->scaled_last_source);
   aom_free_frame_buffer(&cpi->orig_source);
+  aom_free_frame_buffer(&cpi->svc.source_last_TL0);
 
   free_token_info(token_info);
 
@@ -294,6 +295,8 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
   }
 
   if (cpi->ppi->use_svc) av1_free_svc_cyclic_refresh(cpi);
+  aom_free(cpi->svc.layer_context);
+  cpi->svc.layer_context = NULL;
 
   if (cpi->consec_zero_mv) {
     aom_free(cpi->consec_zero_mv);

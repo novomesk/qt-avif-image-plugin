@@ -197,8 +197,16 @@ int SIMD_FUNC(cdef_find_dir)(const uint16_t *img, int stride, int32_t *var,
   return best_dir;
 }
 
+// Work around compiler out of memory issues with Win32 builds. This issue has
+// been observed with Visual Studio 2017, 2019, and 2022 (version 17.4).
+#if defined(_MSC_VER) && defined(_M_IX86) && _MSC_VER < 1940
+#define CDEF_INLINE static INLINE
+#else
+#define CDEF_INLINE SIMD_INLINE
+#endif
+
 // sign(a-b) * min(abs(a-b), max(0, threshold - (abs(a-b) >> adjdamp)))
-SIMD_INLINE v256 constrain16(v256 a, v256 b, unsigned int threshold,
+CDEF_INLINE v256 constrain16(v256 a, v256 b, unsigned int threshold,
                              unsigned int adjdamp) {
   v256 diff = v256_sub_16(a, b);
   const v256 sign = v256_shr_n_s16(diff, 15);
@@ -262,7 +270,7 @@ SIMD_INLINE v256 get_max_secondary(const int is_lowbd, v256 *tap, v256 max,
   return max;
 }
 
-SIMD_INLINE void filter_block_4x4(const int is_lowbd, void *dest, int dstride,
+CDEF_INLINE void filter_block_4x4(const int is_lowbd, void *dest, int dstride,
                                   const uint16_t *in, int pri_strength,
                                   int sec_strength, int dir, int pri_damping,
                                   int sec_damping, int coeff_shift, int height,
@@ -454,7 +462,7 @@ SIMD_INLINE void filter_block_4x4(const int is_lowbd, void *dest, int dstride,
   }
 }
 
-SIMD_INLINE void filter_block_8x8(const int is_lowbd, void *dest, int dstride,
+CDEF_INLINE void filter_block_8x8(const int is_lowbd, void *dest, int dstride,
                                   const uint16_t *in, int pri_strength,
                                   int sec_strength, int dir, int pri_damping,
                                   int sec_damping, int coeff_shift, int height,
@@ -816,17 +824,19 @@ void SIMD_FUNC(cdef_filter_16_3)(void *dest, int dstride, const uint16_t *in,
 
 void SIMD_FUNC(cdef_copy_rect8_16bit_to_16bit)(uint16_t *dst, int dstride,
                                                const uint16_t *src, int sstride,
-                                               int v, int h) {
+                                               int width, int height) {
   int i, j;
-  for (i = 0; i < v; i++) {
-    for (j = 0; j < (h & ~0x7); j += 8) {
+  for (i = 0; i < height; i++) {
+    for (j = 0; j < (width & ~0x7); j += 8) {
       v128 row = v128_load_unaligned(&src[i * sstride + j]);
       v128_store_unaligned(&dst[i * dstride + j], row);
     }
-    for (; j < h; j++) {
+    for (; j < width; j++) {
       dst[i * dstride + j] = src[i * sstride + j];
     }
   }
 }
+
+#undef CDEF_INLINE
 
 #endif  // AOM_AV1_COMMON_CDEF_BLOCK_SIMD_H_

@@ -11,7 +11,9 @@
 
 #include "aom_dsp/binary_codes_writer.h"
 
-#include "av1/encoder/corner_detect.h"
+#include "aom_dsp/flow_estimation/corner_detect.h"
+#include "aom_dsp/flow_estimation/flow_estimation.h"
+#include "av1/common/warped_motion.h"
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/ethread.h"
 #include "av1/encoder/rdopt.h"
@@ -121,7 +123,7 @@ static AOM_INLINE void compute_global_motion_for_ref_frame(
       params_by_motion[i].num_inliers = 0;
     }
 
-    av1_compute_global_motion(model, src_buffer, src_width, src_height,
+    aom_compute_global_motion(model, src_buffer, src_width, src_height,
                               src_stride, src_corners, num_src_corners,
                               ref_buf[frame], cpi->common.seq_params->bit_depth,
                               gm_estimation_type, inliers_by_motion,
@@ -132,6 +134,16 @@ static AOM_INLINE void compute_global_motion_for_ref_frame(
 
       params_this_motion = params_by_motion[i].params;
       av1_convert_model_to_params(params_this_motion, &tmp_wm_params);
+
+      // Work around a bug in the AV1 specification
+      //
+      // For TRANSLATION type global motion models, gm_get_motion_vector() gives
+      // the wrong motion vector (see comments in that function for details).
+      // As translation-type models do not give much gain, we can avoid this bug
+      // by never choosing a TRANSLATION type model
+      if (tmp_wm_params.wmtype == TRANSLATION) {
+        continue;
+      }
 
       if (tmp_wm_params.wmtype != IDENTITY) {
         av1_compute_feature_segmentation_map(
@@ -154,6 +166,12 @@ static AOM_INLINE void compute_global_motion_for_ref_frame(
             GM_REFINEMENT_COUNT, best_warp_error, segment_map, segment_map_w,
             erroradv_threshold);
 
+        // av1_refine_integerized_param() can return a TRANSLATION type model
+        // even if its input is some other type, so we have to skip those too
+        if (tmp_wm_params.wmtype == TRANSLATION) {
+          continue;
+        }
+
         if (warp_error < best_warp_error) {
           best_warp_error = warp_error;
           // Save the wm_params modified by
@@ -168,6 +186,8 @@ static AOM_INLINE void compute_global_motion_for_ref_frame(
       if (!av1_get_shear_params(&cm->global_motion[frame]))
         cm->global_motion[frame] = default_warp_params;
 
+#if 0
+    // We never choose translational models, so this code is disabled
     if (cm->global_motion[frame].wmtype == TRANSLATION) {
       cm->global_motion[frame].wmmat[0] =
           convert_to_trans_prec(cm->features.allow_high_precision_mv,
@@ -178,6 +198,7 @@ static AOM_INLINE void compute_global_motion_for_ref_frame(
                                 cm->global_motion[frame].wmmat[1]) *
           GM_TRANS_ONLY_DECODE_FACTOR;
     }
+#endif
 
     if (cm->global_motion[frame].wmtype == IDENTITY) continue;
 
@@ -477,6 +498,7 @@ void av1_compute_global_motion_facade(AV1_COMP *cpi) {
   }
 
   if (cpi->common.current_frame.frame_type == INTER_FRAME && cpi->source &&
+      cpi->superres_mode == AOM_SUPERRES_NONE &&
       cpi->oxcf.tool_cfg.enable_global_motion && !gm_info->search_done) {
     setup_global_motion_info_params(cpi);
     if (cpi->mt_info.num_workers > 1)

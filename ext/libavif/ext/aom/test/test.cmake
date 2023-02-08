@@ -53,17 +53,21 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/active_map_test.cc"
             "${AOM_ROOT}/test/aq_segment_test.cc"
             "${AOM_ROOT}/test/av1_external_partition_test.cc"
+            "${AOM_ROOT}/test/avif_progressive_test.cc"
             "${AOM_ROOT}/test/borders_test.cc"
             "${AOM_ROOT}/test/cpu_speed_test.cc"
             "${AOM_ROOT}/test/cpu_used_firstpass_test.cc"
             "${AOM_ROOT}/test/datarate_test.cc"
             "${AOM_ROOT}/test/datarate_test.h"
+            "${AOM_ROOT}/test/deltaq_mode_test.cc"
             "${AOM_ROOT}/test/svc_datarate_test.cc"
             "${AOM_ROOT}/test/encode_api_test.cc"
             "${AOM_ROOT}/test/encode_small_width_height_test.cc"
             "${AOM_ROOT}/test/encode_test_driver.cc"
             "${AOM_ROOT}/test/encode_test_driver.h"
             "${AOM_ROOT}/test/end_to_end_psnr_test.cc"
+            "${AOM_ROOT}/test/forced_max_frame_width_height_test.cc"
+            "${AOM_ROOT}/test/force_key_frame_test.cc"
             "${AOM_ROOT}/test/gf_pyr_height_test.cc"
             "${AOM_ROOT}/test/rt_end_to_end_test.cc"
             "${AOM_ROOT}/test/allintra_end_to_end_test.cc"
@@ -74,6 +78,7 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/level_test.cc"
             "${AOM_ROOT}/test/metadata_test.cc"
             "${AOM_ROOT}/test/monochrome_test.cc"
+            "${AOM_ROOT}/test/postproc_filters_test.cc"
             "${AOM_ROOT}/test/resize_test.cc"
             "${AOM_ROOT}/test/scalability_test.cc"
             "${AOM_ROOT}/test/sharpness_test.cc"
@@ -104,15 +109,19 @@ if(CONFIG_REALTIME_ONLY)
   list(REMOVE_ITEM AOM_UNIT_TEST_ENCODER_SOURCES
                    "${AOM_ROOT}/test/allintra_end_to_end_test.cc"
                    "${AOM_ROOT}/test/av1_external_partition_test.cc"
+                   "${AOM_ROOT}/test/avif_progressive_test.cc"
                    "${AOM_ROOT}/test/borders_test.cc"
                    "${AOM_ROOT}/test/cpu_speed_test.cc"
                    "${AOM_ROOT}/test/cpu_used_firstpass_test.cc"
+                   "${AOM_ROOT}/test/deltaq_mode_test.cc"
                    "${AOM_ROOT}/test/end_to_end_psnr_test.cc"
+                   "${AOM_ROOT}/test/force_key_frame_test.cc"
                    "${AOM_ROOT}/test/gf_pyr_height_test.cc"
                    "${AOM_ROOT}/test/horz_superres_test.cc"
                    "${AOM_ROOT}/test/level_test.cc"
                    "${AOM_ROOT}/test/metadata_test.cc"
                    "${AOM_ROOT}/test/monochrome_test.cc"
+                   "${AOM_ROOT}/test/postproc_filters_test.cc"
                    "${AOM_ROOT}/test/sharpness_test.cc")
 endif()
 
@@ -199,8 +208,12 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/av1_k_means_test.cc")
 
   list(APPEND AOM_UNIT_TEST_ENCODER_INTRIN_SSE4_1
-              "${AOM_ROOT}/test/corner_match_test.cc"
               "${AOM_ROOT}/test/simd_cmp_sse4.cc")
+
+  if(NOT CONFIG_REALTIME_ONLY)
+    list(APPEND AOM_UNIT_TEST_ENCODER_INTRIN_SSE4_1
+                "${AOM_ROOT}/test/corner_match_test.cc")
+  endif()
 
   if(CONFIG_ACCOUNTING)
     list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
@@ -228,6 +241,7 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/ratectrl_test.cc"
                 "${AOM_ROOT}/test/rd_test.cc"
                 "${AOM_ROOT}/test/sb_multipass_test.cc"
+                "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
                 "${AOM_ROOT}/test/screen_content_test.cc"
                 "${AOM_ROOT}/test/segment_binarization_sync.cc"
                 "${AOM_ROOT}/test/still_picture_test.cc"
@@ -250,6 +264,7 @@ if(NOT BUILD_SHARED_LIBS)
                        "${AOM_ROOT}/test/kf_test.cc"
                        "${AOM_ROOT}/test/lossless_test.cc"
                        "${AOM_ROOT}/test/sb_multipass_test.cc"
+                       "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
                        "${AOM_ROOT}/test/selfguided_filter_test.cc"
                        "${AOM_ROOT}/test/screen_content_test.cc"
                        "${AOM_ROOT}/test/still_picture_test.cc"
@@ -319,7 +334,7 @@ if(NOT BUILD_SHARED_LIBS)
 
   endif()
 
-  if(HAVE_SSE4_2)
+  if(HAVE_SSE4_2 OR HAVE_ARM_CRC32)
     list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES "${AOM_ROOT}/test/hash_test.cc")
   endif()
 
@@ -494,6 +509,10 @@ function(setup_aom_test_targets)
   if(HAVE_NEON)
     add_intrinsics_source_to_target("${AOM_NEON_INTRIN_FLAG}" "test_libaom"
                                     "AOM_UNIT_TEST_COMMON_INTRIN_NEON")
+  endif()
+  if(HAVE_ARM_CRC32)
+    add_intrinsics_source_to_target("${AOM_ARM_CRC32_FLAG}" "test_libaom"
+                                    "AOM_UNIT_TEST_COMMON_INTRIN_CRC32")
   endif()
 
   if(ENABLE_TESTDATA)

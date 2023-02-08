@@ -19,16 +19,16 @@ README.md                {#LREADME}
     - [Build with VMAF support](#build-with-vmaf)
 2. [Testing the library](#testing-the-av1-codec)
     - [Basics](#testing-basics)
-        - [Unit tests](#1_unit-tests)
-        - [Example tests](#2_example-tests)
-        - [Encoder tests](#3_encoder-tests)
+        - [Unit tests](#unit-tests)
+        - [Example tests](#example-tests)
+        - [Encoder tests](#encoder-tests)
     - [IDE hosted tests](#ide-hosted-tests)
     - [Downloading test data](#downloading-the-test-data)
     - [Adding a new test data file](#adding-a-new-test-data-file)
     - [Additional test data](#additional-test-data)
     - [Sharded testing](#sharded-testing)
-        - [Running tests directly](#1_running-test_libaom-directly)
-        - [Running tests via CMake](#2_running-the-tests-via-the-cmake-build)
+        - [Running tests directly](#running-test_libaom-directly)
+        - [Running tests via CMake](#running-the-tests-via-the-cmake-build)
 3. [Coding style](#coding-style)
 4. [Submitting patches](#submitting-patches)
     - [Login cookie](#login-cookie)
@@ -165,8 +165,8 @@ The toolchain files available at the time of this writing are:
  - armv7-linux-gcc.cmake
  - armv7-mingw-gcc.cmake
  - armv7s-ios.cmake
- - mips32-linux-gcc.cmake
- - mips64-linux-gcc.cmake
+ - ppc-linux-gcc.cmake
+ - riscv-linux-gcc.cmake
  - x86-ios-simulator.cmake
  - x86-linux.cmake
  - x86-macos.cmake
@@ -341,7 +341,7 @@ There are several methods of testing the AV1 codec. All of these methods require
 the presence of the AV1 source code and a working build of the AV1 library and
 applications.
 
-#### 1. Unit tests: {#1_unit-tests}
+#### 1. Unit tests: {#unit-tests}
 
 The unit tests can be run at build time:
 
@@ -355,7 +355,7 @@ The unit tests can be run at build time:
     $ make runtests
 ~~~
 
-#### 2. Example tests: {#2_example-tests}
+#### 2. Example tests: {#example-tests}
 
 The example tests require a bash shell and can be run in the following manner:
 
@@ -370,7 +370,7 @@ The example tests require a bash shell and can be run in the following manner:
     $ path/to/aom/test/examples.sh --bin-path examples
 ~~~
 
-#### 3. Encoder tests: {#3_encoder-tests}
+#### 3. Encoder tests: {#encoder-tests}
 
 When making a change to the encoder run encoder tests to confirm that your
 change has a positive or negligible impact on encode quality. When running these
@@ -487,7 +487,7 @@ https://media.xiph.org/video/derf/
 The AV1 codec library unit tests are built upon gtest which supports sharding of
 test jobs. Sharded test runs can be achieved in a couple of ways.
 
-#### 1. Running test\_libaom directly: {#1_running-test_libaom-directly}
+#### 1. Running test\_libaom directly: {#running-test_libaom-directly}
 
 ~~~
    # Set the environment variable GTEST_TOTAL_SHARDS to control the number of
@@ -501,7 +501,7 @@ test jobs. Sharded test runs can be achieved in a couple of ways.
 To create a test shard for each CPU core available on the current system set
 `GTEST_TOTAL_SHARDS` to the number of CPU cores on your system minus one.
 
-#### 2. Running the tests via the CMake build: {#2_running-the-tests-via-the-cmake-build}
+#### 2. Running the tests via the CMake build: {#running-the-tests-via-the-cmake-build}
 
 ~~~
     # For IDE based builds, ENABLE_IDE_TEST_HOSTING must be enabled. See

@@ -296,6 +296,15 @@ INSTANTIATE_TEST_SUITE_P(SSE2, TemporalFilterTest,
                          Combine(ValuesIn(temporal_filter_test_sse2),
                                  Range(64, 65, 4)));
 #endif  // HAVE_SSE2
+
+#if HAVE_NEON
+TemporalFilterFuncParam temporal_filter_test_neon[] = { TemporalFilterFuncParam(
+    &av1_apply_temporal_filter_c, &av1_apply_temporal_filter_neon) };
+INSTANTIATE_TEST_SUITE_P(NEON, TemporalFilterTest,
+                         Combine(ValuesIn(temporal_filter_test_neon),
+                                 Range(64, 65, 4)));
+#endif  // HAVE_NEON
+
 #if CONFIG_AV1_HIGHBITDEPTH
 
 typedef void (*HBDTemporalFilterFunc)(

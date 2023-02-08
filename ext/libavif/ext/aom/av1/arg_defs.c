@@ -427,8 +427,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "Enable diagonal (D45 to D203) intra prediction modes, which are "
               "a subset of directional modes; has no effect if "
               "enable-directional-intra is 0 (0: false, 1: true (default))"),
-  .force_video_mode = ARG_DEF(NULL, "force-video-mode", 1,
-                              "Force video mode (0: false, 1: true (default))"),
+  .force_video_mode = ARG_DEF(
+      NULL, "force-video-mode", 1,
+      "Force video mode even for a single frame (0: false (default), 1: true)"),
   .enable_obmc = ARG_DEF(NULL, "enable-obmc", 1,
                          "Enable OBMC (0: false, 1: true (default))"),
   .enable_overlay =
@@ -672,5 +673,15 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "strict-level-conformance", 1,
               "When set to 1, exit the encoder when it fails to encode "
               "to a given target level"),
+  .kf_max_pyr_height = ARG_DEF(
+      NULL, "kf-max-pyr-height", 1,
+      "Maximum height of pyramid structure used for the GOP starting with a "
+      "key frame (-1 to 5). When set to -1 (default), it does not have any "
+      "effect. The actual maximum pyramid height will be the minimum of this "
+      "value and the value of gf_max_pyr_height."),
+  .sb_qp_sweep =
+      ARG_DEF(NULL, "sb-qp-sweep", 1,
+              "When set to 1, enable the superblock level qp sweep for a "
+              "given lambda to minimize the rdcost."),
 #endif  // CONFIG_AV1_ENCODER
 };

@@ -202,7 +202,6 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
   (void)sd;
 
   lf->sharpness_level = 0;
-  cpi->td.mb.rdmult = cpi->rd.RDMULT;
 
   if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN &&
       cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ &&
@@ -212,7 +211,7 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
   if (disable_filter_rt_screen ||
       cpi->oxcf.algo_cfg.loopfilter_control == LOOPFILTER_NONE ||
       (cpi->oxcf.algo_cfg.loopfilter_control == LOOPFILTER_REFERENCE &&
-       cpi->svc.non_reference_frame)) {
+       cpi->ppi->rtc_ref.non_reference_frame)) {
     lf->filter_level[0] = 0;
     lf->filter_level[1] = 0;
     return;

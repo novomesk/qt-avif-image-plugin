@@ -517,7 +517,7 @@ static void idct4x4_sse4_1(__m128i *in, __m128i *out, int bit, int do_cols,
 static void iadst4x4_sse4_1(__m128i *in, __m128i *out, int bit, int do_cols,
                             int bd, int out_shift) {
   const int32_t *sinpi = sinpi_arr(bit);
-  const __m128i zero = _mm_set1_epi32(0);
+  const __m128i zero = _mm_setzero_si128();
   __m128i rnding = _mm_set1_epi32(1 << (bit + 4 - 1));
   rnding = _mm_unpacklo_epi32(rnding, zero);
   const __m128i mul = _mm_set1_epi32(1 << 4);
@@ -698,7 +698,7 @@ static void iidentity4_sse4_1(__m128i *in, __m128i *out, int bit, int do_cols,
                               int bd, int out_shift) {
   (void)bit;
   __m128i v[4];
-  __m128i zero = _mm_set1_epi32(0);
+  __m128i zero = _mm_setzero_si128();
   __m128i fact = _mm_set1_epi32(NewSqrt2);
   __m128i offset = _mm_set1_epi32(1 << (NewSqrt2Bits - 1));
   __m128i a0_low, a1_low;
@@ -3142,7 +3142,7 @@ static void iidentity16_sse4_1(__m128i *in, __m128i *out, int bit, int do_cols,
   __m128i fact = _mm_set1_epi32(2 * NewSqrt2);
   __m128i offset = _mm_set1_epi32(1 << (NewSqrt2Bits - 1));
   __m128i a0_low, a0_high, a1_low, a1_high;
-  __m128i zero = _mm_set1_epi32(0);
+  __m128i zero = _mm_setzero_si128();
   offset = _mm_unpacklo_epi32(offset, zero);
 
   for (int i = 0; i < 16; i++) {

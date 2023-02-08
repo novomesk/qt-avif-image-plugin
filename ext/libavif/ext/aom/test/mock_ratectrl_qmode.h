@@ -12,7 +12,7 @@
 #ifndef AOM_TEST_MOCK_RATECTRL_QMODE_H_
 #define AOM_TEST_MOCK_RATECTRL_QMODE_H_
 
-#include "av1/ratectrl_qmode_interface.h"
+#include "av1/qmode_rc/ratectrl_qmode_interface.h"
 #include "third_party/googletest/src/googlemock/include/gmock/gmock.h"
 
 namespace aom {
@@ -25,7 +25,20 @@ class MockRateControlQMode : public AV1RateControlQModeInterface {
               (const FirstpassInfo &firstpass_info), (override));
   MOCK_METHOD(StatusOr<GopEncodeInfo>, GetGopEncodeInfo,
               (const GopStruct &gop_struct, const TplGopStats &tpl_gop_stats,
+               const std::vector<LookaheadStats> &lookahead_stats,
                const RefFrameTable &ref_frame_table_snapshot_init),
+              (override));
+  MOCK_METHOD(StatusOr<GopEncodeInfo>, GetGopEncodeInfo,
+              (const GopStruct &gop_struct, const TplGopStats &tpl_gop_stats,
+               const std::vector<LookaheadStats> &lookahead_stats,
+               const FirstpassInfo &firstpass_info,
+               const RefFrameTable &ref_frame_table_snapshot_init),
+              (override));
+  MOCK_METHOD(StatusOr<GopEncodeInfo>, GetTplPassGopEncodeInfo,
+              (const GopStruct &gop_struct), (override));
+  MOCK_METHOD(StatusOr<GopEncodeInfo>, GetTplPassGopEncodeInfo,
+              (const GopStruct &gop_struct,
+               const FirstpassInfo &firstpass_info),
               (override));
 };
 

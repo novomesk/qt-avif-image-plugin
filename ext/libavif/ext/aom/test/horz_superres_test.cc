@@ -56,7 +56,7 @@ const TestVideoParam kTestVideoVectors[] = {
     45.0 },
 #if CONFIG_AV1_HIGHBITDEPTH
   { "park_joy_90p_10_444.y4m", AOM_IMG_FMT_I44416, AOM_BITS_10, 1, 5, 0, 27.0,
-    48.0 },
+    47.9 },
 #endif
   { "screendata.y4m", AOM_IMG_FMT_I420, AOM_BITS_8, 0, 4, 1, 23.0, 56.0 },
   // Image coding (single frame).

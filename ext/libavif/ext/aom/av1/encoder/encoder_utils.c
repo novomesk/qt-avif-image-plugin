@@ -432,9 +432,9 @@ void av1_apply_active_map(AV1_COMP *cpi) {
 
   if (cpi->active_map.update) {
     if (cpi->active_map.enabled) {
-      for (i = 0;
-           i < cpi->common.mi_params.mi_rows * cpi->common.mi_params.mi_cols;
-           ++i)
+      const int num_mis =
+          cpi->common.mi_params.mi_rows * cpi->common.mi_params.mi_cols;
+      for (i = 0; i < num_mis; ++i)
         if (seg_map[i] == AM_SEGMENT_ID_ACTIVE) seg_map[i] = active_map[i];
       av1_enable_segmentation(seg);
       av1_enable_segfeature(seg, AM_SEGMENT_ID_INACTIVE, SEG_LVL_SKIP);
@@ -636,7 +636,6 @@ void av1_update_film_grain_parameters_seq(struct AV1_PRIMARY *ppi,
 void av1_update_film_grain_parameters(struct AV1_COMP *cpi,
                                       const AV1EncoderConfig *oxcf) {
   AV1_COMMON *const cm = &cpi->common;
-  cpi->oxcf = *oxcf;
   const TuneCfg *const tune_cfg = &oxcf->tune_cfg;
 
   if (cpi->film_grain_table) {
@@ -733,9 +732,16 @@ void av1_scale_references(AV1_COMP *cpi, const InterpFilter filter,
             aom_internal_error(cm->error, AOM_CODEC_MEM_ERROR,
                                "Failed to allocate frame buffer");
           }
-          const bool has_optimized_scaler = av1_has_optimized_scaler(
-              cm->width, cm->height, new_fb->buf.y_crop_width,
+          bool has_optimized_scaler = av1_has_optimized_scaler(
+              ref->y_crop_width, ref->y_crop_height, new_fb->buf.y_crop_width,
               new_fb->buf.y_crop_height);
+          if (num_planes > 1) {
+            has_optimized_scaler =
+                has_optimized_scaler &&
+                av1_has_optimized_scaler(
+                    ref->uv_crop_width, ref->uv_crop_height,
+                    new_fb->buf.uv_crop_width, new_fb->buf.uv_crop_height);
+          }
 #if CONFIG_AV1_HIGHBITDEPTH
           if (use_optimized_scaler && has_optimized_scaler &&
               cm->seq_params->bit_depth == AOM_BITS_8)
@@ -796,7 +802,10 @@ BLOCK_SIZE av1_select_sb_size(const AV1EncoderConfig *const oxcf, int width,
                ? BLOCK_128X128
                : BLOCK_64X64;
   } else if (oxcf->mode == REALTIME) {
-    return AOMMIN(width, height) > 720 ? BLOCK_128X128 : BLOCK_64X64;
+    if (oxcf->tune_cfg.content == AOM_CONTENT_SCREEN)
+      return AOMMIN(width, height) >= 720 ? BLOCK_128X128 : BLOCK_64X64;
+    else
+      return AOMMIN(width, height) > 720 ? BLOCK_128X128 : BLOCK_64X64;
   }
 
   // TODO(any): Possibly could improve this with a heuristic.

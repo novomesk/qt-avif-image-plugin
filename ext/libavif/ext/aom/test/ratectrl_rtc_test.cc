@@ -18,11 +18,12 @@
 #include "test/util.h"
 #include "test/y4m_video_source.h"
 #include "test/yuv_video_source.h"
+#include "test/i420_video_source.h"
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
 namespace {
 
-constexpr size_t kNumFrames = 250;
+constexpr size_t kNumFrames = 450;
 
 constexpr int kTemporalId[4] = { 0, 2, 1, 2 };
 
@@ -46,6 +47,7 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
 
   void PreEncodeFrameHook(libaom_test::VideoSource *video,
                           libaom_test::Encoder *encoder) override {
+    int key_int = key_interval_;
     const int use_svc =
         rc_cfg_.ss_number_layers > 1 || rc_cfg_.ts_number_layers > 1;
     encoder->Control(AV1E_SET_RTC_EXTERNAL_RC, 1);
@@ -53,6 +55,8 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
       encoder->Control(AOME_SET_CPUUSED, 7);
       encoder->Control(AV1E_SET_AQ_MODE, aq_mode_);
       encoder->Control(AV1E_SET_TUNE_CONTENT, AOM_CONTENT_DEFAULT);
+      encoder->Control(AOME_SET_MAX_INTRA_BITRATE_PCT,
+                       rc_cfg_.max_intra_bitrate_pct);
       if (use_svc) encoder->Control(AV1E_SET_SVC_PARAMS, &svc_params_);
     }
     // SVC specific settings
@@ -63,15 +67,10 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
       layer_id_.spatial_layer_id = frame_params_.spatial_layer_id;
       layer_id_.temporal_layer_id = frame_params_.temporal_layer_id;
       encoder->Control(AV1E_SET_SVC_LAYER_ID, &layer_id_);
+      key_int = key_interval_ * rc_cfg_.ss_number_layers;
     }
-    frame_params_.frame_type = layer_frame_cnt_ % key_interval_ == 0
-                                   ? aom::kKeyFrame
-                                   : aom::kInterFrame;
-    if (!use_svc && frame_params_.frame_type == aom::kInterFrame) {
-      // Disable golden frame update.
-      frame_flags_ |= AOM_EFLAG_NO_UPD_GF;
-      frame_flags_ |= AOM_EFLAG_NO_UPD_ARF;
-    }
+    frame_params_.frame_type =
+        layer_frame_cnt_ % key_int == 0 ? aom::kKeyFrame : aom::kInterFrame;
     encoder_exit_ = video->frame() == kNumFrames;
   }
 
@@ -99,33 +98,61 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
   }
 
   void RunOneLayer() {
+    key_interval_ = 10000;
     SetConfig();
     rc_api_ = aom::AV1RateControlRTC::Create(rc_cfg_);
     frame_params_.spatial_layer_id = 0;
     frame_params_.temporal_layer_id = 0;
 
-    ::libaom_test::Y4mVideoSource video("niklas_1280_720_30.y4m", 0,
-                                        kNumFrames);
+    ::libaom_test::I420VideoSource video("niklas_640_480_30.yuv", 640, 480, 30,
+                                         1, 0, kNumFrames);
+
+    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+  }
+
+  void RunOneLayerPeriodicKey() {
+    key_interval_ = 100;
+    SetConfig();
+    rc_api_ = aom::AV1RateControlRTC::Create(rc_cfg_);
+    frame_params_.spatial_layer_id = 0;
+    frame_params_.temporal_layer_id = 0;
+
+    ::libaom_test::I420VideoSource video("niklas_640_480_30.yuv", 640, 480, 30,
+                                         1, 0, kNumFrames);
 
     ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
   }
 
   void RunSvc() {
+    key_interval_ = 10000;
     SetConfigSvc();
     rc_api_ = aom::AV1RateControlRTC::Create(rc_cfg_);
     frame_params_.spatial_layer_id = 0;
     frame_params_.temporal_layer_id = 0;
 
-    ::libaom_test::Y4mVideoSource video("niklas_1280_720_30.y4m", 0,
-                                        kNumFrames);
+    ::libaom_test::I420VideoSource video("niklas_640_480_30.yuv", 640, 480, 30,
+                                         1, 0, kNumFrames);
+
+    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+  }
+
+  void RunSvcPeriodicKey() {
+    key_interval_ = 100;
+    SetConfigSvc();
+    rc_api_ = aom::AV1RateControlRTC::Create(rc_cfg_);
+    frame_params_.spatial_layer_id = 0;
+    frame_params_.temporal_layer_id = 0;
+
+    ::libaom_test::I420VideoSource video("niklas_640_480_30.yuv", 640, 480, 30,
+                                         1, 0, kNumFrames);
 
     ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
   }
 
  private:
   void SetConfig() {
-    rc_cfg_.width = 1280;
-    rc_cfg_.height = 720;
+    rc_cfg_.width = 640;
+    rc_cfg_.height = 480;
     rc_cfg_.max_quantizer = 52;
     rc_cfg_.min_quantizer = 2;
     rc_cfg_.target_bandwidth = 1000;
@@ -146,8 +173,8 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
     rc_cfg_.aq_mode = aq_mode_;
 
     // Encoder settings for ground truth.
-    cfg_.g_w = 1280;
-    cfg_.g_h = 720;
+    cfg_.g_w = 640;
+    cfg_.g_h = 480;
     cfg_.rc_undershoot_pct = 50;
     cfg_.rc_overshoot_pct = 50;
     cfg_.rc_buf_initial_sz = 600;
@@ -165,8 +192,8 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
   }
 
   void SetConfigSvc() {
-    rc_cfg_.width = 1280;
-    rc_cfg_.height = 720;
+    rc_cfg_.width = 640;
+    rc_cfg_.height = 480;
     rc_cfg_.max_quantizer = 52;
     rc_cfg_.min_quantizer = 2;
     rc_cfg_.target_bandwidth = 1000;
@@ -211,6 +238,8 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
     }
 
     // Encoder settings for ground truth.
+    cfg_.g_w = 640;
+    cfg_.g_h = 480;
     svc_params_.number_spatial_layers = 3;
     svc_params_.number_temporal_layers = 3;
     cfg_.g_timebase.num = 1;
@@ -269,7 +298,11 @@ class RcInterfaceTest : public ::libaom_test::EncoderTest,
 
 TEST_P(RcInterfaceTest, OneLayer) { RunOneLayer(); }
 
+TEST_P(RcInterfaceTest, OneLayerPeriodicKey) { RunOneLayerPeriodicKey(); }
+
 TEST_P(RcInterfaceTest, Svc) { RunSvc(); }
+
+TEST_P(RcInterfaceTest, SvcPeriodicKey) { RunSvcPeriodicKey(); }
 
 AV1_INSTANTIATE_TEST_SUITE(RcInterfaceTest, ::testing::Values(0, 3));
 

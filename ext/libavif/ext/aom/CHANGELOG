@@ -1,3 +1,70 @@
+2023-02-03 v3.6.0
+  This release includes compression efficiency and perceptual quality
+  improvements, speedup and memory optimizations, and some new features.
+  This release is ABI compatible with the last release.
+
+  - New Features
+    * New values 20-27 (corresponding to levels 7.0-7.3 and 8.0-8.3) for
+      the encoder control AV1E_SET_TARGET_SEQ_LEVEL_IDX (note that the
+      proposal to add the new levels are still in draft status). The
+      original special value 24 (keep level stats only for level
+      monitoring) is renumbered as 32.
+    * New encoder control AV1E_SET_SKIP_POSTPROC_FILTERING to skip the
+      application of post-processing filters on reconstructed frame in
+      all intra mode.
+    * New encoder option "kf-max-pyr-height": Maximum height of pyramid
+      structure used for the GOP starting with a key frame (-1 to 5).
+    * Make SVC work for screen content.
+    * Rate control improvements to reduce frame-size spikes for screen
+      content coding.
+    * RISC-V architecture support with gcc toolchain.
+
+  - Compression Efficiency Improvements
+    * Peak compression efficiency in VOD setting is improved by 1%.
+    * 0.7% - 2.2% RTC encoding BDrate gains for real time speed 8 to 10.
+    * 15% RTC encoding BDrate gains for screen content speed 10.
+
+  - Perceptual Quality Improvements
+    * Resolved a visual quality issue that was reported for high
+      resolution clips (2K) for speed 4 and above in VOD use case.
+    * Visual quality improvements to screen content coding.
+    * Quality improvements to temporal layer RTC coding.
+
+  - Speedup and Memory Optimizations
+    * RTC single-thread encoder speedup:
+      o ~6% instruction count reduction for speed 5 and 6.
+      o ~15% instruction count reduction for speed 7.
+      o ~10% instruction count reduction for speed 8 to 10 (>=360p
+        resolutions).
+    * RTC multi-thread encoder speedup (beyond single-thread speedup):
+      o 5-8% encode time reduction for speed 7 to 10.
+    * RTC screen-content encoder speedup:
+      o 11% instruction count reduction for speed 9 and 10 (>=720p
+        resolutions).
+    * ~5% reduction in heap memory requirements for RTC, speed 6 to 10.
+    * AVIF:
+      o 4-5% speedup for speed 9 in still-picture encoding mode.
+      o 3-4% heap memory reduction in still-picture encoding mode for
+        360p-720p resolutions with multiple threads.
+
+  - Bug Fixes
+    * Added a workaround for an AV1 specification bug which makes
+      TRANSLATION type global motion models unusable.
+    * Fixed AddressSanitizer global-buffer-overflow errors in
+      av1/encoder/arm/neon/av1_fwd_txfm2d_neon.c.
+    * Fixed AddressSanitizer heap-buffer-overflow error in
+      av1_wiener_convolve_add_src_neon().
+    * chromium:1393384 Avoid scene detection on spatial resize.
+    * aomedia:3308 Remove color artifacts under high motion.
+    * aomedia:3310 Avoid out of memory failures with Visual Studio 2017,
+      2019, and 2022 for Win32 x86 builds.
+    * aomedia:3346 Make SVC work properly for screen content.
+    * aomedia:3348 Fix a bug where an uninitialized search_site is used.
+    * aomedia:3365 Work around what seems like a Visual Studio 2022
+      compiler optimization bug.
+    * aomedia:3369 Incorrect PSNR values reported by libaom for 12-bit
+      encode.
+
 2022-08-31 v3.5.0
   This release is ABI compatible with the last one, including speedup and memory
   optimizations, and new APIs and features.
