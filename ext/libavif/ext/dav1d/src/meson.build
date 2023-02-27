@@ -37,6 +37,7 @@ libdav1d_sources = files(
     'intra_edge.c',
     'itx_1d.c',
     'lf_mask.c',
+    'lib.c',
     'log.c',
     'mem.c',
     'msac.c',
@@ -47,6 +48,7 @@ libdav1d_sources = files(
     'refmvs.c',
     'scan.c',
     'tables.c',
+    'thread_task.c',
     'warpmv.c',
     'wedge.c',
 )
@@ -74,14 +76,6 @@ libdav1d_arch_tmpl_sources = []
 
 libdav1d_bitdepth_objs = []
 
-# libdav1d entrypoint source files
-# These source files contain library entry points and are
-# built with the stack-realign flag set, where necessary.
-libdav1d_entrypoints_sources = files(
-    'lib.c',
-    'thread_task.c'
-)
-
 # ASM specific sources
 libdav1d_asm_objs = []
 # Arch-specific flags
@@ -92,16 +86,6 @@ if is_asm_enabled
 
         libdav1d_sources += files(
             'arm/cpu.c',
-            'arm/refmvs_init.c',
-        )
-        libdav1d_tmpl_sources += files(
-            'arm/cdef_init_tmpl.c',
-            'arm/filmgrain_init_tmpl.c',
-            'arm/ipred_init_tmpl.c',
-            'arm/itx_init_tmpl.c',
-            'arm/loopfilter_init_tmpl.c',
-            'arm/looprestoration_init_tmpl.c',
-            'arm/mc_init_tmpl.c',
         )
         if (host_machine.cpu_family() == 'aarch64' or
             host_machine.cpu() == 'arm64')
@@ -177,18 +161,6 @@ if is_asm_enabled
 
         libdav1d_sources += files(
             'x86/cpu.c',
-            'x86/msac_init.c',
-            'x86/refmvs_init.c',
-        )
-
-        libdav1d_tmpl_sources += files(
-            'x86/cdef_init_tmpl.c',
-            'x86/filmgrain_init_tmpl.c',
-            'x86/ipred_init_tmpl.c',
-            'x86/itx_init_tmpl.c',
-            'x86/loopfilter_init_tmpl.c',
-            'x86/looprestoration_init_tmpl.c',
-            'x86/mc_init_tmpl.c',
         )
 
         # NASM source files
@@ -196,6 +168,7 @@ if is_asm_enabled
             'x86/cpuid.asm',
             'x86/msac.asm',
             'x86/refmvs.asm',
+            'x86/itx_avx512.asm',
             'x86/cdef_avx2.asm',
             'x86/itx_avx2.asm',
             'x86/looprestoration_avx2.asm',
@@ -208,7 +181,6 @@ if is_asm_enabled
                 'x86/cdef_avx512.asm',
                 'x86/filmgrain_avx512.asm',
                 'x86/ipred_avx512.asm',
-                'x86/itx_avx512.asm',
                 'x86/loopfilter_avx512.asm',
                 'x86/looprestoration_avx512.asm',
                 'x86/mc_avx512.asm',
@@ -226,8 +198,11 @@ if is_asm_enabled
 
         if dav1d_bitdepths.contains('16')
             libdav1d_sources_asm += files(
+                'x86/cdef16_avx512.asm',
                 'x86/filmgrain16_avx512.asm',
                 'x86/ipred16_avx512.asm',
+                'x86/itx16_avx512.asm',
+                'x86/loopfilter16_avx512.asm',
                 'x86/looprestoration16_avx512.asm',
                 'x86/mc16_avx512.asm',
                 'x86/cdef16_avx2.asm',
@@ -255,8 +230,8 @@ if is_asm_enabled
             'ppc/cpu.c',
         )
         libdav1d_arch_tmpl_sources += files(
-            'ppc/cdef_init_tmpl.c',
-            'ppc/looprestoration_init_tmpl.c',
+            'ppc/cdef_tmpl.c',
+            'ppc/looprestoration_tmpl.c',
         )
     endif
 endif
@@ -264,7 +239,7 @@ endif
 
 
 libdav1d_rc_obj = []
-libdav1d_flags = [stackalign_flag]
+libdav1d_flags = []
 api_export_flags = []
 
 #
@@ -298,18 +273,6 @@ endif
 #
 # Library definitions
 #
-
-# Helper library for dav1d entrypoints
-libdav1d_entrypoints_objs = static_library('dav1d_entrypoint',
-    libdav1d_entrypoints_sources,
-    rev_target, config_h_target,
-
-    include_directories : dav1d_inc_dirs,
-    dependencies: [stdatomic_dependencies],
-    c_args : [libdav1d_flags, stackrealign_flag, api_export_flags],
-    install : false,
-    build_by_default : false,
-).extract_all_objects(recursive: true)
 
 # Helper library for each bitdepth
 libdav1d_bitdepth_objs = []
@@ -349,10 +312,11 @@ libdav1d = library('dav1d',
     libdav1d_sources,
     libdav1d_asm_objs,
     libdav1d_rc_obj,
+    rev_target,
+    config_h_target,
 
     objects : [
         libdav1d_bitdepth_objs,
-        libdav1d_entrypoints_objs
         ],
 
     include_directories : dav1d_inc_dirs,

@@ -64,7 +64,7 @@ typedef decl_fgy_32x32xn_fn(*fgy_32x32xn_fn);
 
 #define decl_fguv_32x32xn_fn(name) \
 void (name)(pixel *dst_row, const pixel *src_row, ptrdiff_t stride, \
-            const Dav1dFilmGrainData *data, int pw, \
+            const Dav1dFilmGrainData *data, size_t pw, \
             const uint8_t scaling[SCALING_SIZE], \
             const entry grain_lut[][GRAIN_WIDTH], int bh, int row_num, \
             const pixel *luma_row, ptrdiff_t luma_stride, \
@@ -80,7 +80,5 @@ typedef struct Dav1dFilmGrainDSPContext {
 } Dav1dFilmGrainDSPContext;
 
 bitfn_decls(void dav1d_film_grain_dsp_init, Dav1dFilmGrainDSPContext *c);
-bitfn_decls(void dav1d_film_grain_dsp_init_arm, Dav1dFilmGrainDSPContext *c);
-bitfn_decls(void dav1d_film_grain_dsp_init_x86, Dav1dFilmGrainDSPContext *c);
 
 #endif /* DAV1D_SRC_FILM_GRAIN_H */

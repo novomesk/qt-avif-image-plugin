@@ -25,10 +25,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "common/intops.h"
 #include "src/ppc/dav1d_types.h"
-#include "src/cpu.h"
-#include "src/looprestoration.h"
+#include "src/ppc/looprestoration.h"
 
 #if BITDEPTH == 8
 
@@ -52,12 +50,12 @@ static void wiener_filter_h_vsx(int32_t *hor_ptr,
                                 const int16_t filterh[8],
                                 const int w, const int h)
 {
-    static const i32x4 zerov = vec_splats(0);
-    static const i32x4 seven_vec = vec_splats(7);
-    static const i32x4 bitdepth_added_vec = vec_splats(1 << 14);
-    static const i32x4 round_bits_vec = vec_splats(3);
-    static const i32x4 rounding_off_vec = vec_splats(1<<2);
-    static const i32x4 clip_limit_v = vec_splats((1 << 13) - 1);
+    const i32x4 zerov = vec_splats(0);
+    const i32x4 seven_vec = vec_splats(7);
+    const i32x4 bitdepth_added_vec = vec_splats(1 << 14);
+    const i32x4 round_bits_vec = vec_splats(3);
+    const i32x4 rounding_off_vec = vec_splats(1<<2);
+    const i32x4 clip_limit_v = vec_splats((1 << 13) - 1);
 
     i16x8 filterhvall = vec_vsx_ld(0, filterh);
     i16x8 filterhv0 =  vec_splat( filterhvall, 0);
@@ -130,8 +128,8 @@ static void wiener_filter_h_vsx(int32_t *hor_ptr,
 }
 
 static inline i16x8 iclip_u8_vec(i16x8 v) {
-    static const i16x8 zerov = vec_splats((int16_t)0);
-    static const i16x8 maxv = vec_splats((int16_t)255);
+    const i16x8 zerov = vec_splats((int16_t)0);
+    const i16x8 maxv = vec_splats((int16_t)255);
     v = vec_max(zerov, v);
     v = vec_min(maxv, v);
     return v;
@@ -177,8 +175,8 @@ static inline void wiener_filter_v_vsx(uint8_t *p,
                                        const int16_t filterv[8],
                                        const int w, const int h)
 {
-    static const i32x4 round_bits_vec = vec_splats(11);
-    static const i32x4 round_vec = vec_splats((1 << 10) - (1 << 18));
+    const i32x4 round_bits_vec = vec_splats(11);
+    const i32x4 round_vec = vec_splats((1 << 10) - (1 << 18));
 
     i32x4 filterv0 =  vec_splats((int32_t) filterv[0]);
     i32x4 filterv1 =  vec_splats((int32_t) filterv[1]);
@@ -302,12 +300,12 @@ static inline void padding(uint8_t *dst, const uint8_t *p,
 // (since first and last tops are always 0 for chroma)
 // FIXME Could implement a version that requires less temporary memory
 // (should be possible to implement with only 6 rows of temp storage)
-static void wiener_filter_vsx(uint8_t *p, const ptrdiff_t stride,
-                              const uint8_t (*const left)[4],
-                              const uint8_t *lpf,
-                              const int w, const int h,
-                              const LooprestorationParams *const params,
-                              const enum LrEdgeFlags edges HIGHBD_DECL_SUFFIX)
+void dav1d_wiener_filter_vsx(uint8_t *p, const ptrdiff_t stride,
+                             const uint8_t (*const left)[4],
+                             const uint8_t *lpf,
+                             const int w, const int h,
+                             const LooprestorationParams *const params,
+                             const enum LrEdgeFlags edges HIGHBD_DECL_SUFFIX)
 {
     const int16_t (*const filter)[8] = params->filter;
 
@@ -321,17 +319,3 @@ static void wiener_filter_vsx(uint8_t *p, const ptrdiff_t stride,
     wiener_filter_v_vsx(p, stride, hor, filter[1], w, h);
 }
 #endif
-
-COLD void bitfn(dav1d_loop_restoration_dsp_init_ppc)(Dav1dLoopRestorationDSPContext *const c,
-                                                     const int bpc)
-{
-    const unsigned flags = dav1d_get_cpu_flags();
-
-    if (!(flags & DAV1D_PPC_CPU_FLAG_VSX)) return;
-
-#if BITDEPTH == 8
-    c->wiener[0] = c->wiener[1] = wiener_filter_vsx;
-#endif
-}
-
-

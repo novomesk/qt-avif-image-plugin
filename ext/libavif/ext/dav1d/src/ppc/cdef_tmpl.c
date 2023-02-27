@@ -24,15 +24,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdlib.h>
-
-#include "common/bitdepth.h"
-#include "common/intops.h"
-
-#include "src/cdef.h"
-#include "src/cpu.h"
-
 #include "src/ppc/dav1d_types.h"
+#include "src/ppc/cdef.h"
 
 #if BITDEPTH == 8
 static inline i16x8 vconstrain(const i16x8 diff, const int16_t threshold,
@@ -89,7 +82,15 @@ static inline void copy4xN(uint16_t *tmp, const ptrdiff_t tmp_stride,
     vec_st(l0, 0, tmp + (h + 0) * 8);
     vec_st(l1, 0, tmp + (h + 1) * 8);
 
-    for (int y = 0; y < h; y++) {
+    int y_with_left_edge = 0;
+    if (!(edges & CDEF_HAVE_LEFT)) {
+        u16x8 l = u8h_to_u16(vec_vsx_ld(0, src));
+        vec_vsx_st(l, 0, tmp + 2);
+
+        y_with_left_edge = 1;
+    }
+
+    for (int y = y_with_left_edge; y < h; y++) {
         u16x8 l = u8h_to_u16(vec_vsx_ld(0, src - 2 + y * src_stride));
         vec_st(l, 0, tmp + y * 8);
     }
@@ -167,7 +168,18 @@ static inline void copy8xN(uint16_t *tmp, const ptrdiff_t tmp_stride,
     vec_st(l1h, 0, tmp + (h + 1) * 16);
     vec_st(l1l, 0, tmp + (h + 1) * 16 + 8);
 
-    for (int y = 0; y < h; y++) {
+    int y_with_left_edge = 0;
+    if (!(edges & CDEF_HAVE_LEFT)) {
+        u8x16 l = vec_vsx_ld(0, src);
+        u16x8 lh = u8h_to_u16(l);
+        u16x8 ll = u8l_to_u16(l);
+        vec_vsx_st(lh, 0, tmp + 2);
+        vec_vsx_st(ll, 0, tmp + 8 + 2);
+
+        y_with_left_edge = 1;
+    }
+
+    for (int y = y_with_left_edge; y < h; y++) {
         u8x16 l = vec_vsx_ld(0, src - 2 + y * src_stride);
         u16x8 lh = u8h_to_u16(l);
         u16x8 ll = u8l_to_u16(l);
@@ -451,20 +463,19 @@ filter_8xN(pixel *dst, const ptrdiff_t dst_stride,
 
 }
 
-
 #define cdef_fn(w, h, tmp_stride) \
-static void cdef_filter_##w##x##h##_vsx(pixel *const dst, \
-                                        const ptrdiff_t dst_stride, \
-                                        const pixel (*left)[2], \
-                                        const pixel *const top, \
-                                        const pixel *const bottom, \
-                                        const int pri_strength, \
-                                        const int sec_strength, \
-                                        const int dir, \
-                                        const int damping, \
-                                        const enum CdefEdgeFlags edges) \
+void dav1d_cdef_filter_##w##x##h##_vsx(pixel *const dst, \
+                                       const ptrdiff_t dst_stride, \
+                                       const pixel (*left)[2], \
+                                       const pixel *const top, \
+                                       const pixel *const bottom, \
+                                       const int pri_strength, \
+                                       const int sec_strength, \
+                                       const int dir, \
+                                       const int damping, \
+                                       const enum CdefEdgeFlags edges) \
 { \
-    ALIGN_STK_16(uint16_t, tmp_buf, 12 * tmp_stride,); \
+    ALIGN_STK_16(uint16_t, tmp_buf, 12 * tmp_stride + 8,); \
     uint16_t *tmp = tmp_buf + 2 * tmp_stride + 2; \
     filter_##w##xN(dst, dst_stride, left, top, bottom, w, h, pri_strength, \
                    sec_strength, dir, damping, edges, tmp_stride, tmp); \
@@ -474,16 +485,3 @@ cdef_fn(4, 4, 8);
 cdef_fn(4, 8, 8);
 cdef_fn(8, 8, 16);
 #endif
-
-COLD void bitfn(dav1d_cdef_dsp_init_ppc)(Dav1dCdefDSPContext *const c) {
-    const unsigned flags = dav1d_get_cpu_flags();
-
-    if (!(flags & DAV1D_PPC_CPU_FLAG_VSX)) return;
-
-#if BITDEPTH == 8
-    // c->dir = dav1d_cdef_find_dir_vsx;
-    c->fb[0] = cdef_filter_8x8_vsx;
-    c->fb[1] = cdef_filter_4x8_vsx;
-    c->fb[2] = cdef_filter_4x4_vsx;
-#endif
-}

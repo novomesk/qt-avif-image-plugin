@@ -749,9 +749,9 @@ static inline void splat_intraref(const Dav1dContext *const c,
     c->refmvs_dsp.splat_mv(&t->rt.r[(t->by & 31) + 5], &tmpl, t->bx, bw4, bh4);
 }
 
-static inline void mc_lowest_px(int *const dst, const int by4, const int bh4,
-                                const int mvy, const int ss_ver,
-                                const struct ScalableMotionParams *const smp)
+static void mc_lowest_px(int *const dst, const int by4, const int bh4,
+                         const int mvy, const int ss_ver,
+                         const struct ScalableMotionParams *const smp)
 {
     const int v_mul = 4 >> ss_ver;
     if (!smp->scale) {
@@ -766,14 +766,11 @@ static inline void mc_lowest_px(int *const dst, const int by4, const int bh4,
     }
 }
 
-static inline void affine_lowest_px(Dav1dTaskContext *const t,
-                                    int *const dst, const int is_chroma,
-                                    const uint8_t *const b_dim,
-                                    const Dav1dWarpedMotionParams *const wmp)
+static ALWAYS_INLINE void affine_lowest_px(Dav1dTaskContext *const t, int *const dst,
+                                           const uint8_t *const b_dim,
+                                           const Dav1dWarpedMotionParams *const wmp,
+                                           const int ss_ver, const int ss_hor)
 {
-    const Dav1dFrameContext *const f = t->f;
-    const int ss_ver = is_chroma && f->cur.p.layout == DAV1D_PIXEL_LAYOUT_I420;
-    const int ss_hor = is_chroma && f->cur.p.layout != DAV1D_PIXEL_LAYOUT_I444;
     const int h_mul = 4 >> ss_hor, v_mul = 4 >> ss_ver;
     assert(!((b_dim[0] * h_mul) & 7) && !((b_dim[1] * v_mul) & 7));
     const int32_t *const mat = wmp->matrix;
@@ -790,6 +787,25 @@ static inline void affine_lowest_px(Dav1dTaskContext *const t,
         const int dy = (int) (mvy >> 16) - 4;
         *dst = imax(*dst, dy + 4 + 8);
     }
+}
+
+static NOINLINE void affine_lowest_px_luma(Dav1dTaskContext *const t, int *const dst,
+                                           const uint8_t *const b_dim,
+                                           const Dav1dWarpedMotionParams *const wmp)
+{
+    affine_lowest_px(t, dst, b_dim, wmp, 0, 0);
+}
+
+static NOINLINE void affine_lowest_px_chroma(Dav1dTaskContext *const t, int *const dst,
+                                             const uint8_t *const b_dim,
+                                             const Dav1dWarpedMotionParams *const wmp)
+{
+    const Dav1dFrameContext *const f = t->f;
+    assert(f->cur.p.layout != DAV1D_PIXEL_LAYOUT_I400);
+    if (f->cur.p.layout == DAV1D_PIXEL_LAYOUT_I444)
+        affine_lowest_px_luma(t, dst, b_dim, wmp);
+    else
+        affine_lowest_px(t, dst, b_dim, wmp, f->cur.p.layout & DAV1D_PIXEL_LAYOUT_I420, 1);
 }
 
 static void obmc_lowest_px(Dav1dTaskContext *const t,
@@ -2071,11 +2087,14 @@ static int decode_b(Dav1dTaskContext *const t,
             const uint8_t (*const lf_lvls)[8][2] = (const uint8_t (*)[8][2])
                 &ts->lflvl[b->seg_id][0][b->ref[0] + 1][!is_globalmv];
             const uint16_t tx_split[2] = { b->tx_split0, b->tx_split1 };
+            enum RectTxfmSize ytx = b->max_ytx, uvtx = b->uvtx;
+            if (f->frame_hdr->segmentation.lossless[b->seg_id]) {
+                ytx  = (enum RectTxfmSize) TX_4X4;
+                uvtx = (enum RectTxfmSize) TX_4X4;
+            }
             dav1d_create_lf_mask_inter(t->lf_mask, f->lf.level, f->b4_stride, lf_lvls,
                                        t->bx, t->by, f->w4, f->h4, b->skip, bs,
-                                       f->frame_hdr->segmentation.lossless[b->seg_id] ?
-                                           (enum RectTxfmSize) TX_4X4 : b->max_ytx,
-                                       tx_split, b->uvtx, f->cur.p.layout,
+                                       ytx, tx_split, uvtx, f->cur.p.layout,
                                        &t->a->tx_lpf_y[bx4], &t->l.tx_lpf_y[by4],
                                        has_chroma ? &t->a->tx_lpf_uv[cbx4] : NULL,
                                        has_chroma ? &t->l.tx_lpf_uv[cby4] : NULL);
@@ -2150,9 +2169,9 @@ static int decode_b(Dav1dTaskContext *const t,
                 ((b->inter_mode == GLOBALMV && f->gmv_warp_allowed[b->ref[0]]) ||
                  (b->motion_mode == MM_WARP && t->warpmv.type > DAV1D_WM_TYPE_TRANSLATION)))
             {
-                affine_lowest_px(t, &lowest_px[b->ref[0]][0], 0, b_dim,
-                                 b->motion_mode == MM_WARP ? &t->warpmv :
-                                     &f->frame_hdr->gmv[b->ref[0]]);
+                affine_lowest_px_luma(t, &lowest_px[b->ref[0]][0], b_dim,
+                                      b->motion_mode == MM_WARP ? &t->warpmv :
+                                      &f->frame_hdr->gmv[b->ref[0]]);
             } else {
                 mc_lowest_px(&lowest_px[b->ref[0]][0], t->by, bh4, b->mv[0].y,
                              0, &f->svc[b->ref[0]][1]);
@@ -2203,9 +2222,9 @@ static int decode_b(Dav1dTaskContext *const t,
                         ((b->inter_mode == GLOBALMV && f->gmv_warp_allowed[b->ref[0]]) ||
                          (b->motion_mode == MM_WARP && t->warpmv.type > DAV1D_WM_TYPE_TRANSLATION)))
                     {
-                        affine_lowest_px(t, &lowest_px[b->ref[0]][1], 1, b_dim,
-                                         b->motion_mode == MM_WARP ? &t->warpmv :
-                                            &f->frame_hdr->gmv[b->ref[0]]);
+                        affine_lowest_px_chroma(t, &lowest_px[b->ref[0]][1], b_dim,
+                                                b->motion_mode == MM_WARP ? &t->warpmv :
+                                                &f->frame_hdr->gmv[b->ref[0]]);
                     } else {
                         mc_lowest_px(&lowest_px[b->ref[0]][1],
                                      t->by & ~ss_ver, bh4 << (bh4 == ss_ver),
@@ -2220,8 +2239,8 @@ static int decode_b(Dav1dTaskContext *const t,
             // y
             for (int i = 0; i < 2; i++) {
                 if (b->inter_mode == GLOBALMV_GLOBALMV && f->gmv_warp_allowed[b->ref[i]]) {
-                    affine_lowest_px(t, &lowest_px[b->ref[i]][0], 0, b_dim,
-                                     &f->frame_hdr->gmv[b->ref[i]]);
+                    affine_lowest_px_luma(t, &lowest_px[b->ref[i]][0], b_dim,
+                                          &f->frame_hdr->gmv[b->ref[i]]);
                 } else {
                     mc_lowest_px(&lowest_px[b->ref[i]][0], t->by, bh4,
                                  b->mv[i].y, 0, &f->svc[b->ref[i]][1]);
@@ -2233,8 +2252,8 @@ static int decode_b(Dav1dTaskContext *const t,
                 if (b->inter_mode == GLOBALMV_GLOBALMV &&
                     imin(cbw4, cbh4) > 1 && f->gmv_warp_allowed[b->ref[i]])
                 {
-                    affine_lowest_px(t, &lowest_px[b->ref[i]][1], 1, b_dim,
-                                     &f->frame_hdr->gmv[b->ref[i]]);
+                    affine_lowest_px_chroma(t, &lowest_px[b->ref[i]][1], b_dim,
+                                            &f->frame_hdr->gmv[b->ref[i]]);
                 } else {
                     mc_lowest_px(&lowest_px[b->ref[i]][1], t->by, bh4,
                                  b->mv[i].y, ss_ver, &f->svc[b->ref[i]][1]);
@@ -3407,7 +3426,7 @@ void dav1d_decode_frame_exit(Dav1dFrameContext *const f, const int retval) {
                (size_t)f->frame_thread.cf_sz * 128 * 128 / 2);
     }
     for (int i = 0; i < 7; i++) {
-        if (f->refp[i].p.data[0])
+        if (f->refp[i].p.frame_hdr)
             dav1d_thread_picture_unref(&f->refp[i]);
         dav1d_ref_dec(&f->ref_mvs_ref[i]);
     }
@@ -3440,13 +3459,12 @@ int dav1d_decode_frame(Dav1dFrameContext *const f) {
     // wait until all threads have completed
     if (!res) {
         if (f->c->n_tc > 1) {
-            pthread_mutex_lock(&f->task_thread.ttd->lock);
             res = dav1d_task_create_tile_sbrow(f, 0, 1);
+            pthread_mutex_lock(&f->task_thread.ttd->lock);
+            pthread_cond_signal(&f->task_thread.ttd->cond);
             if (!res) {
-                const int uses_2pass = f->c->n_fc > 1;
                 while (!f->task_thread.done[0] ||
-                       (uses_2pass && !f->task_thread.done[1]) ||
-                       f->task_thread.task_counter > 0)
+                       atomic_load(&f->task_thread.task_counter) > 0)
                 {
                     pthread_cond_wait(&f->task_thread.cond,
                                       &f->task_thread.ttd->lock);
@@ -3469,7 +3487,7 @@ int dav1d_decode_frame(Dav1dFrameContext *const f) {
 
 static int get_upscale_x0(const int in_w, const int out_w, const int step) {
     const int err = out_w * step - (in_w << 14);
-    const int x0 = (-((out_w - in_w) << 13) + (out_w >> 1)) / out_w + 128 - (err >> 1);
+    const int x0 = (-((out_w - in_w) << 13) + (out_w >> 1)) / out_w + 128 - (err / 2);
     return x0 & 0x3fff;
 }
 
@@ -3491,10 +3509,13 @@ int dav1d_submit_frame(Dav1dContext *const c) {
                               &c->task_thread.lock);
         out_delayed = &c->frame_thread.out_delayed[next];
         if (out_delayed->p.data[0] || atomic_load(&f->task_thread.error)) {
-            if (atomic_load(&c->task_thread.first) + 1U < c->n_fc)
+            unsigned first = atomic_load(&c->task_thread.first);
+            if (first + 1U < c->n_fc)
                 atomic_fetch_add(&c->task_thread.first, 1U);
             else
                 atomic_store(&c->task_thread.first, 0);
+            atomic_compare_exchange_strong(&c->task_thread.reset_task_cur,
+                                           &first, UINT_MAX);
             if (c->task_thread.cur && c->task_thread.cur < c->n_fc)
                 c->task_thread.cur--;
         }
@@ -3706,7 +3727,8 @@ int dav1d_submit_frame(Dav1dContext *const c) {
     const int uses_2pass = c->n_fc > 1;
     const int cols = f->frame_hdr->tiling.cols;
     const int rows = f->frame_hdr->tiling.rows;
-    f->task_thread.task_counter = (cols * rows + f->sbh) << uses_2pass;
+    atomic_store(&f->task_thread.task_counter,
+                 (cols * rows + f->sbh) << uses_2pass);
 
     // ref_mvs
     if (IS_INTER_OR_SWITCH(f->frame_hdr) || f->frame_hdr->allow_intrabc) {
@@ -3726,9 +3748,10 @@ int dav1d_submit_frame(Dav1dContext *const c) {
         if (f->frame_hdr->use_ref_frame_mvs) {
             for (int i = 0; i < 7; i++) {
                 const int refidx = f->frame_hdr->refidx[i];
+                const int ref_w = ((ref_coded_width[i] + 7) >> 3) << 1;
+                const int ref_h = ((f->refp[i].p.p.h + 7) >> 3) << 1;
                 if (c->refs[refidx].refmvs != NULL &&
-                    ref_coded_width[i] == f->cur.p.w &&
-                    f->refp[i].p.p.h == f->cur.p.h)
+                    ref_w == f->bw && ref_h == f->bh)
                 {
                     f->ref_mvs_ref[i] = c->refs[refidx].refmvs;
                     dav1d_ref_inc(f->ref_mvs_ref[i]);
@@ -3809,7 +3832,7 @@ int dav1d_submit_frame(Dav1dContext *const c) {
     const unsigned refresh_frame_flags = f->frame_hdr->refresh_frame_flags;
     for (int i = 0; i < 8; i++) {
         if (refresh_frame_flags & (1 << i)) {
-            if (c->refs[i].p.p.data[0])
+            if (c->refs[i].p.p.frame_hdr)
                 dav1d_thread_picture_unref(&c->refs[i].p);
             dav1d_thread_picture_ref(&c->refs[i].p, &f->sr_cur);
 
@@ -3839,7 +3862,7 @@ int dav1d_submit_frame(Dav1dContext *const c) {
             dav1d_thread_picture_unref(&c->out);
             for (int i = 0; i < 8; i++) {
                 if (refresh_frame_flags & (1 << i)) {
-                    if (c->refs[i].p.p.data[0])
+                    if (c->refs[i].p.p.frame_hdr)
                         dav1d_thread_picture_unref(&c->refs[i].p);
                     dav1d_cdf_thread_unref(&c->cdf[i]);
                     dav1d_ref_dec(&c->refs[i].segmap);
@@ -3860,7 +3883,7 @@ error:
     if (f->frame_hdr->refresh_context)
         dav1d_cdf_thread_unref(&f->out_cdf);
     for (int i = 0; i < 7; i++) {
-        if (f->refp[i].p.data[0])
+        if (f->refp[i].p.frame_hdr)
             dav1d_thread_picture_unref(&f->refp[i]);
         dav1d_ref_dec(&f->ref_mvs_ref[i]);
     }

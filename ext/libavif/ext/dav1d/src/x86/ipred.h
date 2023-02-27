@@ -68,7 +68,7 @@ decl_fn(cfl_ac, ipred_cfl_ac_444);
 
 decl_fn(pal_pred, pal_pred);
 
-COLD void bitfn(dav1d_intra_pred_dsp_init_x86)(Dav1dIntraPredDSPContext *const c) {
+static ALWAYS_INLINE void intra_pred_dsp_init_x86(Dav1dIntraPredDSPContext *const c) {
     const unsigned flags = dav1d_get_cpu_flags();
 
     if (!(flags & DAV1D_X86_CPU_FLAG_SSSE3)) return;
@@ -83,6 +83,9 @@ COLD void bitfn(dav1d_intra_pred_dsp_init_x86)(Dav1dIntraPredDSPContext *const c
     init_angular_ipred_fn(SMOOTH_PRED,   ipred_smooth,   ssse3);
     init_angular_ipred_fn(SMOOTH_H_PRED, ipred_smooth_h, ssse3);
     init_angular_ipred_fn(SMOOTH_V_PRED, ipred_smooth_v, ssse3);
+#if BITDEPTH == 8
+    init_angular_ipred_fn(Z1_PRED,       ipred_z1,       ssse3);
+#endif
     init_angular_ipred_fn(FILTER_PRED,   ipred_filter,   ssse3);
 
     init_cfl_pred_fn(DC_PRED,      ipred_cfl,      ssse3);
