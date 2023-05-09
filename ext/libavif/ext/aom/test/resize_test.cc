@@ -377,13 +377,15 @@ AV1_INSTANTIATE_TEST_SUITE(ResizeInternalTestLarge,
                            ::testing::Values(::libaom_test::kOnePassGood));
 #endif
 
+// Parameters: test mode, speed, threads
 class ResizeRealtimeTest
-    : public ::libaom_test::CodecTestWith2Params<libaom_test::TestMode, int>,
+    : public ::libaom_test::CodecTestWith3Params<libaom_test::TestMode, int,
+                                                 int>,
       public ::libaom_test::EncoderTest {
  protected:
   ResizeRealtimeTest()
-      : EncoderTest(GET_PARAM(0)), set_scale_mode_(false),
-        set_scale_mode2_(false) {}
+      : EncoderTest(GET_PARAM(0)), num_threads_(GET_PARAM(3)),
+        set_scale_mode_(false), set_scale_mode2_(false) {}
   virtual ~ResizeRealtimeTest() {}
 
   virtual void PreEncodeFrameHook(libaom_test::VideoSource *video,
@@ -457,6 +459,7 @@ class ResizeRealtimeTest
     cfg_.rc_dropframe_thresh = 1;
     // Disable error_resilience mode.
     cfg_.g_error_resilient = 0;
+    cfg_.g_threads = num_threads_;
     // Run at low bitrate.
     cfg_.rc_target_bitrate = 200;
     // We use max(kInitialWidth, kInitialHeight) because during the test
@@ -472,6 +475,7 @@ class ResizeRealtimeTest
 
   std::vector<FrameInfo> frame_info_list_;
   int set_cpu_used_;
+  int num_threads_;
   bool change_bitrate_;
   unsigned int frame_change_bitrate_;
   double mismatch_psnr_;
@@ -864,7 +868,7 @@ AV1_INSTANTIATE_TEST_SUITE(ResizeTest,
                            ::testing::Values(::libaom_test::kRealTime));
 AV1_INSTANTIATE_TEST_SUITE(ResizeRealtimeTest,
                            ::testing::Values(::libaom_test::kRealTime),
-                           ::testing::Range(6, 10));
+                           ::testing::Range(6, 10), ::testing::Values(1, 2, 4));
 AV1_INSTANTIATE_TEST_SUITE(ResizeCspTest,
                            ::testing::Values(::libaom_test::kRealTime));
 

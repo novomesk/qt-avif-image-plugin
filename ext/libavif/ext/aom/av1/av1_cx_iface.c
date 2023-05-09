@@ -2930,7 +2930,7 @@ static aom_codec_err_t encoder_encode(aom_codec_alg_priv_t *ctx,
         AV1EncoderConfig *oxcf = &cpi->oxcf;
         const BLOCK_SIZE sb_size = av1_select_sb_size(
             oxcf, oxcf->frm_dim_cfg.width, oxcf->frm_dim_cfg.height,
-            cpi->svc.number_spatial_layers);
+            ppi->number_spatial_layers);
         oxcf->border_in_pixels =
             av1_get_enc_border_size(av1_is_resize_needed(oxcf),
                                     oxcf->kf_cfg.key_freq_max == 0, sb_size);

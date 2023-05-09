@@ -39,6 +39,8 @@
  */
 
 #if CONFIG_MULTITHREAD && defined(_WIN32)
+#undef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 /* Declare a per-compilation-unit state variable to track the progress
  * of calling func() only once. This must be at global scope because

@@ -182,6 +182,7 @@ static void tf_motion_search(AV1_COMP *cpi, MACROBLOCK *mb,
     ms_params.mv_cost_params.mv_cost_type = MV_COST_NONE;
 
     MV subpel_start_mv = get_mv_from_fullmv(&best_mv.as_fullmv);
+    assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, subpel_start_mv));
     error = cpi->mv_search_params.find_fractional_mv_step(
         &mb->e_mbd, &cpi->common, &ms_params, subpel_start_mv, &best_mv.as_mv,
         &distortion, &sse, NULL);
@@ -229,6 +230,7 @@ static void tf_motion_search(AV1_COMP *cpi, MACROBLOCK *mb,
         ms_params.mv_cost_params.mv_cost_type = MV_COST_NONE;
 
         subpel_start_mv = get_mv_from_fullmv(&best_mv.as_fullmv);
+        assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, subpel_start_mv));
         error = cpi->mv_search_params.find_fractional_mv_step(
             &mb->e_mbd, &cpi->common, &ms_params, subpel_start_mv,
             &best_mv.as_mv, &distortion, &sse, NULL);

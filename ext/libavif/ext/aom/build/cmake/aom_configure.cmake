@@ -230,9 +230,6 @@ if(AOM_TARGET_SYSTEM STREQUAL "Windows")
   # The default _WIN32_WINNT value in MinGW is 0x0502 (Windows XP with SP2). Set
   # it to 0x0601 (Windows 7).
   add_compiler_flag_if_supported("-D_WIN32_WINNT=0x0601")
-  # Prevent windows.h from defining the min and max macros. This allows us to
-  # use std::min and std::max.
-  add_compiler_flag_if_supported("-DNOMINMAX")
 endif()
 
 #
@@ -248,7 +245,7 @@ aom_get_inline("INLINE")
 set(HAVE_PTHREAD_H ${CMAKE_USE_PTHREADS_INIT})
 aom_check_source_compiles("unistd_check" "#include <unistd.h>" HAVE_UNISTD_H)
 
-if(NOT MSVC)
+if(NOT WIN32)
   aom_push_var(CMAKE_REQUIRED_LIBRARIES "m")
   aom_check_c_compiles("fenv_check" "#define _GNU_SOURCE
                         #include <fenv.h>
@@ -300,7 +297,16 @@ if(MSVC)
   endif()
 else()
   require_c_flag("-std=c99" YES)
-  require_cxx_flag_nomsvc("-std=c++11" YES)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+     AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU"
+     AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    # Microsoft's C++ Standard Library requires C++14 as it's MSVC's default and
+    # minimum supported C++ version. If Clang is using this Standard Library
+    # implementation, it cannot target C++11.
+    require_cxx_flag_nomsvc("-std=c++14" YES)
+  else()
+    require_cxx_flag_nomsvc("-std=c++11" YES)
+  endif()
   add_compiler_flag_if_supported("-Wall")
   add_compiler_flag_if_supported("-Wdisabled-optimization")
   add_compiler_flag_if_supported("-Wextra")

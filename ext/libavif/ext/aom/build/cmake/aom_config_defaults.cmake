@@ -155,6 +155,8 @@ set_aom_config_var(CONFIG_TFLITE 0
                    "AV1 experiment: Enable tensorflow lite library.")
 set_aom_config_var(CONFIG_THREE_PASS 0
                    "AV1 experiment: Enable three-pass encoding.")
+set_aom_config_var(CONFIG_CWG_C013 0
+                   "AV1 experiment: Support for 7.x and 8.x levels.")
 
 #
 # Variables in this section control optional features of the build system.

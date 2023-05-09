@@ -58,7 +58,9 @@ int aom_arm_cpu_caps(void) {
 
 #elif defined(_MSC_VER) /* end !CONFIG_RUNTIME_CPU_DETECT || __APPLE__ */
 /*For GetExceptionCode() and EXCEPTION_ILLEGAL_INSTRUCTION.*/
+#undef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#undef WIN32_EXTRA_LEAN
 #define WIN32_EXTRA_LEAN
 #include <windows.h>
 

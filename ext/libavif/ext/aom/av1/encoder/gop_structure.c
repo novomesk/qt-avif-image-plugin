@@ -813,7 +813,7 @@ static void set_ld_layer_depth(GF_GROUP *gf_group, int gop_length) {
     }
     gf_group->layer_depth[gf_index] = AOMMAX(log_gop_length - count, 0);
   }
-  gf_group->max_layer_depth = log_gop_length;
+  gf_group->max_layer_depth = AOMMIN(log_gop_length, MAX_ARF_LAYERS);
 }
 
 void av1_gop_setup_structure(AV1_COMP *cpi) {

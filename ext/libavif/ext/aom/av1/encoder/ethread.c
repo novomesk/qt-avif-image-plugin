@@ -1314,15 +1314,9 @@ static AOM_INLINE void prepare_enc_workers(AV1_COMP *cpi, AVxWorkerHook hook,
                                            int num_workers) {
   MultiThreadInfo *const mt_info = &cpi->mt_info;
   AV1_COMMON *const cm = &cpi->common;
-  MACROBLOCKD *xd = &cpi->td.mb.e_mbd;
   for (int i = num_workers - 1; i >= 0; i--) {
     AVxWorker *const worker = &mt_info->workers[i];
     EncWorkerData *const thread_data = &mt_info->tile_thr_data[i];
-
-    // Initialize loopfilter data
-    thread_data->lf_sync = &mt_info->lf_row_sync;
-    thread_data->lf_data = &thread_data->lf_sync->lfdata[i];
-    loop_filter_data_reset(thread_data->lf_data, &cm->cur_frame->buf, cm, xd);
 
     worker->hook = hook;
     worker->data1 = thread_data;
@@ -1613,7 +1607,7 @@ static AOM_INLINE int fp_compute_max_mb_rows(const AV1_COMMON *cm,
 }
 #endif
 
-static void lpf_pipeline_mt_init(AV1_COMP *cpi) {
+static void lpf_pipeline_mt_init(AV1_COMP *cpi, int num_workers) {
   // Pipelining of loop-filtering after encoding is enabled when loop-filter
   // level is chosen based on quantizer and frame type. It is disabled in case
   // of 'LOOPFILTER_SELECTIVELY' as the stats collected during encoding stage
@@ -1624,18 +1618,20 @@ static void lpf_pipeline_mt_init(AV1_COMP *cpi) {
   const int use_superres = av1_superres_scaled(cm);
   const int use_cdef = is_cdef_used(cm);
   const int use_restoration = is_restoration_used(cm);
+  MultiThreadInfo *const mt_info = &cpi->mt_info;
+  MACROBLOCKD *xd = &cpi->td.mb.e_mbd;
 
   const unsigned int skip_apply_postproc_filters =
       derive_skip_apply_postproc_filters(cpi, use_loopfilter, use_cdef,
                                          use_superres, use_restoration);
-  cpi->mt_info.pipeline_lpf_mt_with_enc =
+  mt_info->pipeline_lpf_mt_with_enc =
       (cpi->oxcf.mode == REALTIME) && (cpi->oxcf.speed >= 5) &&
       (cpi->sf.lpf_sf.lpf_pick == LPF_PICK_FROM_Q) &&
       (cpi->oxcf.algo_cfg.loopfilter_control != LOOPFILTER_SELECTIVELY) &&
       !cpi->ppi->rtc_ref.non_reference_frame && !cm->features.allow_intrabc &&
       ((skip_apply_postproc_filters & SKIP_APPLY_LOOPFILTER) == 0);
 
-  if (!cpi->mt_info.pipeline_lpf_mt_with_enc) return;
+  if (!mt_info->pipeline_lpf_mt_with_enc) return;
 
   set_postproc_filter_default_params(cm);
 
@@ -1661,12 +1657,20 @@ static void lpf_pipeline_mt_init(AV1_COMP *cpi) {
 
     av1_loop_filter_frame_init(cm, plane_start, plane_end);
 
-    assert(cpi->mt_info.num_mod_workers[MOD_ENC] ==
-           cpi->mt_info.num_mod_workers[MOD_LPF]);
+    assert(mt_info->num_mod_workers[MOD_ENC] ==
+           mt_info->num_mod_workers[MOD_LPF]);
     loop_filter_frame_mt_init(cm, start_mi_row, end_mi_row, planes_to_lf,
-                              cpi->mt_info.num_mod_workers[MOD_LPF],
-                              &cpi->mt_info.lf_row_sync, lpf_opt_level,
+                              mt_info->num_mod_workers[MOD_LPF],
+                              &mt_info->lf_row_sync, lpf_opt_level,
                               cm->seq_params->mib_size_log2);
+
+    for (int i = num_workers - 1; i >= 0; i--) {
+      EncWorkerData *const thread_data = &mt_info->tile_thr_data[i];
+      // Initialize loopfilter data
+      thread_data->lf_sync = &mt_info->lf_row_sync;
+      thread_data->lf_data = &thread_data->lf_sync->lfdata[i];
+      loop_filter_data_reset(thread_data->lf_data, &cm->cur_frame->buf, cm, xd);
+    }
   }
 }
 
@@ -1701,7 +1705,8 @@ void av1_encode_tiles_row_mt(AV1_COMP *cpi) {
                      cpi->oxcf.algo_cfg.cdf_update_mode);
   }
 
-  lpf_pipeline_mt_init(cpi);
+  num_workers = AOMMIN(num_workers, mt_info->num_workers);
+  lpf_pipeline_mt_init(cpi, num_workers);
 
   av1_init_tile_data(cpi);
 
@@ -1730,8 +1735,6 @@ void av1_encode_tiles_row_mt(AV1_COMP *cpi) {
                              this_tile->tile_info.mi_col_end, tile_row);
     }
   }
-
-  num_workers = AOMMIN(num_workers, mt_info->num_workers);
 
   assign_tile_to_thread(thread_id_to_tile_id, tile_cols * tile_rows,
                         num_workers);

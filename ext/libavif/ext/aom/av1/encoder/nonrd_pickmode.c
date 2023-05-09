@@ -141,7 +141,7 @@ enum {
 // The original scan order (default_scan_8x8) is modified according to the extra
 // transpose in hadamard c implementation, i.e., aom_hadamard_lp_8x8_c and
 // aom_hadamard_8x8_c.
-static const int16_t default_scan_8x8_transpose[64] = {
+DECLARE_ALIGNED(16, static const int16_t, default_scan_8x8_transpose[64]) = {
   0,  8,  1,  2,  9,  16, 24, 17, 10, 3,  4,  11, 18, 25, 32, 40,
   33, 26, 19, 12, 5,  6,  13, 20, 27, 34, 41, 48, 56, 49, 42, 35,
   28, 21, 14, 7,  15, 22, 29, 36, 43, 50, 57, 58, 51, 44, 37, 30,
@@ -155,7 +155,8 @@ static const int16_t default_scan_8x8_transpose[64] = {
 // guaranteed to scan low coefficients first, therefore we modify the scan order
 // accordingly.
 // Note that this one has to be used together with default_scan_8x8_transpose.
-static const int16_t av1_default_iscan_8x8_transpose[64] = {
+DECLARE_ALIGNED(16, static const int16_t,
+                av1_default_iscan_8x8_transpose[64]) = {
   0,  2,  3,  9,  10, 20, 21, 35, 1,  4,  8,  11, 19, 22, 34, 36,
   5,  7,  12, 18, 23, 33, 37, 48, 6,  13, 17, 24, 32, 38, 47, 49,
   14, 16, 25, 31, 39, 46, 50, 57, 15, 26, 30, 40, 45, 51, 56, 58,
@@ -165,7 +166,8 @@ static const int16_t av1_default_iscan_8x8_transpose[64] = {
 // The original scan order (default_scan_16x16) is modified according to the
 // extra transpose in hadamard c implementation in lp case, i.e.,
 // aom_hadamard_lp_16x16_c.
-static const int16_t default_scan_lp_16x16_transpose[256] = {
+DECLARE_ALIGNED(16, static const int16_t,
+                default_scan_lp_16x16_transpose[256]) = {
   0,   8,   2,   4,   10,  16,  24,  18,  12,  6,   64,  14,  20,  26,  32,
   40,  34,  28,  22,  72,  66,  68,  74,  80,  30,  36,  42,  48,  56,  50,
   44,  38,  88,  82,  76,  70,  128, 78,  84,  90,  96,  46,  52,  58,  1,
@@ -191,7 +193,8 @@ static const int16_t default_scan_lp_16x16_transpose[256] = {
 // extra shift in hadamard c implementation in fp case, i.e.,
 // aom_hadamard_16x16_c. Note that 16x16 lp and fp hadamard generate different
 // outputs, so we handle them separately.
-static const int16_t default_scan_fp_16x16_transpose[256] = {
+DECLARE_ALIGNED(16, static const int16_t,
+                default_scan_fp_16x16_transpose[256]) = {
   0,   4,   2,   8,   6,   16,  20,  18,  12,  10,  64,  14,  24,  22,  32,
   36,  34,  28,  26,  68,  66,  72,  70,  80,  30,  40,  38,  48,  52,  50,
   44,  42,  84,  82,  76,  74,  128, 78,  88,  86,  96,  46,  56,  54,  1,
@@ -219,7 +222,8 @@ static const int16_t default_scan_fp_16x16_transpose[256] = {
 // such that the normal scan order is no longer guaranteed to scan low
 // coefficients first, therefore we modify the scan order accordingly. Note that
 // this one has to be used together with default_scan_lp_16x16_transpose.
-static const int16_t av1_default_iscan_lp_16x16_transpose[256] = {
+DECLARE_ALIGNED(16, static const int16_t,
+                av1_default_iscan_lp_16x16_transpose[256]) = {
   0,   44,  2,   46,  3,   63,  9,   69,  1,   45,  4,   64,  8,   68,  11,
   87,  5,   65,  7,   67,  12,  88,  18,  94,  6,   66,  13,  89,  17,  93,
   24,  116, 14,  90,  16,  92,  25,  117, 31,  123, 15,  91,  26,  118, 30,
@@ -247,7 +251,8 @@ static const int16_t av1_default_iscan_lp_16x16_transpose[256] = {
 // such that the normal scan order is no longer guaranteed to scan low
 // coefficients first, therefore we modify the scan order accordingly. Note that
 // this one has to be used together with default_scan_fp_16x16_transpose.
-static const int16_t av1_default_iscan_fp_16x16_transpose[256] = {
+DECLARE_ALIGNED(16, static const int16_t,
+                av1_default_iscan_fp_16x16_transpose[256]) = {
   0,   44,  2,   46,  1,   45,  4,   64,  3,   63,  9,   69,  8,   68,  11,
   87,  5,   65,  7,   67,  6,   66,  13,  89,  12,  88,  18,  94,  17,  93,
   24,  116, 14,  90,  16,  92,  15,  91,  26,  118, 25,  117, 31,  123, 30,
@@ -483,6 +488,7 @@ static int combined_motion_search(AV1_COMP *cpi, MACROBLOCK *x,
                                             start_mv, fullpel_performed_well);
 
     MV subpel_start_mv = get_mv_from_fullmv(&tmp_mv->as_fullmv);
+    assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, subpel_start_mv));
     // adaptively downgrade subpel search method based on block properties
     if (use_aggressive_subpel_search_method(
             x, sf->rt_sf.use_adaptive_subpel_search, fullpel_performed_well))
@@ -574,6 +580,7 @@ static int search_new_mv(AV1_COMP *cpi, MACROBLOCK *x,
           subpel_select(cpi, x, bsize, &best_mv, ref_mv, start_mv, false);
     }
     MV start_mv = get_mv_from_fullmv(&best_mv.as_fullmv);
+    assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, start_mv));
     cpi->mv_search_params.find_fractional_mv_step(
         xd, cm, &ms_params, start_mv, &best_mv.as_mv, &dis,
         &x->pred_sse[ref_frame], NULL);

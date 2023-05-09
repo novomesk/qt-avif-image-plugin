@@ -204,17 +204,23 @@ void av1_make_default_subpel_ms_params(SUBPEL_MOTION_SEARCH_PARAMS *ms_params,
 }
 
 void av1_set_mv_search_range(FullMvLimits *mv_limits, const MV *mv) {
-  int col_min =
-      GET_MV_RAWPEL(mv->col) - MAX_FULL_PEL_VAL + (mv->col & 7 ? 1 : 0);
-  int row_min =
-      GET_MV_RAWPEL(mv->row) - MAX_FULL_PEL_VAL + (mv->row & 7 ? 1 : 0);
-  int col_max = GET_MV_RAWPEL(mv->col) + MAX_FULL_PEL_VAL;
-  int row_max = GET_MV_RAWPEL(mv->row) + MAX_FULL_PEL_VAL;
+  // Calculate the outermost full-pixel MVs which are inside the limits set by
+  // av1_set_subpel_mv_search_range().
+  //
+  // The subpel limits are simply mv->col +/- 8*MAX_FULL_PEL_VAL, and similar
+  // for mv->row. We can then divide by 8 to find the fullpel MV limits. But
+  // we have to be careful about the rounding. We want these bounds to be
+  // at least as tight as the subpel limits, which means that we must round
+  // the minimum values up and the maximum values down when dividing.
+  int col_min = ((mv->col + 7) >> 3) - MAX_FULL_PEL_VAL;
+  int row_min = ((mv->row + 7) >> 3) - MAX_FULL_PEL_VAL;
+  int col_max = (mv->col >> 3) + MAX_FULL_PEL_VAL;
+  int row_max = (mv->row >> 3) + MAX_FULL_PEL_VAL;
 
-  col_min = AOMMAX(col_min, GET_MV_RAWPEL(MV_LOW) + 1);
-  row_min = AOMMAX(row_min, GET_MV_RAWPEL(MV_LOW) + 1);
-  col_max = AOMMIN(col_max, GET_MV_RAWPEL(MV_UPP) - 1);
-  row_max = AOMMIN(row_max, GET_MV_RAWPEL(MV_UPP) - 1);
+  col_min = AOMMAX(col_min, (MV_LOW >> 3) + 1);
+  row_min = AOMMAX(row_min, (MV_LOW >> 3) + 1);
+  col_max = AOMMIN(col_max, (MV_UPP >> 3) - 1);
+  row_max = AOMMIN(row_max, (MV_UPP >> 3) - 1);
 
   // Get intersection of UMV window and valid MV window to reduce # of checks
   // in diamond search.

@@ -1013,10 +1013,10 @@ static void fill_variance_tree_leaves(
     AV1_COMP *cpi, MACROBLOCK *x, VP128x128 *vt, VP16x16 *vt2,
     PART_EVAL_STATUS *force_split, int avg_16x16[][4], int maxvar_16x16[][4],
     int minvar_16x16[][4], int *variance4x4downsample, int64_t *thresholds,
-    uint8_t *src, int src_stride, const uint8_t *dst, int dst_stride) {
+    uint8_t *src, int src_stride, const uint8_t *dst, int dst_stride,
+    bool is_key_frame) {
   AV1_COMMON *cm = &cpi->common;
   MACROBLOCKD *xd = &x->e_mbd;
-  const int is_key_frame = frame_is_intra_only(cm);
   const int is_small_sb = (cm->seq_params->sb_size == BLOCK_64X64);
   const int num_64x64_blocks = is_small_sb ? 1 : 4;
   // TODO(kyslov) Bring back compute_minmax_variance with content type detection
@@ -1461,7 +1461,7 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   // for splits.
   fill_variance_tree_leaves(cpi, x, vt, vt2, force_split, avg_16x16,
                             maxvar_16x16, minvar_16x16, variance4x4downsample,
-                            thresholds, s, sp, d, dp);
+                            thresholds, s, sp, d, dp, is_key_frame);
 
   avg_64x64 = 0;
   for (m = 0; m < num_64x64_blocks; ++m) {

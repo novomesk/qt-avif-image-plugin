@@ -17,6 +17,7 @@
  */
 /*! @} - end defgroup gf_group_algo */
 
+#include <assert.h>
 #include <stdint.h>
 
 #include "config/aom_config.h"
@@ -938,6 +939,7 @@ static void allocate_gf_group_bits(GF_GROUP *gf_group,
   // Allocate extra bits to each ARF layer
   int i;
   int layer_extra_bits[MAX_ARF_LAYERS + 1] = { 0 };
+  assert(max_arf_layer <= MAX_ARF_LAYERS);
   for (i = 1; i <= max_arf_layer; ++i) {
     double fraction = (i == max_arf_layer) ? 1.0 : layer_fraction[i];
     layer_extra_bits[i] =

@@ -342,7 +342,7 @@ void av1_update_frame_size(AV1_COMP *cpi) {
   if (!cpi->ppi->seq_params_locked)
     set_sb_size(cm->seq_params,
                 av1_select_sb_size(&cpi->oxcf, cm->width, cm->height,
-                                   cpi->svc.number_spatial_layers));
+                                   cpi->ppi->number_spatial_layers));
 
   set_tile_info(cm, &cpi->oxcf.tile_cfg);
 }
@@ -363,6 +363,9 @@ static INLINE int does_level_match(int width, int height, double fps,
 static void set_bitstream_level_tier(AV1_PRIMARY *const ppi, int width,
                                      int height, double init_framerate) {
   SequenceHeader *const seq_params = &ppi->seq_params;
+#if CONFIG_CWG_C013
+  const AV1LevelParams *const level_params = &ppi->level_params;
+#endif
   // TODO(any): This is a placeholder function that only addresses dimensions
   // and max display sample rates.
   // Need to add checks for max bit rate, max decoded luma sample rate, header
@@ -403,25 +406,33 @@ static void set_bitstream_level_tier(AV1_PRIMARY *const ppi, int width,
   } else if (does_level_match(width, height, init_framerate, 8192, 4352, 120.0,
                               2)) {
     level = SEQ_LEVEL_6_2;
-  } else if (does_level_match(width, height, init_framerate, 16384, 8704, 30.0,
-                              2)) {
-    level = SEQ_LEVEL_7_0;
-  } else if (does_level_match(width, height, init_framerate, 16384, 8704, 60.0,
-                              2)) {
-    level = SEQ_LEVEL_7_1;
-  } else if (does_level_match(width, height, init_framerate, 16384, 8704, 120.0,
-                              2)) {
-    level = SEQ_LEVEL_7_2;
-  } else if (does_level_match(width, height, init_framerate, 32768, 17408, 30.0,
-                              2)) {
-    level = SEQ_LEVEL_8_0;
-  } else if (does_level_match(width, height, init_framerate, 32768, 17408, 60.0,
-                              2)) {
-    level = SEQ_LEVEL_8_1;
-  } else if (does_level_match(width, height, init_framerate, 32768, 17408,
-                              120.0, 2)) {
-    level = SEQ_LEVEL_8_2;
   }
+#if CONFIG_CWG_C013
+  // TODO(bohanli): currently target level is only working for the 0th operating
+  // point, so scalable coding is not supported.
+  else if (level_params->target_seq_level_idx[0] >= SEQ_LEVEL_7_0 &&
+           level_params->target_seq_level_idx[0] <= SEQ_LEVEL_8_3) {
+    // Only use level 7.x to 8.x when explicitly asked to.
+    if (does_level_match(width, height, init_framerate, 16384, 8704, 30.0, 2)) {
+      level = SEQ_LEVEL_7_0;
+    } else if (does_level_match(width, height, init_framerate, 16384, 8704,
+                                60.0, 2)) {
+      level = SEQ_LEVEL_7_1;
+    } else if (does_level_match(width, height, init_framerate, 16384, 8704,
+                                120.0, 2)) {
+      level = SEQ_LEVEL_7_2;
+    } else if (does_level_match(width, height, init_framerate, 32768, 17408,
+                                30.0, 2)) {
+      level = SEQ_LEVEL_8_0;
+    } else if (does_level_match(width, height, init_framerate, 32768, 17408,
+                                60.0, 2)) {
+      level = SEQ_LEVEL_8_1;
+    } else if (does_level_match(width, height, init_framerate, 32768, 17408,
+                                120.0, 2)) {
+      level = SEQ_LEVEL_8_2;
+    }
+  }
+#endif
 
   for (int i = 0; i < MAX_NUM_OPERATING_POINTS; ++i) {
     seq_params->seq_level_idx[i] = level;

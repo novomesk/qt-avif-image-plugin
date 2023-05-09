@@ -356,6 +356,7 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
     av1_make_default_subpel_ms_params(&ms_params, cpi, x, bsize, &ref_mv,
                                       cost_list);
     MV subpel_start_mv = get_mv_from_fullmv(&best_mv->as_fullmv);
+    assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, subpel_start_mv));
 
     switch (mbmi->motion_mode) {
       case SIMPLE_TRANSLATION:
@@ -655,6 +656,7 @@ int av1_joint_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
                                mask, mask_stride, id);
       ms_params.forced_stop = EIGHTH_PEL;
       MV start_mv = get_mv_from_fullmv(&best_mv.as_fullmv);
+      assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, start_mv));
       bestsme = cpi->mv_search_params.find_fractional_mv_step(
           xd, cm, &ms_params, start_mv, &best_mv.as_mv, &dis, &sse, NULL);
 
@@ -783,6 +785,7 @@ int av1_compound_single_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
                              mask, mask_stride, ref_idx);
     ms_params.forced_stop = EIGHTH_PEL;
     MV start_mv = get_mv_from_fullmv(&best_mv.as_fullmv);
+    assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, start_mv));
     bestsme = cpi->mv_search_params.find_fractional_mv_step(
         xd, cm, &ms_params, start_mv, &best_mv.as_mv, &dis, &sse, NULL);
   }
@@ -990,6 +993,7 @@ int_mv av1_simple_motion_search(AV1_COMP *const cpi, MACROBLOCK *x, int mi_row,
     ms_params.forced_stop = cpi->sf.mv_sf.simple_motion_subpel_force_stop;
 
     MV subpel_start_mv = get_mv_from_fullmv(&best_mv.as_fullmv);
+    assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, subpel_start_mv));
 
     cpi->mv_search_params.find_fractional_mv_step(
         xd, cm, &ms_params, subpel_start_mv, &best_mv.as_mv, &not_used,

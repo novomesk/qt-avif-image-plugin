@@ -847,7 +847,7 @@ void av1_setup_frame(AV1_COMP *cpi) {
     if (!cpi->ppi->seq_params_locked) {
       set_sb_size(cm->seq_params,
                   av1_select_sb_size(&cpi->oxcf, cm->width, cm->height,
-                                     cpi->svc.number_spatial_layers));
+                                     cpi->ppi->number_spatial_layers));
     }
   } else {
     const RefCntBuffer *const primary_ref_buf = get_primary_ref_frame_buf(cm);

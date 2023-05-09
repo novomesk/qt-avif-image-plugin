@@ -1180,6 +1180,46 @@ void av1_get_entropy_contexts(BLOCK_SIZE plane_bsize,
   get_entropy_contexts_plane(plane_bsize, pd, t_above, t_left);
 }
 
+// Special clamping used in the encoder when calculating a prediction
+//
+// Logically, all pixel fetches used for prediction are clamped against the
+// edges of the frame. But doing this directly is slow, so instead we allocate
+// a finite border around the frame and fill it with copies of the outermost
+// pixels.
+//
+// Since this border is finite, we need to clamp the motion vector before
+// prediction in order to avoid out-of-bounds reads. At the same time, this
+// clamp must not change the prediction result.
+//
+// We can balance both of these concerns by calculating how far we would have
+// to go in each direction before the extended prediction region (the current
+// block + AOM_INTERP_EXTEND many pixels around the block) would be mapped
+// so that it touches the frame only at one row or column. This is a special
+// point because any more extreme MV will always lead to the same prediction.
+// So it is safe to clamp at that point.
+//
+// In the worst case, this requires a border of
+//   max_block_width + 2*AOM_INTERP_EXTEND = 128 + 2*4 = 136 pixels
+// around the frame edges.
+static INLINE void enc_clamp_mv(const AV1_COMMON *cm, const MACROBLOCKD *xd,
+                                MV *mv) {
+  int bw = xd->width << MI_SIZE_LOG2;
+  int bh = xd->height << MI_SIZE_LOG2;
+
+  int px_to_left_edge = xd->mi_col << MI_SIZE_LOG2;
+  int px_to_right_edge = (cm->mi_params.mi_cols - xd->mi_col) << MI_SIZE_LOG2;
+  int px_to_top_edge = xd->mi_row << MI_SIZE_LOG2;
+  int px_to_bottom_edge = (cm->mi_params.mi_rows - xd->mi_row) << MI_SIZE_LOG2;
+
+  const SubpelMvLimits mv_limits = {
+    .col_min = -GET_MV_SUBPEL(px_to_left_edge + bw + AOM_INTERP_EXTEND),
+    .col_max = GET_MV_SUBPEL(px_to_right_edge + AOM_INTERP_EXTEND),
+    .row_min = -GET_MV_SUBPEL(px_to_top_edge + bh + AOM_INTERP_EXTEND),
+    .row_max = GET_MV_SUBPEL(px_to_bottom_edge + AOM_INTERP_EXTEND)
+  };
+  clamp_mv(mv, &mv_limits);
+}
+
 void av1_mv_pred(const AV1_COMP *cpi, MACROBLOCK *x, uint8_t *ref_y_buffer,
                  int ref_y_stride, int ref_frame, BLOCK_SIZE block_size) {
   const MV_REFERENCE_FRAME ref_frames[2] = { ref_frame, NONE_FRAME };
@@ -1202,7 +1242,9 @@ void av1_mv_pred(const AV1_COMP *cpi, MACROBLOCK *x, uint8_t *ref_y_buffer,
   int max_mv = 0;
   // Get the sad for each candidate reference mv.
   for (int i = 0; i < num_mv_refs; ++i) {
-    const MV *this_mv = &pred_mv[i];
+    MV *this_mv = &pred_mv[i];
+    enc_clamp_mv(&cpi->common, &x->e_mbd, this_mv);
+
     const int fp_row = (this_mv->row + 3 + (this_mv->row >= 0)) >> 3;
     const int fp_col = (this_mv->col + 3 + (this_mv->col >= 0)) >> 3;
     max_mv = AOMMAX(max_mv, AOMMAX(abs(this_mv->row), abs(this_mv->col)) >> 3);

@@ -616,11 +616,14 @@ enum aome_enc_control_id {
    * point (OP), int parameter
    * Possible values are in the form of "ABxy".
    *  - AB: OP index.
-   *  - xy: Target level index for the OP. Can be values 0~27 (corresponding to
-   *    level 2.0 ~ 8.3, note levels 2.2, 2.3, 3.2, 3.3, 4.2 & 4.3 are
-   *    undefined, and that levels 7.x and 8.x are in draft status), 31
-   *    (maximum parameters level, no level-based constraints) or 32 (keep
-   *    level stats only for level monitoring).
+   *  - xy: Target level index for the OP. Possible values are:
+   *    + 0~27: corresponding to level 2.0 ~ 8.3. Note:
+   *      > Levels 2.2 (2), 2.3 (3), 3.2 (6), 3.3 (7), 4.2 (10) & 4.3 (11) are
+   *        undefined.
+   *      > Levels 7.x and 8.x (20~27) are in draft status, available under the
+   *        config flag CONFIG_CWG_C013.
+   *    + 31: maximum parameters level, no level-based constraints.
+   *    + 32: keep level stats only for level monitoring.
    *
    * E.g.:
    * - "0" means target level index 0 (2.0) for the 0th OP;

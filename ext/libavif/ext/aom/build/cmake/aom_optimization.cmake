@@ -46,7 +46,11 @@ function(add_intrinsics_object_library flag opt_name target_to_update sources)
   add_library(${target_name} OBJECT ${${sources}})
   set_property(TARGET ${target_name} PROPERTY FOLDER ${AOM_TARGET_CPU})
 
-  if(MSVC)
+  # MSVC does not need flags for intrinsics flavors other than AVX/AVX2.
+  # However, for clang-cl, the default is SSE2, and the MSVC frontend does not
+  # provide any flags to enable SSE3 up to SSE4.1. So we need to restrict the
+  # usage of MSVC-style flags to only the real MSVC.
+  if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     get_msvc_intrinsic_flag("${flag}" "flag")
   endif()
 

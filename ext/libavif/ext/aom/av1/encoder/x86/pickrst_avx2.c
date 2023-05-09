@@ -789,7 +789,7 @@ int64_t av1_lowbd_pixel_proj_error_avx2(
   } else if (params->r[0] > 0 || params->r[1] > 0) {
     const int xq_active = (params->r[0] > 0) ? xq[0] : xq[1];
     const __m256i xq_coeff =
-        pair_set_epi16(xq_active, (-xq_active * (1 << SGRPROJ_RST_BITS)));
+        pair_set_epi16(xq_active, -xq_active * (1 << SGRPROJ_RST_BITS));
     const int32_t *flt = (params->r[0] > 0) ? flt0 : flt1;
     const int flt_stride = (params->r[0] > 0) ? flt0_stride : flt1_stride;
     for (i = 0; i < height; ++i) {
