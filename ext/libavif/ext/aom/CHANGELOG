@@ -1,6 +1,8 @@
-2023-05-05 v3.6.1
+2023-05-08 v3.6.1
   This release includes several bug fixes. This release is ABI
-  compatible with the last release.
+  compatible with the last release. See
+  https://aomedia.googlesource.com/aom/+log/v3.6.0..v3.6.1 for all the
+  commits in this release.
 
   - Bug Fixes
     * aomedia:2871: Guard the support of the 7.x and 8.x levels for AV1
@@ -12,6 +14,7 @@
     * aomedia:3389: Fix MV clamping in av1_mv_pred.
     * aomedia:3390: set_ld_layer_depth: cap max_layer_depth to
       MAX_ARF_LAYERS.
+    * aomedia:3418: Fix MV clamping in av1_int_pro_motion_estimation.
     * aomedia:3429: Move lpf thread data init to lpf_pipeline_mt_init().
     * b:266719111: Fix undefined behavior in Arm Neon code.
     * b:269840681: nonrd_opt: align scan tables.

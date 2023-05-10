@@ -2094,11 +2094,11 @@ unsigned int av1_int_pro_motion_estimation(const AV1_COMP *cpi, MACROBLOCK *x,
     best_sad = tmp_sad;
   }
 
-  convert_fullmv_to_mv(best_int_mv);
+  FullMvLimits mv_limits = x->mv_limits;
+  av1_set_mv_search_range(&mv_limits, ref_mv);
+  clamp_fullmv(&best_int_mv->as_fullmv, &mv_limits);
 
-  SubpelMvLimits subpel_mv_limits;
-  av1_set_subpel_mv_search_range(&subpel_mv_limits, &x->mv_limits, ref_mv);
-  clamp_mv(&best_int_mv->as_mv, &subpel_mv_limits);
+  convert_fullmv_to_mv(best_int_mv);
 
   if (scaled_ref_frame) {
     int i;
