@@ -51,11 +51,12 @@ INPUT_Y4M="${TESTDATA_DIR}/kodim03_yuv420_8bpc.y4m"
 ENCODED_FILE="avif_test_cmd_encoded.avif"
 ENCODED_FILE_WITH_DASH="-avif_test_cmd_encoded.avif"
 DECODED_FILE="avif_test_cmd_decoded.png"
+OUT_MSG="avif_test_cmd_out_msg.txt"
 
 # Cleanup
 cleanup() {
   pushd ${TMP_DIR}
-    rm -- "${ENCODED_FILE}" "${ENCODED_FILE_WITH_DASH}" "${DECODED_FILE}"
+    rm -- "${ENCODED_FILE}" "${ENCODED_FILE_WITH_DASH}" "${DECODED_FILE}" "${OUT_MSG}"
   popd
 }
 trap cleanup EXIT
@@ -74,6 +75,28 @@ pushd ${TMP_DIR}
   # Passing a filename starting with a dash without using -- should fail.
   "${AVIFENC}" -s 10 "${INPUT_Y4M}" "${ENCODED_FILE_WITH_DASH}" && exit 1
   "${AVIFDEC}" --info "${ENCODED_FILE_WITH_DASH}" && exit 1
+
+  # --min and --max must be both specified.
+  "${AVIFENC}" -s 10 --min 24 "${INPUT_Y4M}" "${ENCODED_FILE}" && exit 1
+  "${AVIFENC}" -s 10 --max 26 "${INPUT_Y4M}" "${ENCODED_FILE}" && exit 1
+  # --minalpha and --maxalpha must be both specified.
+  "${AVIFENC}" -s 10 --minalpha 0 "${INPUT_PNG}" "${ENCODED_FILE}" && exit 1
+  "${AVIFENC}" -s 10 --maxalpha 0 "${INPUT_PNG}" "${ENCODED_FILE}" && exit 1
+
+  # The default quality is 60. The default alpha quality is 100 (lossless).
+  "${AVIFENC}" -s 10 "${INPUT_Y4M}" "${ENCODED_FILE}" > "${OUT_MSG}"
+  grep " color quality \[60 " "${OUT_MSG}"
+  grep " alpha quality \[100 " "${OUT_MSG}"
+  "${AVIFENC}" -s 10 -q 85 "${INPUT_Y4M}" "${ENCODED_FILE}" > "${OUT_MSG}"
+  grep " color quality \[85 " "${OUT_MSG}"
+  grep " alpha quality \[100 " "${OUT_MSG}"
+  # The average of 15 and 25 is 20. Quantizer 20 maps to quality 68.
+  "${AVIFENC}" -s 10 --min 15 --max 25 "${INPUT_Y4M}" "${ENCODED_FILE}" > "${OUT_MSG}"
+  grep " color quality \[68 " "${OUT_MSG}"
+  grep " alpha quality \[100 " "${OUT_MSG}"
+  "${AVIFENC}" -s 10 -q 65 --min 15 --max 25 "${INPUT_Y4M}" "${ENCODED_FILE}" > "${OUT_MSG}"
+  grep " color quality \[65 " "${OUT_MSG}"
+  grep " alpha quality \[100 " "${OUT_MSG}"
 popd
 
 exit 0

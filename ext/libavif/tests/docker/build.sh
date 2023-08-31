@@ -2,7 +2,7 @@
 
 # Tests system-wide libavif shared library installation correct behavior, using Ubuntu in Docker. Run:
 #
-#     docker run -it ubuntu
+#     docker run -it ubuntu:rolling
 #
 # ... then run this script inside of there. When it finishes, avifenc and avifdec should
 # be in /usr/bin and offer all codecs chosen in the last cmake command in this script.
@@ -19,15 +19,14 @@ set -e
 
 # build env
 apt update
-DEBIAN_FRONTEND="noninteractive" apt install -y build-essential libjpeg-dev libpng-dev libssl-dev ninja-build cmake pkg-config git perl vim meson cargo nasm
+DEBIAN_FRONTEND="noninteractive" apt install -y build-essential libjpeg-dev libpng-dev libssl-dev ninja-build cmake pkg-config git perl vim meson cargo cargo-c nasm
 
 # Rust env
 export PATH="$HOME/.cargo/bin:$PATH"
-cargo install cargo-c
 
 # aom
 cd
-git clone -b v3.5.0 --depth 1 https://aomedia.googlesource.com/aom
+git clone -b v3.6.1 --depth 1 https://aomedia.googlesource.com/aom
 cd aom
 mkdir build.avif
 cd build.avif
@@ -36,11 +35,11 @@ ninja install
 
 # dav1d
 cd
-git clone -b 1.0.0 --depth 1 https://code.videolan.org/videolan/dav1d.git
+git clone -b 1.2.1 --depth 1 https://code.videolan.org/videolan/dav1d.git
 cd dav1d
 mkdir build
 cd build
-meson --prefix=/usr --buildtype release ..
+meson setup --prefix=/usr --buildtype release ..
 ninja install
 
 # libgav1
@@ -49,18 +48,18 @@ git clone -b v0.18.0 --depth 1 https://chromium.googlesource.com/codecs/libgav1
 cd libgav1
 mkdir build
 cd build
-cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=1 -DCMAKE_BUILD_TYPE=Release -DLIBGAV1_THREADPOOL_USE_STD_MUTEX=1 -DLIBGAV1_ENABLE_EXAMPLES=0 -DLIBGAV1_ENABLE_TESTS=0 ..
+cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=1 -DCMAKE_BUILD_TYPE=Release -DLIBGAV1_THREADPOOL_USE_STD_MUTEX=1 -DLIBGAV1_ENABLE_EXAMPLES=0 -DLIBGAV1_ENABLE_TESTS=0 -DLIBGAV1_MAX_BITDEPTH=12 ..
 ninja install
 
 # rav1e
 cd
-git clone -b v0.5.1 --depth 1 https://github.com/xiph/rav1e.git
+git clone -b v0.6.6 --depth 1 https://github.com/xiph/rav1e.git
 cd rav1e
 cargo cinstall --prefix=/usr --release
 
 # SVT-AV1
 cd
-git clone -b v1.2.1 --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
+git clone -b v1.6.0 --depth 1 https://gitlab.com/AOMediaCodec/SVT-AV1.git
 cd SVT-AV1
 cd Build
 cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release ..
