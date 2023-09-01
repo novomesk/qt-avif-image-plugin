@@ -6,7 +6,7 @@ OTHER_FILES = ../src/avif.json
 
 SOURCES += ../src/main.cpp
 
-LIBS += ../ext/libavif/build/libavif.a ../ext/libavif/ext/aom/build.libavif/libaom.a ../ext/libavif/ext/dav1d/build/src/libdav1d.a ../ext/libavif/ext/libyuv/build/libyuv.a
+LIBS += ../ext/libavif/build/libavif.a ../ext/libavif/ext/aom/build.libavif/libaom.a ../ext/libavif/ext/dav1d/build/src/libdav1d.a ../ext/libavif/ext/libyuv/build/libyuv.a ../ext/libavif/ext/libwebp/build/libsharpyuv.a
 unix:LIBS += -ldl
 
 INCLUDEPATH += ../ext/libavif/include

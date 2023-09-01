@@ -24,6 +24,24 @@ if ! [ -f libavif/ext/libyuv/build/libyuv.a ]; then
 
   if ! [ -f libyuv.a ]; then
     echo 'Error: libyuv.a build failed!' >&2
+    exit 1
+  fi
+
+  cd ../../../..
+fi
+
+if ! [ -f libavif/ext/libwebp/build/libsharpyuv.a ]; then
+  echo 'We are going to build libsharpyuv.a'
+  cd libavif/ext/libwebp
+  mkdir -p build
+  cd build
+
+  cmake -G Ninja -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DWEBP_LINK_STATIC=ON -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_LIBWEBPMUX=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF ..
+  ninja sharpyuv
+
+  if ! [ -f libsharpyuv.a ]; then
+    echo 'Error: libsharpyuv.a build failed!' >&2
+    exit 1
   fi
 
   cd ../../../..
@@ -51,7 +69,7 @@ if ! [ -f libavif/ext/dav1d/build/src/libdav1d.a ]; then
  mkdir -p build
  cd build
 
- meson --default-library=static --buildtype release ..
+ meson setup --default-library=static --buildtype release ..
  ninja
 
  if ! [ -f src/libdav1d.a ]; then
@@ -67,7 +85,7 @@ if ! [ -f libavif/build/libavif.a ]; then
   mkdir -p build
   cd build
 
-  CFLAGS="-fPIC" cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON -DAVIF_CODEC_AOM_DECODE=OFF -DAVIF_CODEC_AOM_ENCODE=ON -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON -DAVIF_LOCAL_LIBYUV=ON ..
+  CFLAGS="-fPIC" cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=ON -DAVIF_LOCAL_AOM=ON -DAVIF_CODEC_AOM_DECODE=OFF -DAVIF_CODEC_AOM_ENCODE=ON -DAVIF_CODEC_DAV1D=ON -DAVIF_LOCAL_DAV1D=ON -DAVIF_LOCAL_LIBYUV=ON -DAVIF_LOCAL_LIBSHARPYUV=ON ..
   ninja
 
   if ! [ -f libavif.a ]; then
