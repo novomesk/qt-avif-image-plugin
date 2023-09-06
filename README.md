@@ -14,7 +14,7 @@ AV1 compression provides significantly better efficiency than traditional JPEG. 
 
 Download [Latest Release](https://github.com/novomesk/qt-avif-image-plugin/releases/latest) and extract the content of the zip file:
 
-`unzip qt-avif-image-plugin-0.5.4.zip`
+`unzip qt-avif-image-plugin-0.6.0.zip`
 
 **Recommended**: read [README.txt](README.txt)
 
