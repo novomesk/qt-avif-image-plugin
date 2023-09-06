@@ -1089,6 +1089,11 @@ int QAVIFHandler::loopCount() const
         return 0;
     }
 
+#if AVIF_VERSION >= 1000000
+    if (m_decoder->repetitionCount >= 0) {
+        return m_decoder->repetitionCount;
+    }
+#endif
     // Endless loop
     return -1;
 }
