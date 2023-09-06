@@ -46,6 +46,12 @@ static INLINE __m128i load8_8to16_sse2(const uint8_t *const p) {
   return _mm_unpacklo_epi8(p0, _mm_setzero_si128());
 }
 
+static INLINE void load16_8to16_sse2(const uint8_t *const p, __m128i *out) {
+  const __m128i p0 = _mm_loadu_si128((const __m128i *)p);
+  out[0] = _mm_unpacklo_epi8(p0, _mm_setzero_si128());  // lower 8 values
+  out[1] = _mm_unpackhi_epi8(p0, _mm_setzero_si128());  // upper 8 values
+}
+
 // Accumulate 4 32bit numbers in val to 1 32bit number
 static INLINE unsigned int add32x4_sse2(__m128i val) {
   val = _mm_add_epi32(val, _mm_srli_si128(val, 8));
@@ -232,14 +238,6 @@ static INLINE void variance128_sse2(const uint8_t *src, const int src_stride,
   }
 }
 
-void aom_get8x8var_sse2(const uint8_t *src_ptr, int src_stride,
-                        const uint8_t *ref_ptr, int ref_stride,
-                        unsigned int *sse, int *sum) {
-  __m128i vsse, vsum;
-  variance8_sse2(src_ptr, src_stride, ref_ptr, ref_stride, 8, &vsse, &vsum);
-  variance_final_128_pel_sse2(vsse, vsum, sse, sum);
-}
-
 void aom_get_var_sse_sum_8x8_quad_sse2(const uint8_t *src_ptr, int src_stride,
                                        const uint8_t *ref_ptr, int ref_stride,
                                        uint32_t *sse8x8, int *sum8x8,
@@ -269,6 +267,42 @@ void aom_get_var_sse_sum_8x8_quad_sse2(const uint8_t *src_ptr, int src_stride,
   *tot_sum += sum8x8[0] + sum8x8[1] + sum8x8[2] + sum8x8[3];
   for (int i = 0; i < 4; i++)
     var8x8[i] = sse8x8[i] - (uint32_t)(((int64_t)sum8x8[i] * sum8x8[i]) >> 6);
+}
+
+void aom_get_var_sse_sum_16x16_dual_sse2(const uint8_t *src_ptr, int src_stride,
+                                         const uint8_t *ref_ptr, int ref_stride,
+                                         uint32_t *sse16x16,
+                                         unsigned int *tot_sse, int *tot_sum,
+                                         uint32_t *var16x16) {
+  int sum16x16[2] = { 0 };
+  // Loop over 2 16x16 blocks. Process one 16x32 block.
+  for (int k = 0; k < 2; k++) {
+    const uint8_t *src = src_ptr;
+    const uint8_t *ref = ref_ptr;
+    __m128i vsum = _mm_setzero_si128();
+    __m128i vsse = _mm_setzero_si128();
+    for (int i = 0; i < 16; i++) {
+      __m128i s[2];
+      __m128i r[2];
+      load16_8to16_sse2(src + (k * 16), s);
+      load16_8to16_sse2(ref + (k * 16), r);
+      const __m128i diff0 = _mm_sub_epi16(s[0], r[0]);
+      const __m128i diff1 = _mm_sub_epi16(s[1], r[1]);
+      vsse = _mm_add_epi32(vsse, _mm_madd_epi16(diff0, diff0));
+      vsse = _mm_add_epi32(vsse, _mm_madd_epi16(diff1, diff1));
+      vsum = _mm_add_epi16(vsum, _mm_add_epi16(diff0, diff1));
+      src += src_stride;
+      ref += ref_stride;
+    }
+    variance_final_256_pel_sse2(vsse, vsum, &sse16x16[k], &sum16x16[k]);
+  }
+
+  // Calculate variance at 16x16 level and total sse, sum of 16x32 block.
+  *tot_sse += sse16x16[0] + sse16x16[1];
+  *tot_sum += sum16x16[0] + sum16x16[1];
+  for (int i = 0; i < 2; i++)
+    var16x16[i] =
+        sse16x16[i] - (uint32_t)(((int64_t)sum16x16[i] * sum16x16[i]) >> 8);
 }
 
 #define AOM_VAR_NO_LOOP_SSE2(bw, bh, bits, max_pixels)                        \

@@ -213,6 +213,11 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
   aom_free_frame_buffer(&cpi->butteraugli_info.resized_source);
 #endif
 
+#if CONFIG_SALIENCY_MAP
+  aom_free(cpi->saliency_map);
+  aom_free(cpi->sm_scaling_factor);
+#endif
+
   release_obmc_buffers(&cpi->td.mb.obmc_buffer);
 
   if (cpi->td.mb.mv_costs) {
@@ -291,6 +296,7 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
 #endif
   if (cpi->film_grain_table) {
     aom_film_grain_table_free(cpi->film_grain_table);
+    aom_free(cpi->film_grain_table);
     cpi->film_grain_table = NULL;
   }
 
@@ -310,6 +316,14 @@ static AOM_INLINE void dealloc_compressor_data(AV1_COMP *cpi) {
 
   aom_free(cpi->mb_weber_stats);
   cpi->mb_weber_stats = NULL;
+
+  if (cpi->oxcf.enable_rate_guide_deltaq) {
+    aom_free(cpi->prep_rate_estimates);
+    cpi->prep_rate_estimates = NULL;
+
+    aom_free(cpi->ext_rate_distribution);
+    cpi->ext_rate_distribution = NULL;
+  }
 
   aom_free(cpi->mb_delta_q);
   cpi->mb_delta_q = NULL;
@@ -379,7 +393,7 @@ static AOM_INLINE YV12_BUFFER_CONFIG *realloc_and_scale_source(
           cm->seq_params->subsampling_x, cm->seq_params->subsampling_y,
           cm->seq_params->use_highbitdepth, AOM_BORDER_IN_PIXELS,
           cm->features.byte_alignment, NULL, NULL, NULL,
-          cpi->oxcf.tool_cfg.enable_global_motion, 0))
+          cpi->image_pyramid_levels, 0))
     aom_internal_error(cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to reallocate scaled source buffer");
   assert(cpi->scaled_source.y_crop_width == scaled_width);
@@ -388,6 +402,40 @@ static AOM_INLINE YV12_BUFFER_CONFIG *realloc_and_scale_source(
       cpi->unscaled_source, &cpi->scaled_source, (int)cm->seq_params->bit_depth,
       num_planes);
   return &cpi->scaled_source;
+}
+
+// Deallocate allocated thread_data.
+static AOM_INLINE void free_thread_data(AV1_PRIMARY *ppi) {
+  PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
+  for (int t = 1; t < p_mt_info->num_workers; ++t) {
+    EncWorkerData *const thread_data = &p_mt_info->tile_thr_data[t];
+    thread_data->td = thread_data->original_td;
+    aom_free(thread_data->td->tctx);
+    aom_free(thread_data->td->palette_buffer);
+    aom_free(thread_data->td->tmp_conv_dst);
+    release_compound_type_rd_buffers(&thread_data->td->comp_rd_buffer);
+    for (int j = 0; j < 2; ++j) {
+      aom_free(thread_data->td->tmp_pred_bufs[j]);
+    }
+    aom_free(thread_data->td->pixel_gradient_info);
+    aom_free(thread_data->td->src_var_info_of_4x4_sub_blocks);
+    release_obmc_buffers(&thread_data->td->obmc_buffer);
+    aom_free(thread_data->td->vt64x64);
+
+    for (int x = 0; x < 2; x++) {
+      for (int y = 0; y < 2; y++) {
+        aom_free(thread_data->td->hash_value_buffer[x][y]);
+        thread_data->td->hash_value_buffer[x][y] = NULL;
+      }
+    }
+    aom_free(thread_data->td->counts);
+    av1_free_pmc(thread_data->td->firstpass_ctx,
+                 ppi->seq_params.monochrome ? 1 : MAX_MB_PLANE);
+    thread_data->td->firstpass_ctx = NULL;
+    av1_free_shared_coeff_buffer(&thread_data->td->shared_coeff_buf);
+    av1_free_sms_tree(thread_data->td);
+    aom_free(thread_data->td);
+  }
 }
 
 #ifdef __cplusplus

@@ -558,7 +558,15 @@ enum {
 // REF_FRAMES for the cm->ref_frame_map array, 1 scratch frame for the new
 // frame in cm->cur_frame, INTER_REFS_PER_FRAME for scaled references on the
 // encoder in the cpi->scaled_ref_buf array.
+// The encoder uses FRAME_BUFFERS only in GOOD and REALTIME encoding modes.
+// The decoder also uses FRAME_BUFFERS.
 #define FRAME_BUFFERS (REF_FRAMES + 1 + INTER_REFS_PER_FRAME)
+
+// During allintra encoding, one reference frame buffer is free to be used again
+// only after another frame buffer is stored as the reference frame. Hence, it
+// is necessary and sufficient to maintain only two reference frame buffers in
+// this case.
+#define FRAME_BUFFERS_ALLINTRA 2
 
 #define FWD_RF_OFFSET(ref) (ref - LAST_FRAME)
 #define BWD_RF_OFFSET(ref) (ref - BWDREF_FRAME)
@@ -610,7 +618,7 @@ typedef enum {
 } RestorationType;
 
 /*!\cond */
-// Picture prediction structures (0-12 are predefined) in scalability metadata.
+// Picture prediction structures (0-13 are predefined) in scalability metadata.
 enum {
   SCALABILITY_L1T2 = 0,
   SCALABILITY_L1T3 = 1,

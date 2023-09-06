@@ -2795,7 +2795,7 @@ static int check_frame_refs_short_signaling(AV1_COMMON *const cm,
   }
 
   // Check whether all references are distinct frames.
-  const RefCntBuffer *seen_bufs[FRAME_BUFFERS] = { NULL };
+  const RefCntBuffer *seen_bufs[INTER_REFS_PER_FRAME] = { NULL };
   int num_refs = 0;
   for (int ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
     const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);

@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <assert.h>
 #include <math.h>
 
 #include "av1/encoder/encoder.h"
@@ -84,6 +85,7 @@ void av1_init_layer_context(AV1_COMP *const cpi) {
 bool av1_alloc_layer_context(AV1_COMP *cpi, int num_layers) {
   SVC *const svc = &cpi->svc;
   if (svc->layer_context == NULL || svc->num_allocated_layers < num_layers) {
+    assert(num_layers > 1);
     aom_free(svc->layer_context);
     svc->num_allocated_layers = 0;
     svc->layer_context =
@@ -99,10 +101,13 @@ void av1_update_layer_context_change_config(AV1_COMP *const cpi,
                                             const int64_t target_bandwidth) {
   const RATE_CONTROL *const rc = &cpi->rc;
   const PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
+  AV1_COMMON *const cm = &cpi->common;
   SVC *const svc = &cpi->svc;
   int layer = 0;
   int64_t spatial_layer_target = 0;
   float bitrate_alloc = 1.0;
+  const int mi_rows = cm->mi_params.mi_rows;
+  const int mi_cols = cm->mi_params.mi_cols;
   for (int sl = 0; sl < svc->number_spatial_layers; ++sl) {
     for (int tl = 0; tl < svc->number_temporal_layers; ++tl) {
       layer = LAYER_IDS_TO_IDX(sl, tl, svc->number_temporal_layers);
@@ -116,7 +121,9 @@ void av1_update_layer_context_change_config(AV1_COMP *const cpi,
       RATE_CONTROL *const lrc = &lc->rc;
       PRIMARY_RATE_CONTROL *const lp_rc = &lc->p_rc;
       lc->spatial_layer_target_bandwidth = spatial_layer_target;
-      bitrate_alloc = (float)lc->target_bandwidth / target_bandwidth;
+      if (target_bandwidth != 0) {
+        bitrate_alloc = (float)lc->target_bandwidth / target_bandwidth;
+      }
       lp_rc->starting_buffer_level =
           (int64_t)(p_rc->starting_buffer_level * bitrate_alloc);
       lp_rc->optimal_buffer_level =
@@ -134,6 +141,24 @@ void av1_update_layer_context_change_config(AV1_COMP *const cpi,
       lrc->rtc_external_ratectrl = rc->rtc_external_ratectrl;
       lrc->worst_quality = av1_quantizer_to_qindex(lc->max_q);
       lrc->best_quality = av1_quantizer_to_qindex(lc->min_q);
+      if (rc->use_external_qp_one_pass) {
+        lrc->worst_quality = rc->worst_quality;
+        lrc->best_quality = rc->best_quality;
+      }
+      // Reset the cyclic refresh parameters, if needed (map is NULL),
+      // or number of spatial layers has changed.
+      // Cyclic refresh is only applied on base temporal layer.
+      if (svc->number_spatial_layers > 1 && tl == 0 &&
+          (lc->map == NULL ||
+           svc->prev_number_spatial_layers != svc->number_spatial_layers)) {
+        lc->sb_index = 0;
+        lc->actual_num_seg1_blocks = 0;
+        lc->actual_num_seg2_blocks = 0;
+        lc->counter_encode_maxq_scene_change = 0;
+        if (lc->map) aom_free(lc->map);
+        CHECK_MEM_ERROR(cm, lc->map,
+                        aom_calloc(mi_rows * mi_cols, sizeof(*lc->map)));
+      }
     }
   }
 }
@@ -178,8 +203,9 @@ void av1_update_temporal_layer_framerate(AV1_COMP *const cpi) {
 static AOM_INLINE bool check_ref_is_low_spatial_res_super_frame(
     int ref_frame, const SVC *svc, const RTC_REF *rtc_ref) {
   int ref_frame_idx = rtc_ref->ref_idx[ref_frame - 1];
-  return svc->buffer_time_index[ref_frame_idx] == svc->current_superframe &&
-         svc->buffer_spatial_layer[ref_frame_idx] <= svc->spatial_layer_id - 1;
+  return rtc_ref->buffer_time_index[ref_frame_idx] == svc->current_superframe &&
+         rtc_ref->buffer_spatial_layer[ref_frame_idx] <=
+             svc->spatial_layer_id - 1;
 }
 
 void av1_restore_layer_context(AV1_COMP *const cpi) {
@@ -232,6 +258,32 @@ void av1_restore_layer_context(AV1_COMP *const cpi) {
   }
 }
 
+void av1_svc_update_buffer_slot_refreshed(AV1_COMP *const cpi) {
+  SVC *const svc = &cpi->svc;
+  RTC_REF *const rtc_ref = &cpi->ppi->rtc_ref;
+  const unsigned int current_frame =
+      cpi->ppi->use_svc ? svc->current_superframe
+                        : cpi->common.current_frame.frame_number;
+  // For any buffer slot that is refreshed, update it with
+  // the spatial_layer_id and the current_superframe.
+  if (cpi->common.current_frame.frame_type == KEY_FRAME) {
+    // All slots are refreshed on KEY.
+    for (unsigned int i = 0; i < REF_FRAMES; i++) {
+      rtc_ref->buffer_time_index[i] = current_frame;
+      rtc_ref->buffer_spatial_layer[i] = svc->spatial_layer_id;
+    }
+  } else if (rtc_ref->set_ref_frame_config) {
+    for (unsigned int i = 0; i < INTER_REFS_PER_FRAME; i++) {
+      const int ref_frame_map_idx = rtc_ref->ref_idx[i];
+      if (cpi->ppi->rtc_ref.refresh[ref_frame_map_idx]) {
+        rtc_ref->buffer_time_index[ref_frame_map_idx] = current_frame;
+        rtc_ref->buffer_spatial_layer[ref_frame_map_idx] =
+            svc->spatial_layer_id;
+      }
+    }
+  }
+}
+
 void av1_save_layer_context(AV1_COMP *const cpi) {
   SVC *const svc = &cpi->svc;
   const AV1_COMMON *const cm = &cpi->common;
@@ -255,23 +307,7 @@ void av1_save_layer_context(AV1_COMP *const cpi) {
     lc->actual_num_seg2_blocks = cr->actual_num_seg2_blocks;
     lc->counter_encode_maxq_scene_change = cr->counter_encode_maxq_scene_change;
   }
-  // For any buffer slot that is refreshed, update it with
-  // the spatial_layer_id and the current_superframe.
-  if (cpi->common.current_frame.frame_type == KEY_FRAME) {
-    // All slots are refreshed on KEY.
-    for (unsigned int i = 0; i < REF_FRAMES; i++) {
-      svc->buffer_time_index[i] = svc->current_superframe;
-      svc->buffer_spatial_layer[i] = svc->spatial_layer_id;
-    }
-  } else if (cpi->ppi->rtc_ref.set_ref_frame_config) {
-    for (unsigned int i = 0; i < INTER_REFS_PER_FRAME; i++) {
-      int ref_frame_map_idx = cpi->ppi->rtc_ref.ref_idx[i];
-      if (cpi->ppi->rtc_ref.refresh[ref_frame_map_idx]) {
-        svc->buffer_time_index[ref_frame_map_idx] = svc->current_superframe;
-        svc->buffer_spatial_layer[ref_frame_map_idx] = svc->spatial_layer_id;
-      }
-    }
-  }
+  av1_svc_update_buffer_slot_refreshed(cpi);
   for (unsigned int i = 0; i < REF_FRAMES; i++) {
     if (frame_is_intra_only(cm) ||
         cm->current_frame.refresh_frame_flags & (1 << i)) {
@@ -524,12 +560,24 @@ void av1_svc_check_reset_layer_rc_flag(AV1_COMP *const cpi) {
   SVC *const svc = &cpi->svc;
   for (int sl = 0; sl < svc->number_spatial_layers; ++sl) {
     // Check for reset based on avg_frame_bandwidth for spatial layer sl.
+    // If avg_frame_bandwidth for top temporal layer is not set
+    // (because enhancement layer was inactive), use the base TL0
     int layer = LAYER_IDS_TO_IDX(sl, svc->number_temporal_layers - 1,
                                  svc->number_temporal_layers);
     LAYER_CONTEXT *lc = &svc->layer_context[layer];
     RATE_CONTROL *lrc = &lc->rc;
-    if (lrc->avg_frame_bandwidth > (3 * lrc->prev_avg_frame_bandwidth >> 1) ||
-        lrc->avg_frame_bandwidth < (lrc->prev_avg_frame_bandwidth >> 1)) {
+    int avg_frame_bandwidth = lrc->avg_frame_bandwidth;
+    int prev_avg_frame_bandwidth = lrc->prev_avg_frame_bandwidth;
+    if (avg_frame_bandwidth == 0 || prev_avg_frame_bandwidth == 0) {
+      // Use base TL0.
+      layer = LAYER_IDS_TO_IDX(sl, 0, svc->number_temporal_layers);
+      lc = &svc->layer_context[layer];
+      lrc = &lc->rc;
+      avg_frame_bandwidth = lrc->avg_frame_bandwidth;
+      prev_avg_frame_bandwidth = lrc->prev_avg_frame_bandwidth;
+    }
+    if (avg_frame_bandwidth > (3 * prev_avg_frame_bandwidth >> 1) ||
+        avg_frame_bandwidth < (prev_avg_frame_bandwidth >> 1)) {
       // Reset for all temporal layers with spatial layer sl.
       for (int tl = 0; tl < svc->number_temporal_layers; ++tl) {
         int layer2 = LAYER_IDS_TO_IDX(sl, tl, svc->number_temporal_layers);
@@ -548,25 +596,76 @@ void av1_svc_check_reset_layer_rc_flag(AV1_COMP *const cpi) {
 
 void av1_svc_set_last_source(AV1_COMP *const cpi, EncodeFrameInput *frame_input,
                              YV12_BUFFER_CONFIG *prev_source) {
-  if (cpi->svc.spatial_layer_id == 0) {
-    // For base spatial layer: if the LAST reference (index 0) is not
-    // the previous (super)frame set the last_source to the source corresponding
-    // to the last TL0, otherwise keep it at prev_source.
-    frame_input->last_source = prev_source != NULL ? prev_source : NULL;
-    if (cpi->svc.current_superframe > 0) {
-      const int buffslot_last = cpi->ppi->rtc_ref.ref_idx[0];
-      if (cpi->svc.buffer_time_index[buffslot_last] <
-          cpi->svc.current_superframe - 1)
+  frame_input->last_source = prev_source != NULL ? prev_source : NULL;
+  if (!cpi->ppi->use_svc && cpi->rc.prev_frame_is_dropped &&
+      cpi->rc.frame_number_encoded > 0) {
+    frame_input->last_source = &cpi->svc.source_last_TL0;
+  } else {
+    RTC_REF *const rtc_ref = &cpi->ppi->rtc_ref;
+    if (cpi->svc.spatial_layer_id == 0) {
+      // For base spatial layer: if the LAST reference (index 0) is not
+      // the previous (super)frame set the last_source to the source
+      // corresponding to the last TL0, otherwise keep it at prev_source.
+      // Always use source_last_TL0 if previous base TL0 was dropped.
+      if (cpi->svc.current_superframe > 0) {
+        const int buffslot_last = rtc_ref->ref_idx[0];
+        // Check if previous frame was dropped on base TL0 layer.
+        const int layer =
+            LAYER_IDS_TO_IDX(0, 0, cpi->svc.number_temporal_layers);
+        LAYER_CONTEXT *lc = &cpi->svc.layer_context[layer];
+        RATE_CONTROL *lrc = &lc->rc;
+        if (lrc->prev_frame_is_dropped ||
+            rtc_ref->buffer_time_index[buffslot_last] <
+                cpi->svc.current_superframe - 1) {
+          frame_input->last_source = &cpi->svc.source_last_TL0;
+        }
+      }
+    } else if (cpi->svc.spatial_layer_id > 0) {
+      // For spatial enhancement layers: the previous source (prev_source)
+      // corresponds to the lower spatial layer (which is the same source so
+      // we can't use that), so always set the last_source to the source of the
+      // last TL0.
+      if (cpi->svc.current_superframe > 0)
         frame_input->last_source = &cpi->svc.source_last_TL0;
+      else
+        frame_input->last_source = NULL;
     }
-  } else if (cpi->svc.spatial_layer_id > 0) {
-    // For spatial enhancement layers: the previous source (prev_source)
-    // corresponds to the lower spatial layer (which is the same source so
-    // we can't use that), so always set the last_source to the source of the
-    // last TL0.
-    if (cpi->svc.current_superframe > 0)
-      frame_input->last_source = &cpi->svc.source_last_TL0;
-    else
-      frame_input->last_source = NULL;
+  }
+}
+
+int av1_svc_get_min_ref_dist(const AV1_COMP *cpi) {
+  RTC_REF *const rtc_ref = &cpi->ppi->rtc_ref;
+  int min_dist = INT_MAX;
+  const unsigned int current_frame_num =
+      cpi->ppi->use_svc ? cpi->svc.current_superframe
+                        : cpi->common.current_frame.frame_number;
+  for (unsigned int i = 0; i < INTER_REFS_PER_FRAME; i++) {
+    if (cpi->ppi->rtc_ref.reference[i]) {
+      const int ref_frame_map_idx = rtc_ref->ref_idx[i];
+      const int dist =
+          current_frame_num - rtc_ref->buffer_time_index[ref_frame_map_idx];
+      if (dist < min_dist) min_dist = dist;
+    }
+  }
+  return min_dist;
+}
+
+void av1_svc_set_reference_was_previous(AV1_COMP *cpi) {
+  RTC_REF *const rtc_ref = &cpi->ppi->rtc_ref;
+  // Check if the encoded frame had some reference that was the
+  // previous frame.
+  const unsigned int current_frame =
+      cpi->ppi->use_svc ? cpi->svc.current_superframe
+                        : cpi->common.current_frame.frame_number;
+  rtc_ref->reference_was_previous_frame = true;
+  if (current_frame > 0) {
+    rtc_ref->reference_was_previous_frame = false;
+    for (unsigned int i = 0; i < INTER_REFS_PER_FRAME; i++) {
+      if (rtc_ref->reference[i]) {
+        const int ref_frame_map_idx = rtc_ref->ref_idx[i];
+        if (rtc_ref->buffer_time_index[ref_frame_map_idx] == current_frame - 1)
+          rtc_ref->reference_was_previous_frame = true;
+      }
+    }
   }
 }

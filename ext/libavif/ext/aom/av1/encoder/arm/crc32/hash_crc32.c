@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <arm_acle.h>
 
+#include "config/aom_config.h"
+
 #define CRC_LOOP(op, crc, type, buf, len) \
   while ((len) >= sizeof(type)) {         \
     (crc) = op((crc), *(type *)(buf));    \
@@ -37,7 +39,7 @@ uint32_t av1_get_crc32c_value_arm_crc32(void *crc_calculator, uint8_t *p,
   const uint8_t *buf = p;
   uint32_t crc = 0xFFFFFFFF;
 
-#if !defined(__aarch64__)
+#if !AOM_ARCH_AARCH64
   // Align input to 8-byte boundary (only necessary for 32-bit builds.)
   while (len && ((uintptr_t)buf & 7)) {
     crc = __crc32cb(crc, *buf++);

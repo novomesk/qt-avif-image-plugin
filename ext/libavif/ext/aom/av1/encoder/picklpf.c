@@ -234,6 +234,17 @@ void av1_pick_filter_level(const YV12_BUFFER_CONFIG *sd, AV1_COMP *cpi,
           cpi->common.width * cpi->common.height > 352 * 288))
             ? 12034
             : 6017;
+    // Increase strength on base TL0 for temporal layers, for low-resoln,
+    // based on frame source_sad.
+    if (cpi->svc.number_temporal_layers > 1 &&
+        cpi->svc.temporal_layer_id == 0 &&
+        cpi->common.width * cpi->common.height <= 352 * 288 &&
+        cpi->sf.rt_sf.use_nonrd_pick_mode) {
+      if (cpi->rc.frame_source_sad > 100000)
+        inter_frame_multiplier = inter_frame_multiplier << 1;
+      else if (cpi->rc.frame_source_sad > 50000)
+        inter_frame_multiplier = 3 * (inter_frame_multiplier >> 1);
+    }
     // These values were determined by linear fitting the result of the
     // searched level for 8 bit depth:
     // Keyframes: filt_guess = q * 0.06699 - 1.60817

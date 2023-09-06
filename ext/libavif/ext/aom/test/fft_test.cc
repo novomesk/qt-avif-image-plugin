@@ -82,7 +82,8 @@ struct FFTTestArg {
 };
 
 std::ostream &operator<<(std::ostream &os, const FFTTestArg &test_arg) {
-  return os << "fft_arg { n:" << test_arg.n << " fft:" << test_arg.fft << " }";
+  return os << "fft_arg { n:" << test_arg.n
+            << " fft:" << reinterpret_cast<const void *>(test_arg.fft) << " }";
 }
 
 class FFT2DTest : public ::testing::TestWithParam<FFTTestArg> {
@@ -146,7 +147,7 @@ INSTANTIATE_TEST_SUITE_P(C, FFT2DTest,
                                            FFTTestArg(16, aom_fft16x16_float_c),
                                            FFTTestArg(32,
                                                       aom_fft32x32_float_c)));
-#if ARCH_X86 || ARCH_X86_64
+#if AOM_ARCH_X86 || AOM_ARCH_X86_64
 #if HAVE_SSE2
 INSTANTIATE_TEST_SUITE_P(
     SSE2, FFT2DTest,
@@ -162,7 +163,7 @@ INSTANTIATE_TEST_SUITE_P(
                       FFTTestArg(16, aom_fft16x16_float_avx2),
                       FFTTestArg(32, aom_fft32x32_float_avx2)));
 #endif  // HAVE_AVX2
-#endif  // ARCH_X86 || ARCH_X86_64
+#endif  // AOM_ARCH_X86 || AOM_ARCH_X86_64
 
 struct IFFTTestArg {
   int n;
@@ -171,8 +172,8 @@ struct IFFTTestArg {
 };
 
 std::ostream &operator<<(std::ostream &os, const IFFTTestArg &test_arg) {
-  return os << "ifft_arg { n:" << test_arg.n << " fft:" << test_arg.ifft
-            << " }";
+  return os << "ifft_arg { n:" << test_arg.n
+            << " fft:" << reinterpret_cast<const void *>(test_arg.ifft) << " }";
 }
 
 class IFFT2DTest : public ::testing::TestWithParam<IFFTTestArg> {
@@ -245,7 +246,7 @@ INSTANTIATE_TEST_SUITE_P(
                       IFFTTestArg(8, aom_ifft8x8_float_c),
                       IFFTTestArg(16, aom_ifft16x16_float_c),
                       IFFTTestArg(32, aom_ifft32x32_float_c)));
-#if ARCH_X86 || ARCH_X86_64
+#if AOM_ARCH_X86 || AOM_ARCH_X86_64
 #if HAVE_SSE2
 INSTANTIATE_TEST_SUITE_P(
     SSE2, IFFT2DTest,
@@ -262,6 +263,6 @@ INSTANTIATE_TEST_SUITE_P(
                       IFFTTestArg(16, aom_ifft16x16_float_avx2),
                       IFFTTestArg(32, aom_ifft32x32_float_avx2)));
 #endif  // HAVE_AVX2
-#endif  // ARCH_X86 || ARCH_X86_64
+#endif  // AOM_ARCH_X86 || AOM_ARCH_X86_64
 
 }  // namespace

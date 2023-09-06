@@ -12,6 +12,8 @@
 #ifndef AOM_AOM_DSP_SIMD_V256_INTRINSICS_V128_H_
 #define AOM_AOM_DSP_SIMD_V256_INTRINSICS_V128_H_
 
+#include "config/aom_config.h"
+
 #if HAVE_NEON
 #include "aom_dsp/simd/v128_intrinsics_arm.h"
 #elif HAVE_SSE2
@@ -614,7 +616,7 @@ SIMD_INLINE v256 v256_cmpeq_32(v256 a, v256 b) {
 
 SIMD_INLINE v256 v256_shuffle_8(v256 x, v256 pattern) {
 #if HAVE_NEON
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   uint8x16x2_t p = { { vreinterpretq_u8_s64(x.val[0]),
                        vreinterpretq_u8_s64(x.val[1]) } };
   return v256_from_v128(
@@ -626,15 +628,18 @@ SIMD_INLINE v256 v256_shuffle_8(v256 x, v256 pattern) {
                       vget_high_u8(vreinterpretq_u8_s64(x.val[0])),
                       vget_low_u8(vreinterpretq_u8_s64(x.val[1])),
                       vget_high_u8(vreinterpretq_u8_s64(x.val[1])) } };
-  return v256_from_64(
-      (uint64_t)vreinterpret_s64_u8(
-          vtbl4_u8(p, vreinterpret_u8_s64(vget_high_s64(pattern.val[1])))),
-      (uint64_t)vreinterpret_s64_u8(
-          vtbl4_u8(p, vreinterpret_u8_s64(vget_low_s64(pattern.val[1])))),
-      (uint64_t)vreinterpret_s64_u8(
-          vtbl4_u8(p, vreinterpret_u8_s64(vget_high_s64(pattern.val[0])))),
-      (uint64_t)vreinterpret_s64_u8(
-          vtbl4_u8(p, vreinterpret_u8_s64(vget_low_s64(pattern.val[0])))));
+  uint8x8_t shuffle1_hi =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_high_s64(pattern.val[1])));
+  uint8x8_t shuffle1_lo =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_low_s64(pattern.val[1])));
+  uint8x8_t shuffle0_hi =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_high_s64(pattern.val[0])));
+  uint8x8_t shuffle0_lo =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_low_s64(pattern.val[0])));
+  return v256_from_64(vget_lane_u64(vreinterpret_u64_u8(shuffle1_hi), 0),
+                      vget_lane_u64(vreinterpret_u64_u8(shuffle1_lo), 0),
+                      vget_lane_u64(vreinterpret_u64_u8(shuffle0_hi), 0),
+                      vget_lane_u64(vreinterpret_u64_u8(shuffle0_lo), 0));
 #endif
 #else
   v128 c16 = v128_dup_8(16);
@@ -650,7 +655,7 @@ SIMD_INLINE v256 v256_shuffle_8(v256 x, v256 pattern) {
 
 SIMD_INLINE v256 v256_wideshuffle_8(v256 x, v256 y, v256 pattern) {
 #if HAVE_NEON
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   uint8x16x4_t p = { {
       vreinterpretq_u8_s64(y.val[0]),
       vreinterpretq_u8_s64(y.val[1]),
@@ -672,24 +677,26 @@ SIMD_INLINE v256 v256_wideshuffle_8(v256 x, v256 y, v256 pattern) {
                       vget_high_u8(vreinterpretq_u8_s64(y.val[0])),
                       vget_low_u8(vreinterpretq_u8_s64(y.val[1])),
                       vget_high_u8(vreinterpretq_u8_s64(y.val[1])) } };
-  v256 r1 =
-      v256_from_64((uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       p, vreinterpret_u8_s64(vget_high_s64(p32.val[1])))),
-                   (uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       p, vreinterpret_u8_s64(vget_low_s64(p32.val[1])))),
-                   (uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       p, vreinterpret_u8_s64(vget_high_s64(p32.val[0])))),
-                   (uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       p, vreinterpret_u8_s64(vget_low_s64(p32.val[0])))));
-  v256 r2 =
-      v256_from_64((uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       q, vreinterpret_u8_s64(vget_high_s64(pattern.val[1])))),
-                   (uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       q, vreinterpret_u8_s64(vget_low_s64(pattern.val[1])))),
-                   (uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       q, vreinterpret_u8_s64(vget_high_s64(pattern.val[0])))),
-                   (uint64_t)vreinterpret_s64_u8(vtbl4_u8(
-                       q, vreinterpret_u8_s64(vget_low_s64(pattern.val[0])))));
+  uint8x8_t shuffle1_hi =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_high_s64(p32.val[1])));
+  uint8x8_t shuffle1_lo =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_low_s64(p32.val[1])));
+  uint8x8_t shuffle0_hi =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_high_s64(p32.val[0])));
+  uint8x8_t shuffle0_lo =
+      vtbl4_u8(p, vreinterpret_u8_s64(vget_low_s64(p32.val[0])));
+  v256 r1 = v256_from_64(vget_lane_u64(vreinterpret_u64_u8(shuffle1_hi), 0),
+                         vget_lane_u64(vreinterpret_u64_u8(shuffle1_lo), 0),
+                         vget_lane_u64(vreinterpret_u64_u8(shuffle0_hi), 0),
+                         vget_lane_u64(vreinterpret_u64_u8(shuffle0_lo), 0));
+  shuffle1_hi = vtbl4_u8(q, vreinterpret_u8_s64(vget_high_s64(pattern.val[1])));
+  shuffle1_lo = vtbl4_u8(q, vreinterpret_u8_s64(vget_low_s64(pattern.val[1])));
+  shuffle0_hi = vtbl4_u8(q, vreinterpret_u8_s64(vget_high_s64(pattern.val[0])));
+  shuffle0_lo = vtbl4_u8(q, vreinterpret_u8_s64(vget_low_s64(pattern.val[0])));
+  v256 r2 = v256_from_64(vget_lane_u64(vreinterpret_u64_u8(shuffle1_hi), 0),
+                         vget_lane_u64(vreinterpret_u64_u8(shuffle1_lo), 0),
+                         vget_lane_u64(vreinterpret_u64_u8(shuffle0_hi), 0),
+                         vget_lane_u64(vreinterpret_u64_u8(shuffle0_lo), 0));
   return v256_blend_8(r1, r2, v256_cmplt_s8(pattern, c32));
 #endif
 #else

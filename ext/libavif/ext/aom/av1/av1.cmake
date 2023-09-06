@@ -214,6 +214,7 @@ list(APPEND AOM_AV1_ENCODER_SOURCES
             "${AOM_ROOT}/av1/encoder/rd.h"
             "${AOM_ROOT}/av1/encoder/rdopt.c"
             "${AOM_ROOT}/av1/encoder/nonrd_pickmode.c"
+            "${AOM_ROOT}/av1/encoder/nonrd_opt.c"
             "${AOM_ROOT}/av1/encoder/nonrd_opt.h"
             "${AOM_ROOT}/av1/encoder/rdopt.h"
             "${AOM_ROOT}/av1/encoder/rdopt_data_defs.h"
@@ -357,9 +358,11 @@ list(APPEND AOM_AV1_ENCODER_INTRIN_NEON
             "${AOM_ROOT}/av1/encoder/arm/neon/av1_error_neon.c"
             "${AOM_ROOT}/av1/encoder/arm/neon/encodetxb_neon.c"
             "${AOM_ROOT}/av1/encoder/arm/neon/hybrid_fwd_txfm_neon.c"
+            "${AOM_ROOT}/av1/encoder/arm/neon/av1_k_means_neon.c"
             "${AOM_ROOT}/av1/encoder/arm/neon/av1_fwd_txfm2d_neon.c"
             "${AOM_ROOT}/av1/encoder/arm/neon/highbd_fwd_txfm_neon.c"
             "${AOM_ROOT}/av1/encoder/arm/neon/wedge_utils_neon.c"
+            "${AOM_ROOT}/av1/encoder/arm/neon/reconinter_enc_neon.c"
             "${AOM_ROOT}/av1/encoder/arm/neon/temporal_filter_neon.c")
 
 list(APPEND AOM_AV1_ENCODER_INTRIN_ARM_CRC32
@@ -400,6 +403,11 @@ if(CONFIG_TUNE_BUTTERAUGLI)
               "${AOM_ROOT}/av1/encoder/tune_butteraugli.h")
 endif()
 
+if(CONFIG_SALIENCY_MAP)
+  list(APPEND AOM_AV1_ENCODER_SOURCES "${AOM_ROOT}/av1/encoder/saliency_map.c"
+              "${AOM_ROOT}/av1/encoder/saliency_map.h")
+endif()
+
 if(CONFIG_OPTICAL_FLOW_API)
   list(APPEND AOM_AV1_ENCODER_SOURCES
               "${AOM_ROOT}/av1/encoder/sparse_linear_solver.c"
@@ -436,6 +444,9 @@ if(CONFIG_AV1_HIGHBITDEPTH)
               "${AOM_ROOT}/av1/common/x86/highbd_jnt_convolve_avx2.c"
               "${AOM_ROOT}/av1/common/x86/highbd_wiener_convolve_avx2.c"
               "${AOM_ROOT}/av1/common/x86/highbd_warp_affine_avx2.c")
+
+  list(APPEND AOM_AV1_COMMON_INTRIN_NEON
+              "${AOM_ROOT}/av1/common/arm/highbd_convolve_neon.c")
 
   list(APPEND AOM_AV1_ENCODER_INTRIN_SSE2
               "${AOM_ROOT}/av1/encoder/x86/highbd_block_error_intrin_sse2.c"

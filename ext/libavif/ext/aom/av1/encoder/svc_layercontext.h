@@ -29,7 +29,7 @@ typedef struct {
   RATE_CONTROL rc;
   PRIMARY_RATE_CONTROL p_rc;
   int framerate_factor;
-  int64_t layer_target_bitrate;
+  int64_t layer_target_bitrate;  // In bits per second.
   int scaling_factor_num;
   int scaling_factor_den;
   int64_t target_bandwidth;
@@ -91,6 +91,7 @@ typedef struct SVC {
   int temporal_layer_id;
   int number_spatial_layers;
   int number_temporal_layers;
+  int prev_number_spatial_layers;
   int use_flexible_mode;
   int ksvc_fixed_mode;
   /*!\endcond */
@@ -98,8 +99,6 @@ typedef struct SVC {
   /*!\cond */
   double base_framerate;
   unsigned int current_superframe;
-  unsigned int buffer_time_index[REF_FRAMES];
-  unsigned char buffer_spatial_layer[REF_FRAMES];
   int skip_mvsearch_last;
   int skip_mvsearch_gf;
   int skip_mvsearch_altref;
@@ -114,11 +113,14 @@ typedef struct SVC {
 
   /*!
    * Layer context used for rate control in CBR mode.
+   * An array. The index for spatial layer `sl` and temporal layer `tl` is
+   * sl * number_temporal_layers + tl.
    */
   LAYER_CONTEXT *layer_context;
 
   /*!
-   * Number of layers allocated for layer_context.
+   * Number of layers allocated for layer_context. If nonzero, must be greater
+   * than or equal to number_spatial_layers * number_temporal_layers.
    */
   int num_allocated_layers;
 
@@ -286,6 +288,11 @@ void av1_svc_set_last_source(struct AV1_COMP *const cpi,
                              struct EncodeFrameInput *frame_input,
                              YV12_BUFFER_CONFIG *prev_source);
 
+void av1_svc_update_buffer_slot_refreshed(struct AV1_COMP *const cpi);
+
+int av1_svc_get_min_ref_dist(const struct AV1_COMP *cpi);
+
+void av1_svc_set_reference_was_previous(struct AV1_COMP *cpi);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -20,6 +20,10 @@
 
 #include "av1/encoder/encoder.h"
 
+// Calculate block index x and y from split level and index
+#define GET_BLK_IDX_X(idx, level) (((idx) & (0x01)) << (level))
+#define GET_BLK_IDX_Y(idx, level) (((idx) >> (0x01)) << (level))
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -522,9 +522,10 @@ static double get_presentation_time(const DECODER_MODEL *const decoder_model,
 }
 
 #define MAX_TIME 1e16
-double time_next_buffer_is_free(int num_decoded_frame, int decoder_buffer_delay,
-                                const FRAME_BUFFER *frame_buffer_pool,
-                                double current_time) {
+static double time_next_buffer_is_free(int num_decoded_frame,
+                                       int decoder_buffer_delay,
+                                       const FRAME_BUFFER *frame_buffer_pool,
+                                       double current_time) {
   if (num_decoded_frame == 0) {
     return (double)decoder_buffer_delay / 90000.0;
   }
@@ -1243,7 +1244,8 @@ static void scan_past_frames(const FrameWindowBuffer *const buffer,
       AOMMAX(level_spec->max_decode_rate, decoded_samples);
   level_spec->max_tile_rate = AOMMAX(level_spec->max_tile_rate, tiles);
   level_stats->max_bitrate =
-      AOMMAX(level_stats->max_bitrate, (int)encoded_size_in_bytes * 8);
+      AOMMAX(level_stats->max_bitrate,
+             (int)AOMMIN(encoded_size_in_bytes * 8, (size_t)INT_MAX));
 }
 
 void av1_update_level_info(AV1_COMP *cpi, size_t size, int64_t ts_start,

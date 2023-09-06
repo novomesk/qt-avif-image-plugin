@@ -368,6 +368,13 @@ void av1_set_ssim_rdmult(const AV1_COMP *const cpi, int *errorperbit,
                          const BLOCK_SIZE bsize, const int mi_row,
                          const int mi_col, int *const rdmult);
 
+#if CONFIG_SALIENCY_MAP
+void av1_set_saliency_map_vmaf_rdmult(const AV1_COMP *const cpi,
+                                      int *errorperbit, const BLOCK_SIZE bsize,
+                                      const int mi_row, const int mi_col,
+                                      int *const rdmult);
+#endif
+
 void av1_update_state(const AV1_COMP *const cpi, ThreadData *td,
                       const PICK_MODE_CONTEXT *const ctx, int mi_row,
                       int mi_col, BLOCK_SIZE bsize, RUN_TYPE dry_run);

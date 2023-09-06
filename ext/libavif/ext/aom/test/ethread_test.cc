@@ -261,6 +261,16 @@ class AVxEncoderThreadTest
         encoder->Control(AOME_SET_ARNR_STRENGTH, 5);
         encoder->Control(AV1E_SET_FRAME_PARALLEL_DECODING, 0);
         encoder->Control(AV1E_SET_MAX_GF_INTERVAL, 4);
+        // In row_mt_=0 case, the output of single thread (1 thread) will be
+        // compared with multi thread (4 thread) output (as per line no:340).
+        // Currently, Loop restoration stage is conditionally disabled for speed
+        // 5, 6 when num_workers > 1. Due to this, the match between single
+        // thread and multi thread output can not be achieved. Hence, testing
+        // this case alone with LR disabled.
+        // TODO(aomedia:3446): Remove the constraint on this test case once Loop
+        // restoration state is same in both single and multi thread path.
+        if (set_cpu_used_ >= 5 && row_mt_ == 0)
+          encoder->Control(AV1E_SET_ENABLE_RESTORATION, 0);
       } else if (encoding_mode_ == ::libaom_test::kRealTime) {
         encoder->Control(AOME_SET_ENABLEAUTOALTREF, 0);
         encoder->Control(AV1E_SET_AQ_MODE, 3);

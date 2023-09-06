@@ -10,16 +10,16 @@
  */
 
 #include <assert.h>
-#include <emmintrin.h>  // SSE2
-#include <tmmintrin.h>
+#include <emmintrin.h>
 
 #include "config/aom_config.h"
 #include "config/aom_dsp_rtcd.h"
 
 #include "aom_dsp/x86/synonyms.h"
 
-unsigned int aom_sad4xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
-                             int b_stride, int width, int height) {
+static unsigned int sad4xh_sse2(const uint8_t *a, int a_stride,
+                                const uint8_t *b, int b_stride, int width,
+                                int height) {
   int i;
   assert(width == 4);
   (void)width;
@@ -59,8 +59,9 @@ unsigned int aom_sad4xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
   return res;
 }
 
-unsigned int aom_sad8xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
-                             int b_stride, int width, int height) {
+static unsigned int sad8xh_sse2(const uint8_t *a, int a_stride,
+                                const uint8_t *b, int b_stride, int width,
+                                int height) {
   int i;
   assert(width == 8);
   (void)width;
@@ -91,8 +92,9 @@ unsigned int aom_sad8xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
   return res;
 }
 
-unsigned int aom_sad16xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
-                              int b_stride, int width, int height) {
+static unsigned int sad16xh_sse2(const uint8_t *a, int a_stride,
+                                 const uint8_t *b, int b_stride, int width,
+                                 int height) {
   int i;
   assert(width == 16);
   (void)width;
@@ -116,8 +118,9 @@ unsigned int aom_sad16xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
   return res;
 }
 
-unsigned int aom_sad32xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
-                              int b_stride, int width, int height) {
+static unsigned int sad32xh_sse2(const uint8_t *a, int a_stride,
+                                 const uint8_t *b, int b_stride, int width,
+                                 int height) {
   int i, j;
   assert(width == 32);
   (void)width;
@@ -143,8 +146,9 @@ unsigned int aom_sad32xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
   return res;
 }
 
-unsigned int aom_sad64xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
-                              int b_stride, int width, int height) {
+static unsigned int sad64xh_sse2(const uint8_t *a, int a_stride,
+                                 const uint8_t *b, int b_stride, int width,
+                                 int height) {
   int i, j;
   assert(width == 64);
   (void)width;
@@ -170,8 +174,9 @@ unsigned int aom_sad64xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
   return res;
 }
 
-unsigned int aom_sad128xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
-                               int b_stride, int width, int height) {
+static unsigned int sad128xh_sse2(const uint8_t *a, int a_stride,
+                                  const uint8_t *b, int b_stride, int width,
+                                  int height) {
   int i, j;
   assert(width == 128);
   (void)width;
@@ -197,47 +202,37 @@ unsigned int aom_sad128xh_sse2(const uint8_t *a, int a_stride, const uint8_t *b,
   return res;
 }
 
-#define dist_wtd_sadMxN_sse2(m, n)                                            \
-  unsigned int aom_dist_wtd_sad##m##x##n##_avg_ssse3(                         \
+#define DIST_WTD_SADMXN_SSE2(m, n)                                            \
+  unsigned int aom_dist_wtd_sad##m##x##n##_avg_sse2(                          \
       const uint8_t *src, int src_stride, const uint8_t *ref, int ref_stride, \
       const uint8_t *second_pred, const DIST_WTD_COMP_PARAMS *jcp_param) {    \
     uint8_t comp_pred[m * n];                                                 \
     aom_dist_wtd_comp_avg_pred(comp_pred, second_pred, m, n, ref, ref_stride, \
                                jcp_param);                                    \
-    return aom_sad##m##xh_sse2(src, src_stride, comp_pred, m, m, n);          \
+    return sad##m##xh_sse2(src, src_stride, comp_pred, m, m, n);              \
   }
 
-#define dist_wtd_sadMxN_avx2(m, n)                                            \
-  unsigned int aom_dist_wtd_sad##m##x##n##_avg_avx2(                          \
-      const uint8_t *src, int src_stride, const uint8_t *ref, int ref_stride, \
-      const uint8_t *second_pred, const DIST_WTD_COMP_PARAMS *jcp_param) {    \
-    uint8_t comp_pred[m * n];                                                 \
-    aom_dist_wtd_comp_avg_pred(comp_pred, second_pred, m, n, ref, ref_stride, \
-                               jcp_param);                                    \
-    return aom_sad##m##xh_avx2(src, src_stride, comp_pred, m, m, n);          \
-  }
-
-/* clang-format off */
-dist_wtd_sadMxN_sse2(128, 128)
-dist_wtd_sadMxN_sse2(128, 64)
-dist_wtd_sadMxN_sse2(64, 128)
-dist_wtd_sadMxN_sse2(64, 64)
-dist_wtd_sadMxN_sse2(64, 32)
-dist_wtd_sadMxN_sse2(32, 64)
-dist_wtd_sadMxN_sse2(32, 32)
-dist_wtd_sadMxN_sse2(32, 16)
-dist_wtd_sadMxN_sse2(16, 32)
-dist_wtd_sadMxN_sse2(16, 16)
-dist_wtd_sadMxN_sse2(16, 8)
-dist_wtd_sadMxN_sse2(8, 16)
-dist_wtd_sadMxN_sse2(8, 8)
-dist_wtd_sadMxN_sse2(8, 4)
-dist_wtd_sadMxN_sse2(4, 8)
-dist_wtd_sadMxN_sse2(4, 4)
-dist_wtd_sadMxN_sse2(4, 16)
-dist_wtd_sadMxN_sse2(16, 4)
-dist_wtd_sadMxN_sse2(8, 32)
-dist_wtd_sadMxN_sse2(32, 8)
-dist_wtd_sadMxN_sse2(16, 64)
-dist_wtd_sadMxN_sse2(64, 16)
-    /* clang-format on */
+DIST_WTD_SADMXN_SSE2(128, 128)
+DIST_WTD_SADMXN_SSE2(128, 64)
+DIST_WTD_SADMXN_SSE2(64, 128)
+DIST_WTD_SADMXN_SSE2(64, 64)
+DIST_WTD_SADMXN_SSE2(64, 32)
+DIST_WTD_SADMXN_SSE2(32, 64)
+DIST_WTD_SADMXN_SSE2(32, 32)
+DIST_WTD_SADMXN_SSE2(32, 16)
+DIST_WTD_SADMXN_SSE2(16, 32)
+DIST_WTD_SADMXN_SSE2(16, 16)
+DIST_WTD_SADMXN_SSE2(16, 8)
+DIST_WTD_SADMXN_SSE2(8, 16)
+DIST_WTD_SADMXN_SSE2(8, 8)
+DIST_WTD_SADMXN_SSE2(8, 4)
+DIST_WTD_SADMXN_SSE2(4, 8)
+DIST_WTD_SADMXN_SSE2(4, 4)
+#if !CONFIG_REALTIME_ONLY
+DIST_WTD_SADMXN_SSE2(4, 16)
+DIST_WTD_SADMXN_SSE2(16, 4)
+DIST_WTD_SADMXN_SSE2(8, 32)
+DIST_WTD_SADMXN_SSE2(32, 8)
+DIST_WTD_SADMXN_SSE2(16, 64)
+DIST_WTD_SADMXN_SSE2(64, 16)
+#endif

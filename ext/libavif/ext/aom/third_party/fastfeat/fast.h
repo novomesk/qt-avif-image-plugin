@@ -41,9 +41,11 @@ xy* aom_fast9_detect(const byte* im, int xsize, int ysize, int stride, int b, in
 
 int* aom_fast9_score(const byte* i, int stride, xy* corners, int num_corners, int b);
 
-xy* aom_fast9_detect_nonmax(const byte* im, int xsize, int ysize, int stride, int b, int* ret_num_corners);
+xy* aom_fast9_detect_nonmax(const byte* im, int xsize, int ysize, int stride, int b,
+                            int** ret_scores, int* ret_num_corners);
 
-xy* aom_nonmax_suppression(const xy* corners, const int* scores, int num_corners, int* ret_num_nonmax);
+xy* aom_nonmax_suppression(const xy* corners, const int* scores, int num_corners,
+                           int** ret_scores, int* ret_num_nonmax);
 
 
 #endif

@@ -485,6 +485,7 @@ double av1_laplace_estimate_frame_rate(int q_index, int block_count,
  */
 void av1_init_tpl_txfm_stats(TplTxfmStats *tpl_txfm_stats);
 
+#if CONFIG_BITRATE_ACCURACY
 /*
  *!\brief Accumulate TplTxfmStats
  *
@@ -516,6 +517,7 @@ void av1_record_tpl_txfm_block(TplTxfmStats *tpl_txfm_stats,
  * \param[in]  txfm_stats     A structure for storing transform stats
  */
 void av1_tpl_txfm_stats_update_abs_coeff_mean(TplTxfmStats *txfm_stats);
+#endif  // CONFIG_BITRATE_ACCURACY
 
 /*!\brief  Estimate coefficient entropy using Laplace dsitribution
  *

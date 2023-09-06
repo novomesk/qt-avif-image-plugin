@@ -237,6 +237,8 @@ static const int av1_arg_ctrl_map[] = { AOME_SET_CPUUSED,
                                         AV1E_SET_ENABLE_TX_SIZE_SEARCH,
                                         AV1E_SET_LOOPFILTER_CONTROL,
                                         AV1E_SET_AUTO_INTRA_TOOLS_OFF,
+                                        AV1E_ENABLE_RATE_GUIDE_DELTAQ,
+                                        AV1E_SET_RATE_DISTRIBUTION_INFO,
                                         0 };
 
 const arg_def_t *main_args[] = { &g_av1_codec_arg_defs.help,
@@ -437,6 +439,8 @@ const arg_def_t *av1_ctrl_args[] = {
 #endif
   &g_av1_codec_arg_defs.dv_cost_upd_freq,
   &g_av1_codec_arg_defs.partition_info_path,
+  &g_av1_codec_arg_defs.enable_rate_guide_deltaq,
+  &g_av1_codec_arg_defs.rate_distribution_info,
   &g_av1_codec_arg_defs.enable_directional_intra,
   &g_av1_codec_arg_defs.enable_tx_size_search,
   &g_av1_codec_arg_defs.loopfilter_control,
@@ -533,6 +537,8 @@ struct stream_config {
   const char *vmaf_model_path;
 #endif
   const char *partition_info_path;
+  unsigned int enable_rate_guide_deltaq;
+  const char *rate_distribution_info;
   aom_color_range_t color_range;
   const char *two_pass_input;
   const char *two_pass_output;
@@ -1130,6 +1136,12 @@ static int parse_stream_params(struct AvxEncoderConfig *global,
     } else if (arg_match(&arg, &g_av1_codec_arg_defs.partition_info_path,
                          argi)) {
       config->partition_info_path = arg.val;
+    } else if (arg_match(&arg, &g_av1_codec_arg_defs.enable_rate_guide_deltaq,
+                         argi)) {
+      config->enable_rate_guide_deltaq = arg_parse_uint(&arg);
+    } else if (arg_match(&arg, &g_av1_codec_arg_defs.rate_distribution_info,
+                         argi)) {
+      config->rate_distribution_info = arg.val;
     } else if (arg_match(&arg, &g_av1_codec_arg_defs.use_fixed_qp_offsets,
                          argi)) {
       config->cfg.use_fixed_qp_offsets = arg_parse_uint(&arg);
@@ -1290,21 +1302,6 @@ static const char *file_type_to_string(enum VideoFileType t) {
   switch (t) {
     case FILE_TYPE_RAW: return "RAW";
     case FILE_TYPE_Y4M: return "Y4M";
-    default: return "Other";
-  }
-}
-
-static const char *image_format_to_string(aom_img_fmt_t f) {
-  switch (f) {
-    case AOM_IMG_FMT_I420: return "I420";
-    case AOM_IMG_FMT_I422: return "I422";
-    case AOM_IMG_FMT_I444: return "I444";
-    case AOM_IMG_FMT_YV12: return "YV12";
-    case AOM_IMG_FMT_NV12: return "NV12";
-    case AOM_IMG_FMT_YV1216: return "YV1216";
-    case AOM_IMG_FMT_I42016: return "I42016";
-    case AOM_IMG_FMT_I42216: return "I42216";
-    case AOM_IMG_FMT_I44416: return "I44416";
     default: return "Other";
   }
 }
@@ -1539,6 +1536,16 @@ static void initialize_encoder(struct stream_state *stream,
     AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
                                   AV1E_SET_PARTITION_INFO_PATH,
                                   stream->config.partition_info_path);
+  }
+  if (stream->config.enable_rate_guide_deltaq) {
+    AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                  AV1E_ENABLE_RATE_GUIDE_DELTAQ,
+                                  stream->config.enable_rate_guide_deltaq);
+  }
+  if (stream->config.rate_distribution_info) {
+    AOM_CODEC_CONTROL_TYPECHECKED(&stream->encoder,
+                                  AV1E_SET_RATE_DISTRIBUTION_INFO,
+                                  stream->config.rate_distribution_info);
   }
 
   if (stream->config.film_grain_filename) {

@@ -33,6 +33,9 @@ struct ThreadData;
 // Window size for temporal filtering.
 #define TF_WINDOW_LENGTH 5
 
+// A constant number, sqrt(pi / 2),  used for noise estimation.
+static const double SQRT_PI_BY_2 = 1.25331413732;
+
 // Hyper-parameters used to compute filtering weight. These hyper-parameters can
 // be tuned for a better performance.
 // 0. A scale factor used in temporal filtering to raise the filter weight from
@@ -268,15 +271,15 @@ typedef struct {
 // Signal Processing, 2008, St Julians, Malta.
 // Inputs:
 //   frame: Pointer to the frame to estimate noise level from.
-//   plane: Index of the plane used for noise estimation. Commonly, 0 for
-//          Y-plane, 1 for U-plane, and 2 for V-plane.
+//   noise_level: Pointer to store the estimated noise.
+//   plane_from: Index of the starting plane used for noise estimation.
+//               Commonly, 0 for Y-plane, 1 for U-plane, and 2 for V-plane.
+//   plane_to: Index of the end plane used for noise estimation.
 //   bit_depth: Actual bit-depth instead of the encoding bit-depth of the frame.
-// Returns:
-//   The estimated noise, or -1.0 if there are too few smooth pixels.
-double av1_estimate_noise_from_single_plane(const YV12_BUFFER_CONFIG *frame,
-                                            const int plane,
-                                            const int bit_depth,
-                                            const int edge_thresh);
+//   edge_thresh: Edge threshold.
+void av1_estimate_noise_level(const YV12_BUFFER_CONFIG *frame,
+                              double *noise_level, int plane_from, int plane_to,
+                              int bit_depth, int edge_thresh);
 /*!\endcond */
 
 /*!\brief Does temporal filter for a given macroblock row.

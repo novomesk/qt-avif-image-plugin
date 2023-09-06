@@ -100,7 +100,7 @@ if(CONFIG_AV1_ENCODER)
                                        "Scalable encoder loop.")
 
   set(AOM_DOXYGEN_EXAMPLE_SOURCES ${AOM_DOXYGEN_EXAMPLE_SOURCES}
-                                  "${AOM_ROOT}/examples/svc_encoder_rtc.c")
+                                  "${AOM_ROOT}/examples/svc_encoder_rtc.cc")
 
   set(AOM_DOXYGEN_EXAMPLE_DESCRIPTIONS ${AOM_DOXYGEN_EXAMPLE_DESCRIPTIONS}
                                        "Layered encoder for RTC.")

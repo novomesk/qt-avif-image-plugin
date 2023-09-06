@@ -673,15 +673,38 @@ void av1_build_quantizer(aom_bit_depth_t bit_depth, int y_dc_delta_q,
   }
 }
 
+static INLINE bool deltaq_params_have_changed(
+    const DeltaQuantParams *prev_deltaq_params,
+    const CommonQuantParams *quant_params) {
+  return (prev_deltaq_params->y_dc_delta_q != quant_params->y_dc_delta_q ||
+          prev_deltaq_params->u_dc_delta_q != quant_params->u_dc_delta_q ||
+          prev_deltaq_params->v_dc_delta_q != quant_params->v_dc_delta_q ||
+          prev_deltaq_params->u_ac_delta_q != quant_params->u_ac_delta_q ||
+          prev_deltaq_params->v_ac_delta_q != quant_params->v_ac_delta_q);
+}
+
 void av1_init_quantizer(EncQuantDequantParams *const enc_quant_dequant_params,
                         const CommonQuantParams *quant_params,
                         aom_bit_depth_t bit_depth) {
+  DeltaQuantParams *const prev_deltaq_params =
+      &enc_quant_dequant_params->prev_deltaq_params;
+
+  // Re-initialize the quantizer only if any of the dc/ac deltaq parameters
+  // change.
+  if (!deltaq_params_have_changed(prev_deltaq_params, quant_params)) return;
   QUANTS *const quants = &enc_quant_dequant_params->quants;
   Dequants *const dequants = &enc_quant_dequant_params->dequants;
   av1_build_quantizer(bit_depth, quant_params->y_dc_delta_q,
                       quant_params->u_dc_delta_q, quant_params->u_ac_delta_q,
                       quant_params->v_dc_delta_q, quant_params->v_ac_delta_q,
                       quants, dequants);
+
+  // Record the state of deltaq parameters.
+  prev_deltaq_params->y_dc_delta_q = quant_params->y_dc_delta_q;
+  prev_deltaq_params->u_dc_delta_q = quant_params->u_dc_delta_q;
+  prev_deltaq_params->v_dc_delta_q = quant_params->v_dc_delta_q;
+  prev_deltaq_params->u_ac_delta_q = quant_params->u_ac_delta_q;
+  prev_deltaq_params->v_ac_delta_q = quant_params->v_ac_delta_q;
 }
 
 void av1_set_q_index(const EncQuantDequantParams *enc_quant_dequant_params,

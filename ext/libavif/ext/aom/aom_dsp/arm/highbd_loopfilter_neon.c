@@ -247,12 +247,12 @@ void aom_highbd_lpf_horizontal_4_neon(uint16_t *s, int pitch,
   filter4_masks(p0q0, p1q1, hev_thresh, outer_mask, inner_thresh, &hev_mask,
                 &needs_filter4_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter4_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
 
   // Copy the masks to the high bits for packed comparisons later.
   const uint16x8_t hev_mask_8 = vcombine_u16(hev_mask, hev_mask);
@@ -313,12 +313,12 @@ void aom_highbd_lpf_vertical_4_neon(uint16_t *s, int pitch,
   filter4_masks(p0q0, p1q1, hev_thresh, outer_mask, inner_thresh, &hev_mask,
                 &needs_filter4_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter4_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
 
   // Copy the masks to the high bits for packed comparisons later.
   const uint16x8_t hev_mask_8 = vcombine_u16(hev_mask, hev_mask);
@@ -437,12 +437,12 @@ void aom_highbd_lpf_horizontal_6_neon(uint16_t *s, int pitch,
   filter6_masks(p2q2, p1q1, p0q0, hev_thresh, outer_mask, inner_thresh, bd,
                 &needs_filter_mask, &is_flat3_mask, &hev_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
 
   // Copy the masks to the high bits for packed comparisons later.
   const uint16x8_t hev_mask_8 = vcombine_u16(hev_mask, hev_mask);
@@ -528,12 +528,12 @@ void aom_highbd_lpf_vertical_6_neon(uint16_t *s, int pitch,
   filter6_masks(p2q2, p1q1, p0q0, hev_thresh, outer_mask, inner_thresh, bd,
                 &needs_filter_mask, &is_flat3_mask, &hev_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
 
   // Copy the masks to the high bits for packed comparisons later.
   const uint16x8_t hev_mask_8 = vcombine_u16(hev_mask, hev_mask);
@@ -684,12 +684,12 @@ void aom_highbd_lpf_horizontal_8_neon(uint16_t *s, int pitch,
   filter8_masks(p3q3, p2q2, p1q1, p0q0, hev_thresh, outer_mask, inner_thresh,
                 bd, &needs_filter_mask, &is_flat4_mask, &hev_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
 
   // Copy the masks to the high bits for packed comparisons later.
   const uint16x8_t hev_mask_8 = vcombine_u16(hev_mask, hev_mask);
@@ -783,12 +783,12 @@ void aom_highbd_lpf_vertical_8_neon(uint16_t *s, int pitch,
   filter8_masks(p3q3, p2q2, p1q1, p0q0, hev_thresh, outer_mask, inner_thresh,
                 bd, &needs_filter_mask, &is_flat4_mask, &hev_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
 
   // Copy the masks to the high bits for packed comparisons later.
   const uint16x8_t hev_mask_8 = vcombine_u16(hev_mask, hev_mask);
@@ -976,12 +976,12 @@ void aom_highbd_lpf_horizontal_14_neon(uint16_t *s, int pitch,
   filter8_masks(p3q3, p2q2, p1q1, p0q0, hev_thresh, outer_mask, inner_thresh,
                 bd, &needs_filter_mask, &is_flat4_mask, &hev_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
   const uint16x8_t p4q4 = vcombine_u16(src[2], src[11]);
   const uint16x8_t p5q5 = vcombine_u16(src[1], src[12]);
   const uint16x8_t p6q6 = vcombine_u16(src[0], src[13]);
@@ -1083,7 +1083,7 @@ void aom_highbd_lpf_horizontal_14_dual_neon(
 static INLINE uint16x8x2_t permute_acdb64(const uint16x8_t ab,
                                           const uint16x8_t cd) {
   uint16x8x2_t acdb;
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   // a[b] <- [c]d
   acdb.val[0] = vreinterpretq_u16_u64(
       vtrn1q_u64(vreinterpretq_u64_u16(ab), vreinterpretq_u64_u16(cd)));
@@ -1099,7 +1099,7 @@ static INLINE uint16x8x2_t permute_acdb64(const uint16x8_t ab,
   acdb.val[1] = vreinterpretq_u16_u64(
       vsetq_lane_u64(vgetq_lane_u64(vreinterpretq_u64_u16(cd), 1),
                      vreinterpretq_u64_u16(ab), 0));
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
   return acdb;
 }
 
@@ -1144,12 +1144,12 @@ void aom_highbd_lpf_vertical_14_neon(uint16_t *s, int pitch,
   filter8_masks(p3q3, p2q2, p1q1, p0q0, hev_thresh, outer_mask, inner_thresh,
                 bd, &needs_filter_mask, &is_flat4_mask, &hev_mask);
 
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   if (vaddv_u16(needs_filter_mask) == 0) {
     // None of the values will be filtered.
     return;
   }
-#endif  // defined(__aarch64__)
+#endif  // AOM_ARCH_AARCH64
   const uint16x8_t p4q4 =
       vcombine_u16(vget_low_u16(src_p[3]), vget_high_u16(src_q[0]));
   const uint16x8_t p5q5 =

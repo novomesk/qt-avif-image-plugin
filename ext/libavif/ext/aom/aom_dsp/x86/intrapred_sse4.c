@@ -602,7 +602,7 @@ static void dr_prediction_z2_Nx8_sse4_1(int N, uint8_t *dst, ptrdiff_t stride,
   const __m128i c1234 = _mm_setr_epi16(1, 2, 3, 4, 5, 6, 7, 8);
 
   for (int r = 0; r < N; r++) {
-    __m128i b, res, res1, shift, shifty;
+    __m128i b, res, res1, shift;
     __m128i resx, resy, resxy, r6, ydx;
 
     int y = r + 1;
@@ -620,11 +620,7 @@ static void dr_prediction_z2_Nx8_sse4_1(int N, uint8_t *dst, ptrdiff_t stride,
     }
 
     if (base_shift > 7) {
-      a0_x = _mm_setzero_si128();
-      a1_x = _mm_setzero_si128();
-      a0_y = _mm_setzero_si128();
-      a1_y = _mm_setzero_si128();
-      shift = _mm_setzero_si128();
+      resx = _mm_setzero_si128();
     } else {
       a0_above = _mm_loadu_si128((__m128i *)(above + base_x + base_shift));
       ydx = _mm_set1_epi16(y * dx);
@@ -649,9 +645,15 @@ static void dr_prediction_z2_Nx8_sse4_1(int N, uint8_t *dst, ptrdiff_t stride,
       }
       a0_x = _mm_cvtepu8_epi16(a0_above);
       a1_x = _mm_cvtepu8_epi16(a1_above);
-      a0_y = _mm_setzero_si128();
-      a1_y = _mm_setzero_si128();
-      shifty = shift;
+
+      diff = _mm_sub_epi16(a1_x, a0_x);  // a[x+1] - a[x]
+      a32 = _mm_slli_epi16(a0_x, 5);     // a[x] * 32
+      a32 = _mm_add_epi16(a32, a16);     // a[x] * 32 + 16
+
+      b = _mm_mullo_epi16(diff, shift);
+      res = _mm_add_epi16(a32, b);
+      res = _mm_srli_epi16(res, 5);
+      resx = _mm_packus_epi16(res, res);
     }
 
     // y calc
@@ -678,34 +680,27 @@ static void dr_prediction_z2_Nx8_sse4_1(int N, uint8_t *dst, ptrdiff_t stride,
                             left[base_y_c[6]], left[base_y_c[7]]);
 
       if (upsample_left) {
-        shifty = _mm_srli_epi16(
+        shift = _mm_srli_epi16(
             _mm_and_si128(_mm_slli_epi16(y_c, upsample_left), c3f), 1);
       } else {
-        shifty = _mm_srli_epi16(_mm_and_si128(y_c, c3f), 1);
+        shift = _mm_srli_epi16(_mm_and_si128(y_c, c3f), 1);
       }
+
+      diff = _mm_sub_epi16(a1_y, a0_y);  // a[x+1] - a[x]
+      a32 = _mm_slli_epi16(a0_y, 5);     // a[x] * 32
+      a32 = _mm_add_epi16(a32, a16);     // a[x] * 32 + 16
+
+      b = _mm_mullo_epi16(diff, shift);
+      res1 = _mm_add_epi16(a32, b);
+      res1 = _mm_srli_epi16(res1, 5);
+
+      resy = _mm_packus_epi16(res1, res1);
+      resxy = _mm_blendv_epi8(resx, resy, *(__m128i *)Mask[0][base_min_diff]);
+      _mm_storel_epi64((__m128i *)dst, resxy);
+    } else {
+      _mm_storel_epi64((__m128i *)dst, resx);
     }
 
-    diff = _mm_sub_epi16(a1_x, a0_x);  // a[x+1] - a[x]
-    a32 = _mm_slli_epi16(a0_x, 5);     // a[x] * 32
-    a32 = _mm_add_epi16(a32, a16);     // a[x] * 32 + 16
-
-    b = _mm_mullo_epi16(diff, shift);
-    res = _mm_add_epi16(a32, b);
-    res = _mm_srli_epi16(res, 5);
-
-    diff = _mm_sub_epi16(a1_y, a0_y);  // a[x+1] - a[x]
-    a32 = _mm_slli_epi16(a0_y, 5);     // a[x] * 32
-    a32 = _mm_add_epi16(a32, a16);     // a[x] * 32 + 16
-
-    b = _mm_mullo_epi16(diff, shifty);
-    res1 = _mm_add_epi16(a32, b);
-    res1 = _mm_srli_epi16(res1, 5);
-
-    resx = _mm_packus_epi16(res, res);
-    resy = _mm_packus_epi16(res1, res1);
-
-    resxy = _mm_blendv_epi8(resx, resy, *(__m128i *)Mask[0][base_min_diff]);
-    _mm_storel_epi64((__m128i *)(dst), resxy);
     dst += stride;
   }
 }

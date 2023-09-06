@@ -348,7 +348,8 @@ static INLINE uint32_t highbd_sse_W8x1_neon(uint16x8_t q2, uint16x8_t q3) {
 
 int64_t aom_highbd_sse_neon(const uint8_t *a8, int a_stride, const uint8_t *b8,
                             int b_stride, int width, int height) {
-  const uint16x8_t q0 = { 0, 1, 2, 3, 4, 5, 6, 7 };
+  static const uint16_t k01234567[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+  const uint16x8_t q0 = vld1q_u16(k01234567);
   int64_t sse = 0;
   uint16_t *a = CONVERT_TO_SHORTPTR(a8);
   uint16_t *b = CONVERT_TO_SHORTPTR(b8);

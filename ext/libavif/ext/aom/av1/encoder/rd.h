@@ -56,6 +56,16 @@ extern "C" {
 // Factor to weigh the rate for switchable interp filters.
 #define SWITCHABLE_INTERP_RATE_FACTOR 1
 
+// Macros for common video resolutions: width x height
+// For example, 720p represents video resolution of 1280x720 pixels.
+#define RESOLUTION_288P 352 * 288
+#define RESOLUTION_360P 640 * 360
+#define RESOLUTION_480P 640 * 480
+#define RESOLUTION_720P 1280 * 720
+#define RESOLUTION_1080P 1920 * 1080
+#define RESOLUTION_1440P 2560 * 1440
+#define RESOLUTION_4K 3840 * 2160
+
 #define RTC_REFS 4
 static const MV_REFERENCE_FRAME real_time_ref_combos[RTC_REFS][2] = {
   { LAST_FRAME, NONE_FRAME },

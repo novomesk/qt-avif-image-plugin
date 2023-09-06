@@ -63,32 +63,51 @@ static INLINE int linsolve(int n, double *A, int stride, double *b, double *x) {
 // Solves for n-dim x in a least squares sense to minimize |Ax - b|^2
 // The solution is simply x = (A'A)^-1 A'b or simply the solution for
 // the system: A'A x = A'b
-static INLINE int least_squares(int n, double *A, int rows, int stride,
-                                double *b, double *scratch, double *x) {
-  int i, j, k;
-  double *scratch_ = NULL;
-  double *AtA, *Atb;
-  if (!scratch) {
-    scratch_ = (double *)aom_malloc(sizeof(*scratch) * n * (n + 1));
-    if (!scratch_) return 0;
-    scratch = scratch_;
-  }
-  AtA = scratch;
-  Atb = scratch + n * n;
+//
+// This process is split into three steps in order to avoid needing to
+// explicitly allocate the A matrix, which may be very large if there
+// are many equations to solve.
+//
+// The process for using this is (in pseudocode):
+//
+// Allocate mat (size n*n), y (size n), a (size n), x (size n)
+// least_squares_init(mat, y, n)
+// for each equation a . x = b {
+//    least_squares_accumulate(mat, y, a, b, n)
+// }
+// least_squares_solve(mat, y, x, n)
+//
+// where:
+// * mat, y are accumulators for the values A'A and A'b respectively,
+// * a, b are the coefficients of each individual equation,
+// * x is the result vector
+// * and n is the problem size
+static INLINE void least_squares_init(double *mat, double *y, int n) {
+  memset(mat, 0, n * n * sizeof(double));
+  memset(y, 0, n * sizeof(double));
+}
 
-  for (i = 0; i < n; ++i) {
-    for (j = i; j < n; ++j) {
-      AtA[i * n + j] = 0.0;
-      for (k = 0; k < rows; ++k)
-        AtA[i * n + j] += A[k * stride + i] * A[k * stride + j];
-      AtA[j * n + i] = AtA[i * n + j];
+// Round the given positive value to nearest integer
+static AOM_FORCE_INLINE int iroundpf(float x) {
+  assert(x >= 0.0);
+  return (int)(x + 0.5f);
+}
+
+static INLINE void least_squares_accumulate(double *mat, double *y,
+                                            const double *a, double b, int n) {
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < n; j++) {
+      mat[i * n + j] += a[i] * a[j];
     }
-    Atb[i] = 0;
-    for (k = 0; k < rows; ++k) Atb[i] += A[k * stride + i] * b[k];
   }
-  int ret = linsolve(n, AtA, n, Atb, x);
-  aom_free(scratch_);
-  return ret;
+  for (int i = 0; i < n; i++) {
+    y[i] += a[i] * b;
+  }
+}
+
+static INLINE int least_squares_solve(double *mat, double *y, double *x,
+                                      int n) {
+  return linsolve(n, mat, n, y, x);
 }
 
 // Matrix multiply
@@ -108,4 +127,19 @@ static INLINE void multiply_mat(const double *m1, const double *m2, double *res,
   }
 }
 
+static AOM_INLINE float approx_exp(float y) {
+#define A ((1 << 23) / 0.69314718056f)  // (1 << 23) / ln(2)
+#define B \
+  127  // Offset for the exponent according to IEEE floating point standard.
+#define C 60801  // Magic number controls the accuracy of approximation
+  union {
+    float as_float;
+    int32_t as_int32;
+  } container;
+  container.as_int32 = ((int32_t)(y * A)) + ((B << 23) - C);
+  return container.as_float;
+#undef A
+#undef B
+#undef C
+}
 #endif  // AOM_AOM_DSP_MATHUTILS_H_

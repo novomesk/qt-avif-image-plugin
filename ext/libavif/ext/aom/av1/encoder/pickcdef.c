@@ -638,7 +638,7 @@ static AOM_INLINE bool cdef_alloc_data(CdefSearchCtx *cdef_search_ctx) {
   const int nvfb = cdef_search_ctx->nvfb;
   const int nhfb = cdef_search_ctx->nhfb;
   cdef_search_ctx->sb_index =
-      aom_malloc(nvfb * nhfb * sizeof(cdef_search_ctx->sb_index));
+      aom_malloc(nvfb * nhfb * sizeof(cdef_search_ctx->sb_index[0]));
   cdef_search_ctx->sb_count = 0;
   cdef_search_ctx->mse[0] =
       aom_malloc(sizeof(**cdef_search_ctx->mse) * nvfb * nhfb);
@@ -728,8 +728,8 @@ static AOM_INLINE void cdef_params_init(const YV12_BUFFER_CONFIG *frame,
 #endif
 }
 
-static void pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
-                              int is_screen_content) {
+void av1_pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
+                           int is_screen_content) {
   const int bd = cm->seq_params->bit_depth;
   const int q =
       av1_ac_quant_QTX(cm->quant_params.base_qindex, 0, bd) >> (bd - 8);
@@ -807,6 +807,8 @@ static void pick_cdef_from_qp(AV1_COMMON *const cm, int skip_cdef,
   const int nvfb = (mi_params->mi_rows + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
   const int nhfb = (mi_params->mi_cols + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
   MB_MODE_INFO **mbmi = mi_params->mi_grid_base;
+  // mbmi is NULL when real-time rate control library is used.
+  if (!mbmi) return;
   for (int r = 0; r < nvfb; ++r) {
     for (int c = 0; c < nhfb; ++c) {
       MB_MODE_INFO *current_mbmi = mbmi[MI_SIZE_64X64 * c];
@@ -820,7 +822,8 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
                      const YV12_BUFFER_CONFIG *ref, AV1_COMMON *cm,
                      MACROBLOCKD *xd, CDEF_PICK_METHOD pick_method, int rdmult,
                      int skip_cdef_feature, CDEF_CONTROL cdef_control,
-                     const int is_screen_content, int non_reference_frame) {
+                     const int is_screen_content, int non_reference_frame,
+                     int rtc_ext_rc) {
   assert(cdef_control != CDEF_NONE);
   if (cdef_control == CDEF_REFERENCE && non_reference_frame) {
     CdefInfo *const cdef_info = &cm->cdef_info;
@@ -831,8 +834,12 @@ void av1_cdef_search(MultiThreadInfo *mt_info, const YV12_BUFFER_CONFIG *frame,
     return;
   }
 
+  if (rtc_ext_rc) {
+    av1_pick_cdef_from_qp(cm, 0, 0);
+    return;
+  }
   if (pick_method == CDEF_PICK_FROM_Q) {
-    pick_cdef_from_qp(cm, skip_cdef_feature, is_screen_content);
+    av1_pick_cdef_from_qp(cm, skip_cdef_feature, is_screen_content);
     return;
   }
   const CommonModeInfoParams *const mi_params = &cm->mi_params;

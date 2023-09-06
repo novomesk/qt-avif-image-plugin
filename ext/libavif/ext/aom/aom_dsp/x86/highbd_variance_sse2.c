@@ -98,43 +98,6 @@ static void highbd_12_variance_sse2(const uint16_t *src, int src_stride,
   *sse = (uint32_t)ROUND_POWER_OF_TWO(sse_long, 8);
 }
 
-#define HIGH_GET_VAR(S)                                                       \
-  void aom_highbd_get##S##x##S##var_sse2(const uint8_t *src8, int src_stride, \
-                                         const uint8_t *ref8, int ref_stride, \
-                                         uint32_t *sse, int *sum) {           \
-    uint16_t *src = CONVERT_TO_SHORTPTR(src8);                                \
-    uint16_t *ref = CONVERT_TO_SHORTPTR(ref8);                                \
-    aom_highbd_calc##S##x##S##var_sse2(src, src_stride, ref, ref_stride, sse, \
-                                       sum);                                  \
-  }                                                                           \
-                                                                              \
-  void aom_highbd_10_get##S##x##S##var_sse2(                                  \
-      const uint8_t *src8, int src_stride, const uint8_t *ref8,               \
-      int ref_stride, uint32_t *sse, int *sum) {                              \
-    uint16_t *src = CONVERT_TO_SHORTPTR(src8);                                \
-    uint16_t *ref = CONVERT_TO_SHORTPTR(ref8);                                \
-    aom_highbd_calc##S##x##S##var_sse2(src, src_stride, ref, ref_stride, sse, \
-                                       sum);                                  \
-    *sum = ROUND_POWER_OF_TWO(*sum, 2);                                       \
-    *sse = ROUND_POWER_OF_TWO(*sse, 4);                                       \
-  }                                                                           \
-                                                                              \
-  void aom_highbd_12_get##S##x##S##var_sse2(                                  \
-      const uint8_t *src8, int src_stride, const uint8_t *ref8,               \
-      int ref_stride, uint32_t *sse, int *sum) {                              \
-    uint16_t *src = CONVERT_TO_SHORTPTR(src8);                                \
-    uint16_t *ref = CONVERT_TO_SHORTPTR(ref8);                                \
-    aom_highbd_calc##S##x##S##var_sse2(src, src_stride, ref, ref_stride, sse, \
-                                       sum);                                  \
-    *sum = ROUND_POWER_OF_TWO(*sum, 4);                                       \
-    *sse = ROUND_POWER_OF_TWO(*sse, 8);                                       \
-  }
-
-HIGH_GET_VAR(16)
-HIGH_GET_VAR(8)
-
-#undef HIGH_GET_VAR
-
 #define VAR_FN(w, h, block_size, shift)                                    \
   uint32_t aom_highbd_8_variance##w##x##h##_sse2(                          \
       const uint8_t *src8, int src_stride, const uint8_t *ref8,            \

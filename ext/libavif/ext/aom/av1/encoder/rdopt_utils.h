@@ -23,6 +23,7 @@ extern "C" {
 #endif
 
 #define MAX_REF_MV_SEARCH 3
+#define MAX_TX_RD_GATE_LEVEL 5
 #define INTER_INTRA_RD_THRESH_SCALE 9
 #define INTER_INTRA_RD_THRESH_SHIFT 4
 
@@ -352,10 +353,12 @@ static INLINE int check_txfm_eval(MACROBLOCK *const x, BLOCK_SIZE bsize,
   // Derive aggressiveness factor for gating the transform search
   // Lower value indicates more aggressiveness. Be more conservative (high
   // value) for (i) low quantizers (ii) regions where prediction is poor
-  const int scale[5] = { INT_MAX, 4, 3, 2, 2 };
+  const int scale[MAX_TX_RD_GATE_LEVEL + 1] = { INT_MAX, 4, 3, 2, 2, 1 };
   const int qslope = 2 * (!is_luma_only);
-  const int level_to_qindex_map[5] = { 0, 0, 0, 80, 100 };
+  const int level_to_qindex_map[MAX_TX_RD_GATE_LEVEL + 1] = { 0,  0,   0,
+                                                              80, 100, 140 };
   int aggr_factor = 4;
+  assert(level <= MAX_TX_RD_GATE_LEVEL);
   const int pred_qindex_thresh = level_to_qindex_map[level];
   if (!is_luma_only && level <= 2) {
     aggr_factor = 4 * AOMMAX(1, ROUND_POWER_OF_TWO((MAXQ - x->qindex) * qslope,
@@ -374,7 +377,9 @@ static INLINE int check_txfm_eval(MACROBLOCK *const x, BLOCK_SIZE bsize,
   // since best_skip_rd is computed after and skip_rd is computed (with 8-bit
   // prediction signals blended for WEDGE/DIFFWTD rather than 16-bit) before
   // interpolation filter search
-  const int luma_mul[5] = { INT_MAX, 32, 29, 17, 17 };
+  const int luma_mul[MAX_TX_RD_GATE_LEVEL + 1] = {
+    INT_MAX, 32, 29, 17, 17, 17
+  };
   int mul_factor = is_luma_only ? luma_mul[level] : 16;
   int64_t rd_thresh =
       (best_skip_rd == INT64_MAX)
@@ -765,6 +770,18 @@ static INLINE void av1_copy_usable_ref_mv_stack_and_weight(
          USABLE_REF_MV_STACK_SIZE * sizeof(xd->weight[0][0]));
   memcpy(mbmi_ext->ref_mv_stack[ref_frame], xd->ref_mv_stack[ref_frame],
          USABLE_REF_MV_STACK_SIZE * sizeof(xd->ref_mv_stack[0][0]));
+}
+
+// Get transform rd gate level for the given transform search case.
+static INLINE int get_txfm_rd_gate_level(
+    const int txfm_rd_gate_level[TX_SEARCH_CASES], BLOCK_SIZE bsize,
+    TX_SEARCH_CASE tx_search_case, int eval_motion_mode) {
+  assert(tx_search_case < TX_SEARCH_CASES);
+  if (tx_search_case == TX_SEARCH_MOTION_MODE && !eval_motion_mode &&
+      num_pels_log2_lookup[bsize] > 8)
+    return txfm_rd_gate_level[TX_SEARCH_MOTION_MODE];
+
+  return txfm_rd_gate_level[TX_SEARCH_DEFAULT];
 }
 
 #ifdef __cplusplus

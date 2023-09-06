@@ -9,7 +9,6 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -118,10 +117,18 @@ static const arg_def_t *all_args[] = {
 };
 
 #if CONFIG_LIBYUV
-static INLINE int libyuv_scale(aom_image_t *src, aom_image_t *dst,
+// Returns 0 on success and returns -1 on failure.
+static INLINE int libyuv_scale(const aom_image_t *src, aom_image_t *dst,
                                FilterModeEnum mode) {
+  if (src->fmt != dst->fmt) {
+    fprintf(stderr,
+            "%s failed to scale output frame because format changed from %s to "
+            "%s\n",
+            exec_name, image_format_to_string(dst->fmt),
+            image_format_to_string(src->fmt));
+    return -1;
+  }
   if (src->fmt == AOM_IMG_FMT_I42016) {
-    assert(dst->fmt == AOM_IMG_FMT_I42016);
     return I420Scale_16(
         (uint16_t *)src->planes[AOM_PLANE_Y], src->stride[AOM_PLANE_Y] / 2,
         (uint16_t *)src->planes[AOM_PLANE_U], src->stride[AOM_PLANE_U] / 2,
@@ -131,15 +138,18 @@ static INLINE int libyuv_scale(aom_image_t *src, aom_image_t *dst,
         dst->stride[AOM_PLANE_U] / 2, (uint16_t *)dst->planes[AOM_PLANE_V],
         dst->stride[AOM_PLANE_V] / 2, dst->d_w, dst->d_h, mode);
   }
-  assert(src->fmt == AOM_IMG_FMT_I420);
-  assert(dst->fmt == AOM_IMG_FMT_I420);
-  return I420Scale(src->planes[AOM_PLANE_Y], src->stride[AOM_PLANE_Y],
-                   src->planes[AOM_PLANE_U], src->stride[AOM_PLANE_U],
-                   src->planes[AOM_PLANE_V], src->stride[AOM_PLANE_V], src->d_w,
-                   src->d_h, dst->planes[AOM_PLANE_Y], dst->stride[AOM_PLANE_Y],
-                   dst->planes[AOM_PLANE_U], dst->stride[AOM_PLANE_U],
-                   dst->planes[AOM_PLANE_V], dst->stride[AOM_PLANE_V], dst->d_w,
-                   dst->d_h, mode);
+  if (src->fmt == AOM_IMG_FMT_I420) {
+    return I420Scale(src->planes[AOM_PLANE_Y], src->stride[AOM_PLANE_Y],
+                     src->planes[AOM_PLANE_U], src->stride[AOM_PLANE_U],
+                     src->planes[AOM_PLANE_V], src->stride[AOM_PLANE_V],
+                     src->d_w, src->d_h, dst->planes[AOM_PLANE_Y],
+                     dst->stride[AOM_PLANE_Y], dst->planes[AOM_PLANE_U],
+                     dst->stride[AOM_PLANE_U], dst->planes[AOM_PLANE_V],
+                     dst->stride[AOM_PLANE_V], dst->d_w, dst->d_h, mode);
+  }
+  fprintf(stderr, "%s cannot scale output frame of format %s\n", exec_name,
+          image_format_to_string(src->fmt));
+  return -1;
 }
 #endif
 
@@ -371,7 +381,7 @@ static void generate_filename(const char *pattern, char *out, size_t q_len,
         case '7': snprintf(q, q_len - 1, "%07d", frame_in); break;
         case '8': snprintf(q, q_len - 1, "%08d", frame_in); break;
         case '9': snprintf(q, q_len - 1, "%09d", frame_in); break;
-        default: die("Unrecognized pattern %%%c\n", p[1]); break;
+        default: die("Unrecognized pattern %%%c\n", p[1]);
       }
 
       pat_len = strlen(q);
@@ -878,7 +888,7 @@ static int main_loop(int argc, const char **argv_) {
 
           if (img->d_w != scaled_img->d_w || img->d_h != scaled_img->d_h) {
 #if CONFIG_LIBYUV
-            libyuv_scale(img, scaled_img, kFilterBox);
+            if (libyuv_scale(img, scaled_img, kFilterBox) != 0) goto fail;
             img = scaled_img;
 #else
             fprintf(

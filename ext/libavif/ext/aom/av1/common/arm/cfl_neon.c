@@ -10,6 +10,7 @@
  */
 #include <arm_neon.h>
 
+#include "config/aom_config.h"
 #include "config/av1_rtcd.h"
 
 #include "av1/common/cfl.h"
@@ -31,12 +32,12 @@ static INLINE uint8x8_t vldh_dup_u8(const uint8_t *ptr) {
 
 // Store half of a vector.
 static INLINE void vsth_u16(uint16_t *ptr, uint16x4_t val) {
-  *((uint32_t *)ptr) = vreinterpret_u32_u16(val)[0];
+  vst1_lane_u32((uint32_t *)ptr, vreinterpret_u32_u16(val), 0);
 }
 
 // Store half of a vector.
 static INLINE void vsth_u8(uint8_t *ptr, uint8x8_t val) {
-  *((uint32_t *)ptr) = vreinterpret_u32_u8(val)[0];
+  vst1_lane_u32((uint32_t *)ptr, vreinterpret_u32_u8(val), 0);
 }
 
 static void cfl_luma_subsampling_420_lbd_neon(const uint8_t *input,
@@ -132,7 +133,7 @@ static void cfl_luma_subsampling_444_lbd_neon(const uint8_t *input,
 }
 
 #if CONFIG_AV1_HIGHBITDEPTH
-#ifndef __aarch64__
+#if !AOM_ARCH_AARCH64
 uint16x8_t vpaddq_u16(uint16x8_t a, uint16x8_t b) {
   return vcombine_u16(vpadd_u16(vget_low_u16(a), vget_high_u16(a)),
                       vpadd_u16(vget_low_u16(b), vget_high_u16(b)));
@@ -269,7 +270,7 @@ static INLINE void subtract_average_neon(const uint16_t *src, int16_t *dst,
   // unsigned integer for the sum, we can do one addition operation inside 16
   // bits (8 lanes) before having to convert to 32 bits (4 lanes).
   const uint16_t *sum_buf = src;
-  uint32x4_t sum_32x4 = { 0, 0, 0, 0 };
+  uint32x4_t sum_32x4 = vdupq_n_u32(0);
   do {
     // For all widths, we load, add and combine the data so it fits in 4 lanes.
     if (width == 4) {
@@ -313,7 +314,7 @@ static INLINE void subtract_average_neon(const uint16_t *src, int16_t *dst,
 
   // Permute and add in such a way that each lane contains the block sum.
   // [A+C+B+D, B+D+A+C, C+A+D+B, D+B+C+A]
-#ifdef __aarch64__
+#if AOM_ARCH_AARCH64
   sum_32x4 = vpaddq_u32(sum_32x4, sum_32x4);
   sum_32x4 = vpaddq_u32(sum_32x4, sum_32x4);
 #else

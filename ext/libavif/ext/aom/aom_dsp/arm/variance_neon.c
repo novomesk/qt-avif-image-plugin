@@ -27,7 +27,7 @@ static INLINE void variance_4xh_neon(const uint8_t *src, int src_stride,
   uint32x4_t ref_sum = vdupq_n_u32(0);
   uint32x4_t sse_u32 = vdupq_n_u32(0);
 
-  int i = 0;
+  int i = h;
   do {
     uint8x16_t s = load_unaligned_u8q(src, src_stride);
     uint8x16_t r = load_unaligned_u8q(ref, ref_stride);
@@ -40,8 +40,8 @@ static INLINE void variance_4xh_neon(const uint8_t *src, int src_stride,
 
     src += 4 * src_stride;
     ref += 4 * ref_stride;
-    i += 4;
-  } while (i < h);
+    i -= 4;
+  } while (i != 0);
 
   int32x4_t sum_diff =
       vsubq_s32(vreinterpretq_s32_u32(src_sum), vreinterpretq_s32_u32(ref_sum));
@@ -56,7 +56,7 @@ static INLINE void variance_8xh_neon(const uint8_t *src, int src_stride,
   uint32x4_t ref_sum = vdupq_n_u32(0);
   uint32x4_t sse_u32 = vdupq_n_u32(0);
 
-  int i = 0;
+  int i = h;
   do {
     uint8x16_t s = vcombine_u8(vld1_u8(src), vld1_u8(src + src_stride));
     uint8x16_t r = vcombine_u8(vld1_u8(ref), vld1_u8(ref + ref_stride));
@@ -69,8 +69,8 @@ static INLINE void variance_8xh_neon(const uint8_t *src, int src_stride,
 
     src += 2 * src_stride;
     ref += 2 * ref_stride;
-    i += 2;
-  } while (i < h);
+    i -= 2;
+  } while (i != 0);
 
   int32x4_t sum_diff =
       vsubq_s32(vreinterpretq_s32_u32(src_sum), vreinterpretq_s32_u32(ref_sum));
@@ -85,7 +85,7 @@ static INLINE void variance_16xh_neon(const uint8_t *src, int src_stride,
   uint32x4_t ref_sum = vdupq_n_u32(0);
   uint32x4_t sse_u32 = vdupq_n_u32(0);
 
-  int i = 0;
+  int i = h;
   do {
     uint8x16_t s = vld1q_u8(src);
     uint8x16_t r = vld1q_u8(ref);
@@ -98,8 +98,7 @@ static INLINE void variance_16xh_neon(const uint8_t *src, int src_stride,
 
     src += src_stride;
     ref += ref_stride;
-    i++;
-  } while (i < h);
+  } while (--i != 0);
 
   int32x4_t sum_diff =
       vsubq_s32(vreinterpretq_s32_u32(src_sum), vreinterpretq_s32_u32(ref_sum));
@@ -114,7 +113,7 @@ static INLINE void variance_large_neon(const uint8_t *src, int src_stride,
   uint32x4_t ref_sum = vdupq_n_u32(0);
   uint32x4_t sse_u32 = vdupq_n_u32(0);
 
-  int i = 0;
+  int i = h;
   do {
     int j = 0;
     do {
@@ -132,8 +131,7 @@ static INLINE void variance_large_neon(const uint8_t *src, int src_stride,
 
     src += src_stride;
     ref += ref_stride;
-    i++;
-  } while (i < h);
+  } while (--i != 0);
 
   int32x4_t sum_diff =
       vsubq_s32(vreinterpretq_s32_u32(src_sum), vreinterpretq_s32_u32(ref_sum));
@@ -171,7 +169,7 @@ static INLINE void variance_4xh_neon(const uint8_t *src, int src_stride,
   // 32767 / 255 ~= 128, but we use an 8-wide accumulator; so 256 4-wide rows.
   assert(h <= 256);
 
-  int i = 0;
+  int i = h;
   do {
     uint8x8_t s = load_unaligned_u8(src, src_stride);
     uint8x8_t r = load_unaligned_u8(ref, ref_stride);
@@ -184,8 +182,8 @@ static INLINE void variance_4xh_neon(const uint8_t *src, int src_stride,
 
     src += 2 * src_stride;
     ref += 2 * ref_stride;
-    i += 2;
-  } while (i < h);
+    i -= 2;
+  } while (i != 0);
 
   *sum = horizontal_add_s16x8(sum_s16);
   *sse = (uint32_t)horizontal_add_s32x4(sse_s32);
@@ -201,7 +199,7 @@ static INLINE void variance_8xh_neon(const uint8_t *src, int src_stride,
   // 32767 / 255 ~= 128
   assert(h <= 128);
 
-  int i = 0;
+  int i = h;
   do {
     uint8x8_t s = vld1_u8(src);
     uint8x8_t r = vld1_u8(ref);
@@ -215,8 +213,7 @@ static INLINE void variance_8xh_neon(const uint8_t *src, int src_stride,
 
     src += src_stride;
     ref += ref_stride;
-    i++;
-  } while (i < h);
+  } while (--i != 0);
 
   *sum = horizontal_add_s16x8(sum_s16);
   *sse = (uint32_t)horizontal_add_s32x4(vaddq_s32(sse_s32[0], sse_s32[1]));
@@ -232,7 +229,7 @@ static INLINE void variance_16xh_neon(const uint8_t *src, int src_stride,
   // 32767 / 255 ~= 128, so 128 16-wide rows.
   assert(h <= 128);
 
-  int i = 0;
+  int i = h;
   do {
     uint8x16_t s = vld1q_u8(src);
     uint8x16_t r = vld1q_u8(ref);
@@ -256,8 +253,7 @@ static INLINE void variance_16xh_neon(const uint8_t *src, int src_stride,
 
     src += src_stride;
     ref += ref_stride;
-    i++;
-  } while (i < h);
+  } while (--i != 0);
 
   *sum = horizontal_add_s16x8(vaddq_s16(sum_s16[0], sum_s16[1]));
   *sse = (uint32_t)horizontal_add_s32x4(vaddq_s32(sse_s32[0], sse_s32[1]));
@@ -378,17 +374,6 @@ VARIANCE_WXH_NEON(128, 128, 14)
 
 #undef VARIANCE_WXH_NEON
 
-void aom_get8x8var_neon(const uint8_t *src, int src_stride, const uint8_t *ref,
-                        int ref_stride, unsigned int *sse, int *sum) {
-  variance_8xh_neon(src, src_stride, ref, ref_stride, 8, sse, sum);
-}
-
-void aom_get16x16var_neon(const uint8_t *src, int src_stride,
-                          const uint8_t *ref, int ref_stride, unsigned int *sse,
-                          int *sum) {
-  variance_16xh_neon(src, src_stride, ref, ref_stride, 16, sse, sum);
-}
-
 // TODO(yunqingwang): Perform variance of two/four 8x8 blocks similar to that of
 // AVX2. Also, implement the NEON for variance computation present in this
 // function.
@@ -409,6 +394,25 @@ void aom_get_var_sse_sum_8x8_quad_neon(const uint8_t *src, int src_stride,
     var8x8[i] = sse8x8[i] - (uint32_t)(((int64_t)sum8x8[i] * sum8x8[i]) >> 6);
 }
 
+void aom_get_var_sse_sum_16x16_dual_neon(const uint8_t *src, int src_stride,
+                                         const uint8_t *ref, int ref_stride,
+                                         uint32_t *sse16x16,
+                                         unsigned int *tot_sse, int *tot_sum,
+                                         uint32_t *var16x16) {
+  int sum16x16[2] = { 0 };
+  // Loop over 2 16x16 blocks. Process one 16x32 block.
+  for (int k = 0; k < 2; k++) {
+    variance_16xh_neon(src + (k * 16), src_stride, ref + (k * 16), ref_stride,
+                       16, &sse16x16[k], &sum16x16[k]);
+  }
+
+  *tot_sse += sse16x16[0] + sse16x16[1];
+  *tot_sum += sum16x16[0] + sum16x16[1];
+  for (int i = 0; i < 2; i++)
+    var16x16[i] =
+        sse16x16[i] - (uint32_t)(((int64_t)sum16x16[i] * sum16x16[i]) >> 8);
+}
+
 #if defined(__ARM_FEATURE_DOTPROD)
 
 static INLINE unsigned int mse8xh_neon(const uint8_t *src, int src_stride,
@@ -416,7 +420,7 @@ static INLINE unsigned int mse8xh_neon(const uint8_t *src, int src_stride,
                                        unsigned int *sse, int h) {
   uint32x4_t sse_u32 = vdupq_n_u32(0);
 
-  int i = 0;
+  int i = h;
   do {
     uint8x16_t s = vcombine_u8(vld1_u8(src), vld1_u8(src + src_stride));
     uint8x16_t r = vcombine_u8(vld1_u8(ref), vld1_u8(ref + ref_stride));
@@ -427,8 +431,8 @@ static INLINE unsigned int mse8xh_neon(const uint8_t *src, int src_stride,
 
     src += 2 * src_stride;
     ref += 2 * ref_stride;
-    i += 2;
-  } while (i < h);
+    i -= 2;
+  } while (i != 0);
 
   *sse = horizontal_add_u32x4(sse_u32);
   return horizontal_add_u32x4(sse_u32);
@@ -439,7 +443,7 @@ static INLINE unsigned int mse16xh_neon(const uint8_t *src, int src_stride,
                                         unsigned int *sse, int h) {
   uint32x4_t sse_u32[2] = { vdupq_n_u32(0), vdupq_n_u32(0) };
 
-  int i = 0;
+  int i = h;
   do {
     uint8x16_t s0 = vld1q_u8(src);
     uint8x16_t s1 = vld1q_u8(src + src_stride);
@@ -454,23 +458,11 @@ static INLINE unsigned int mse16xh_neon(const uint8_t *src, int src_stride,
 
     src += 2 * src_stride;
     ref += 2 * ref_stride;
-    i += 2;
-  } while (i < h);
+    i -= 2;
+  } while (i != 0);
 
   *sse = horizontal_add_u32x4(vaddq_u32(sse_u32[0], sse_u32[1]));
   return horizontal_add_u32x4(vaddq_u32(sse_u32[0], sse_u32[1]));
-}
-
-unsigned int aom_get4x4sse_cs_neon(const uint8_t *src, int src_stride,
-                                   const uint8_t *ref, int ref_stride) {
-  uint8x16_t s = load_unaligned_u8q(src, src_stride);
-  uint8x16_t r = load_unaligned_u8q(ref, ref_stride);
-
-  uint8x16_t abs_diff = vabdq_u8(s, r);
-
-  uint32x4_t sse = vdotq_u32(vdupq_n_u32(0), abs_diff, abs_diff);
-
-  return horizontal_add_u32x4(sse);
 }
 
 #else  // !defined(__ARM_FEATURE_DOTPROD)
@@ -483,7 +475,7 @@ static INLINE unsigned int mse8xh_neon(const uint8_t *src, int src_stride,
   uint16x8_t diff[2];
   int32x4_t sse_s32[2] = { vdupq_n_s32(0), vdupq_n_s32(0) };
 
-  int i = 0;
+  int i = h;
   do {
     s[0] = vld1_u8(src);
     src += src_stride;
@@ -507,8 +499,8 @@ static INLINE unsigned int mse8xh_neon(const uint8_t *src, int src_stride,
     sse_s32[0] = vmlal_s16(sse_s32[0], diff_hi[0], diff_hi[0]);
     sse_s32[1] = vmlal_s16(sse_s32[1], diff_hi[1], diff_hi[1]);
 
-    i += 2;
-  } while (i < h);
+    i -= 2;
+  } while (i != 0);
 
   sse_s32[0] = vaddq_s32(sse_s32[0], sse_s32[1]);
 
@@ -525,7 +517,7 @@ static INLINE unsigned int mse16xh_neon(const uint8_t *src, int src_stride,
   int32x4_t sse_s32[4] = { vdupq_n_s32(0), vdupq_n_s32(0), vdupq_n_s32(0),
                            vdupq_n_s32(0) };
 
-  int i = 0;
+  int i = h;
   do {
     s[0] = vld1q_u8(src);
     src += src_stride;
@@ -561,8 +553,8 @@ static INLINE unsigned int mse16xh_neon(const uint8_t *src, int src_stride,
     sse_s32[2] = vmlal_s16(sse_s32[2], diff_hi[2], diff_hi[2]);
     sse_s32[3] = vmlal_s16(sse_s32[3], diff_hi[3], diff_hi[3]);
 
-    i += 2;
-  } while (i < h);
+    i -= 2;
+  } while (i != 0);
 
   sse_s32[0] = vaddq_s32(sse_s32[0], sse_s32[1]);
   sse_s32[2] = vaddq_s32(sse_s32[2], sse_s32[3]);
@@ -570,40 +562,6 @@ static INLINE unsigned int mse16xh_neon(const uint8_t *src, int src_stride,
 
   *sse = horizontal_add_u32x4(vreinterpretq_u32_s32(sse_s32[0]));
   return horizontal_add_u32x4(vreinterpretq_u32_s32(sse_s32[0]));
-}
-
-unsigned int aom_get4x4sse_cs_neon(const uint8_t *src, int src_stride,
-                                   const uint8_t *ref, int ref_stride) {
-  uint8x8_t s[4], r[4];
-  int16x4_t diff[4];
-  int32x4_t sse;
-
-  s[0] = vld1_u8(src);
-  src += src_stride;
-  r[0] = vld1_u8(ref);
-  ref += ref_stride;
-  s[1] = vld1_u8(src);
-  src += src_stride;
-  r[1] = vld1_u8(ref);
-  ref += ref_stride;
-  s[2] = vld1_u8(src);
-  src += src_stride;
-  r[2] = vld1_u8(ref);
-  ref += ref_stride;
-  s[3] = vld1_u8(src);
-  r[3] = vld1_u8(ref);
-
-  diff[0] = vget_low_s16(vreinterpretq_s16_u16(vsubl_u8(s[0], r[0])));
-  diff[1] = vget_low_s16(vreinterpretq_s16_u16(vsubl_u8(s[1], r[1])));
-  diff[2] = vget_low_s16(vreinterpretq_s16_u16(vsubl_u8(s[2], r[2])));
-  diff[3] = vget_low_s16(vreinterpretq_s16_u16(vsubl_u8(s[3], r[3])));
-
-  sse = vmull_s16(diff[0], diff[0]);
-  sse = vmlal_s16(sse, diff[1], diff[1]);
-  sse = vmlal_s16(sse, diff[2], diff[2]);
-  sse = vmlal_s16(sse, diff[3], diff[3]);
-
-  return horizontal_add_u32x4(vreinterpretq_u32_s32(sse));
 }
 
 #endif  // defined(__ARM_FEATURE_DOTPROD)
@@ -647,7 +605,7 @@ static AOM_INLINE uint64_t mse_4xh_16bit_neon(uint8_t *dst, int dstride,
                                               int h) {
   uint64x2_t square_result = vdupq_n_u64(0);
   uint32_t d0, d1;
-  int i = 0;
+  int i = h;
   uint8_t *dst_ptr = dst;
   uint16_t *src_ptr = src;
   do {
@@ -678,8 +636,8 @@ static AOM_INLINE uint64_t mse_4xh_16bit_neon(uint8_t *dst, int dstride,
     const uint16x8_t src_16x8 = vcombine_u16(src0_16x4, src1_16x4);
 
     COMPUTE_MSE_16BIT(src_16x8, dst_16x8)
-    i += 2;
-  } while (i < h);
+    i -= 2;
+  } while (i != 0);
   uint64x1_t sum =
       vadd_u64(vget_high_u64(square_result), vget_low_u64(square_result));
   return vget_lane_u64(sum, 0);
@@ -689,16 +647,18 @@ static AOM_INLINE uint64_t mse_8xh_16bit_neon(uint8_t *dst, int dstride,
                                               uint16_t *src, int sstride,
                                               int h) {
   uint64x2_t square_result = vdupq_n_u64(0);
-  int i = 0;
+  int i = h;
   do {
     // d7 d6 d5 d4 d3 d2 d1 d0 - 8 bit
-    const uint16x8_t dst_16x8 = vmovl_u8(vld1_u8(&dst[i * dstride]));
+    const uint16x8_t dst_16x8 = vmovl_u8(vld1_u8(dst));
     // s7 s6 s5 s4 s3 s2 s1 s0 - 16 bit
-    const uint16x8_t src_16x8 = vld1q_u16(&src[i * sstride]);
+    const uint16x8_t src_16x8 = vld1q_u16(src);
 
     COMPUTE_MSE_16BIT(src_16x8, dst_16x8)
-    i++;
-  } while (i < h);
+
+    dst += dstride;
+    src += sstride;
+  } while (--i != 0);
   uint64x1_t sum =
       vadd_u64(vget_high_u64(square_result), vget_low_u64(square_result));
   return vget_lane_u64(sum, 0);

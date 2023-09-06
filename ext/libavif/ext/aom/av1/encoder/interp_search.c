@@ -682,6 +682,7 @@ int64_t av1_interpolation_filter_search(
     *rd = args->interp_filter_stats[match_found_idx].rd;
     x->pred_sse[ref_frame] =
         args->interp_filter_stats[match_found_idx].pred_sse;
+    *skip_build_pred = 0;
     return 0;
   }
 

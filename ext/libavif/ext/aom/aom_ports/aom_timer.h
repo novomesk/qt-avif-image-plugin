@@ -14,9 +14,10 @@
 
 #include "config/aom_config.h"
 
-#include "aom/aom_integer.h"
-
 #if CONFIG_OS_SUPPORT
+
+#include <stddef.h>
+#include <stdint.h>
 
 #if defined(_WIN32)
 /*

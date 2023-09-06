@@ -1071,6 +1071,15 @@ typedef struct AV1EncoderConfig {
   // CONFIG_PARTITION_SEARCH_ORDER.
   const char *partition_info_path;
 
+  // The flag that indicates whether we use an external rate distribution to
+  // guide adaptive quantization. It requires --deltaq-mode=3. The rate
+  // distribution map file name is stored in |rate_distribution_info|.
+  unsigned int enable_rate_guide_deltaq;
+
+  // The input file of rate distribution information used in all intra mode
+  // to determine delta quantization.
+  const char *rate_distribution_info;
+
   // Exit the encoder when it fails to encode to a given level.
   int strict_level_conformance;
 
@@ -1544,6 +1553,36 @@ typedef struct {
 } AV1EncRowMultiThreadInfo;
 
 /*!
+ * \brief Encoder data related to multi-threading for allintra deltaq-mode=3
+ */
+typedef struct {
+#if CONFIG_MULTITHREAD
+  /*!
+   * Mutex lock used while dispatching jobs.
+   */
+  pthread_mutex_t *mutex_;
+  /*!
+   *  Condition variable used to dispatch loopfilter jobs.
+   */
+  pthread_cond_t *cond_;
+#endif
+
+  /**
+   * \name Row synchronization related function pointers for all intra mode
+   */
+  /**@{*/
+  /*!
+   * Reader.
+   */
+  void (*intra_sync_read_ptr)(AV1EncRowMultiThreadSync *const, int, int);
+  /*!
+   * Writer.
+   */
+  void (*intra_sync_write_ptr)(AV1EncRowMultiThreadSync *const, int, int, int);
+  /**@}*/
+} AV1EncAllIntraMultiThreadInfo;
+
+/*!
  * \brief Max number of recodes used to track the frame probabilities.
  */
 #define NUM_RECODES_PER_FRAME 10
@@ -1619,6 +1658,11 @@ typedef struct PrimaryMultiThreadInfo {
    * Number of primary workers created for multi-threading.
    */
   int p_num_workers;
+
+  /*!
+   * Tracks the number of workers in encode stage multi-threading.
+   */
+  int prev_num_enc_workers;
 } PrimaryMultiThreadInfo;
 
 /*!
@@ -1661,6 +1705,12 @@ typedef struct MultiThreadInfo {
    * Encoder row multi-threading data.
    */
   AV1EncRowMultiThreadInfo enc_row_mt;
+
+  /*!
+   * Encoder multi-threading data for allintra mode in the preprocessing stage
+   * when --deltaq-mode=3.
+   */
+  AV1EncAllIntraMultiThreadInfo intra_mt;
 
   /*!
    * Tpl row multi-threading data.
@@ -1950,11 +2000,6 @@ typedef struct {
   YV12_BUFFER_CONFIG *ref_buf[REF_FRAMES];
 
   /*!
-   * Pointer to the source frame buffer.
-   */
-  unsigned char *src_buffer;
-
-  /*!
    * Holds the number of valid reference frames in past and future directions
    * w.r.t. the current frame. num_ref_frames[i] stores the total number of
    * valid reference frames in 'i' direction.
@@ -1976,18 +2021,6 @@ typedef struct {
   int segment_map_w; /*!< segment map width */
   int segment_map_h; /*!< segment map height */
   /**@}*/
-
-  /*!
-   * Holds the total number of corner points detected in the source frame.
-   */
-  int num_src_corners;
-
-  /*!
-   * Holds the x and y co-ordinates of the corner points detected in the source
-   * frame. src_corners[i] holds the x co-ordinate and src_corners[i+1] holds
-   * the y co-ordinate of the ith corner point detected.
-   */
-  int src_corners[2 * MAX_CORNERS];
 } GlobalMotionInfo;
 
 /*!
@@ -2405,6 +2438,23 @@ typedef struct RTC_REF {
   int non_reference_frame;
   int ref_frame_comp[3];
   int gld_idx_1layer;
+  /*!
+   * Frame number of the last frame that refreshed the buffer slot.
+   */
+  unsigned int buffer_time_index[REF_FRAMES];
+  /*!
+   * Spatial layer id of the last frame that refreshed the buffer slot.
+   */
+  unsigned char buffer_spatial_layer[REF_FRAMES];
+  /*!
+   * Flag to indicate whether closest reference was the previous frame.
+   */
+  bool reference_was_previous_frame;
+  /*!
+   * Flag to indicate this frame is based on longer term reference only,
+   * for recovery from past loss, and it should be biased for improved coding.
+   */
+  bool bias_recovery_frame;
 } RTC_REF;
 /*!\endcond */
 
@@ -2751,6 +2801,12 @@ typedef struct AV1_PRIMARY {
    * Struct for the reference structure for RTC.
    */
   RTC_REF rtc_ref;
+
+  /*!
+   * Struct for all intra mode row multi threading in the preprocess stage
+   * when --deltaq-mode=3.
+   */
+  AV1EncRowMultiThreadSync intra_row_mt_sync;
 } AV1_PRIMARY;
 
 /*!
@@ -3382,6 +3438,23 @@ typedef struct AV1_COMP {
   WeberStats *mb_weber_stats;
 
   /*!
+   * Buffer to store rate cost estimates for each macro block (8x8) in the
+   * preprocessing stage used in allintra mode.
+   */
+  int *prep_rate_estimates;
+
+  /*!
+   * Buffer to store rate cost estimates for each 16x16 block read
+   * from an external file, used in allintra mode.
+   */
+  double *ext_rate_distribution;
+
+  /*!
+   * The scale that equals sum_rate_uniform_quantizer / sum_ext_rate.
+   */
+  double ext_rate_scale;
+
+  /*!
    * Buffer to store MB variance after Wiener filter.
    */
   BLOCK_SIZE weber_bsize;
@@ -3462,6 +3535,30 @@ typedef struct AV1_COMP {
    * Block level thresholds to force zeromv-skip at partition level.
    */
   unsigned int zeromv_skip_thresh_exit_part[BLOCK_SIZES_ALL];
+
+  /*!
+   *  Number of downsampling pyramid levels to allocate for each frame
+   *  This is currently only used for global motion
+   */
+  int image_pyramid_levels;
+
+#if CONFIG_SALIENCY_MAP
+  /*!
+   * Pixel level saliency map for each frame.
+   */
+  uint8_t *saliency_map;
+
+  /*!
+   * Superblock level rdmult scaling factor driven by saliency map.
+   */
+  double *sm_scaling_factor;
+#endif
+
+  /*!
+   * Number of pixels that choose palette mode for luma in the
+   * fast encoding pass in av1_determine_sc_tools_with_encoding().
+   */
+  int palette_pixel_num;
 } AV1_COMP;
 
 /*!
@@ -3599,11 +3696,11 @@ int av1_init_parallel_frame_context(const AV1_COMP_DATA *const first_cpi_data,
  * \ingroup high_level_algo
  * This function receives the raw frame data from input.
  *
- * \param[in]    cpi            Top-level encoder structure
- * \param[in]    frame_flags    Flags to decide how to encoding the frame
- * \param[in]    sd             Contain raw frame data
- * \param[in]    time_stamp     Time stamp of the frame
- * \param[in]    end_time_stamp End time stamp
+ * \param[in]     cpi            Top-level encoder structure
+ * \param[in]     frame_flags    Flags to decide how to encoding the frame
+ * \param[in,out] sd             Contain raw frame data
+ * \param[in]     time_stamp     Time stamp of the frame
+ * \param[in]     end_time_stamp End time stamp
  *
  * \return Returns a value to indicate if the frame data is received
  * successfully.
@@ -4177,7 +4274,9 @@ static INLINE unsigned int derive_skip_apply_postproc_filters(
   }
   if (use_loopfilter) return SKIP_APPLY_LOOPFILTER;
 
-  return 0;  // All post-processing stages disabled.
+  // If we reach here, all post-processing stages are disabled, so none need to
+  // be skipped.
+  return 0;
 }
 
 static INLINE void set_postproc_filter_default_params(AV1_COMMON *cm) {

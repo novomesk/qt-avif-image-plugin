@@ -75,7 +75,7 @@ YV12_BUFFER_CONFIG *av1_realloc_and_scale_if_required(
     AV1_COMMON *cm, YV12_BUFFER_CONFIG *unscaled, YV12_BUFFER_CONFIG *scaled,
     const InterpFilter filter, const int phase, const bool use_optimized_scaler,
     const bool for_psnr, const int border_in_pixels,
-    const bool alloc_y_buffer_8bit);
+    const int num_pyramid_levels);
 
 void av1_resize_and_extend_frame_nonnormative(const YV12_BUFFER_CONFIG *src,
                                               YV12_BUFFER_CONFIG *dst, int bd,
@@ -95,7 +95,8 @@ void av1_calculate_scaled_superres_size(int *width, int *height,
 // denominator.
 void av1_calculate_unscaled_superres_size(int *width, int *height, int denom);
 
-void av1_superres_upscale(AV1_COMMON *cm, BufferPool *const pool);
+void av1_superres_upscale(AV1_COMMON *cm, BufferPool *const pool,
+                          int num_pyramid_levels);
 
 // Returns 1 if a superres upscaled frame is scaled and 0 otherwise.
 static INLINE int av1_superres_scaled(const AV1_COMMON *cm) {

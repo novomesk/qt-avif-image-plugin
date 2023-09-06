@@ -10,7 +10,10 @@
 #
 
 if("${AOM_TARGET_CPU}" MATCHES "^arm")
-  set(ARCH_ARM 1)
+  set(AOM_ARCH_ARM 1)
+  if("${AOM_TARGET_CPU}" STREQUAL "arm64")
+    set(AOM_ARCH_AARCH64 1)
+  endif()
   set(RTCD_ARCH_ARM "yes")
 
   if(ENABLE_NEON)
@@ -34,7 +37,7 @@ if("${AOM_TARGET_CPU}" MATCHES "^arm")
   endif()
 
 elseif("${AOM_TARGET_CPU}" MATCHES "ppc")
-  set(ARCH_PPC 1)
+  set(AOM_ARCH_PPC 1)
   set(RTCD_ARCH_PPC "yes")
 
   if(ENABLE_VSX)
@@ -46,10 +49,10 @@ elseif("${AOM_TARGET_CPU}" MATCHES "ppc")
   endif()
 elseif("${AOM_TARGET_CPU}" MATCHES "^x86")
   if("${AOM_TARGET_CPU}" STREQUAL "x86")
-    set(ARCH_X86 1)
+    set(AOM_ARCH_X86 1)
     set(RTCD_ARCH_X86 "yes")
   elseif("${AOM_TARGET_CPU}" STREQUAL "x86_64")
-    set(ARCH_X86_64 1)
+    set(AOM_ARCH_X86_64 1)
     set(RTCD_ARCH_X86_64 "yes")
   endif()
 

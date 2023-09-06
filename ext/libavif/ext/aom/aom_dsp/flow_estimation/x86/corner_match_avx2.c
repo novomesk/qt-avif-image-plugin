@@ -24,12 +24,13 @@ DECLARE_ALIGNED(16, static const uint8_t,
 #error "Need to change byte_mask in corner_match_sse4.c if MATCH_SZ != 13"
 #endif
 
-/* Compute corr(im1, im2) * MATCH_SZ * stddev(im1), where the
+/* Compute corr(frame1, frame2) * MATCH_SZ * stddev(frame1), where the
 correlation/standard deviation are taken over MATCH_SZ by MATCH_SZ windows
 of each image, centered at (x1, y1) and (x2, y2) respectively.
 */
-double av1_compute_cross_correlation_avx2(unsigned char *im1, int stride1,
-                                          int x1, int y1, unsigned char *im2,
+double av1_compute_cross_correlation_avx2(const unsigned char *frame1,
+                                          int stride1, int x1, int y1,
+                                          const unsigned char *frame2,
                                           int stride2, int x2, int y2) {
   int i, stride1_i = 0, stride2_i = 0;
   __m256i temp1, sum_vec, sumsq2_vec, cross_vec, v, v1_1, v2_1;
@@ -41,13 +42,13 @@ double av1_compute_cross_correlation_avx2(unsigned char *im1, int stride1,
   sumsq2_vec = zero;
   cross_vec = zero;
 
-  im1 += (y1 - MATCH_SZ_BY2) * stride1 + (x1 - MATCH_SZ_BY2);
-  im2 += (y2 - MATCH_SZ_BY2) * stride2 + (x2 - MATCH_SZ_BY2);
+  frame1 += (y1 - MATCH_SZ_BY2) * stride1 + (x1 - MATCH_SZ_BY2);
+  frame2 += (y2 - MATCH_SZ_BY2) * stride2 + (x2 - MATCH_SZ_BY2);
 
   for (i = 0; i < MATCH_SZ; ++i) {
-    v1 = _mm_and_si128(_mm_loadu_si128((__m128i *)&im1[stride1_i]), mask);
+    v1 = _mm_and_si128(_mm_loadu_si128((__m128i *)&frame1[stride1_i]), mask);
     v1_1 = _mm256_cvtepu8_epi16(v1);
-    v2 = _mm_and_si128(_mm_loadu_si128((__m128i *)&im2[stride2_i]), mask);
+    v2 = _mm_and_si128(_mm_loadu_si128((__m128i *)&frame2[stride2_i]), mask);
     v2_1 = _mm256_cvtepu8_epi16(v2);
 
     v = _mm256_insertf128_si256(_mm256_castsi128_si256(v1), v2, 1);

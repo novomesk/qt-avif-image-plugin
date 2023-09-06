@@ -17,7 +17,8 @@ set(CMAKE_SYSTEM_NAME "Linux")
 
 if("${CROSS}" STREQUAL "")
 
-  # Default the cross compiler prefix to something known to work.
+  # Default the cross compiler prefix to one used by Debian and other package
+  # management systems.
   set(CROSS arm-linux-gnueabihf-)
 endif()
 
@@ -31,8 +32,8 @@ endif()
 if(NOT CMAKE_CXX_COMPILER)
   set(CMAKE_CXX_COMPILER ${CROSS}g++)
 endif()
-if(NOT AS_EXECUTABLE)
-  set(AS_EXECUTABLE ${CROSS}as)
+if(NOT CMAKE_ASM_COMPILER)
+  set(CMAKE_ASM_COMPILER ${CROSS}as)
 endif()
 set(CMAKE_C_FLAGS_INIT "-march=armv7-a -mfpu=vfpv3 \
                           ${AOM_EXTRA_TOOLCHAIN_FLAGS}")

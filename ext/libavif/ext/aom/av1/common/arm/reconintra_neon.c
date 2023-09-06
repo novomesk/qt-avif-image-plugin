@@ -12,6 +12,8 @@
 #include <arm_neon.h>
 #include <assert.h>
 
+#include "config/aom_config.h"
+
 #include "aom/aom_integer.h"
 #include "aom_dsp/arm/sum_neon.h"
 
@@ -126,7 +128,7 @@ void av1_filter_intra_predictor_neon(uint8_t *dst, ptrdiff_t stride,
       out_45 = vmlaq_s16(out_45, vreinterpretq_s16_u16(p_b_hi), f5f4_hi);
       int16x8_t out_67 = vmulq_s16(vreinterpretq_s16_u16(p_b_lo), f7f6_lo);
       out_67 = vmlaq_s16(out_67, vreinterpretq_s16_u16(p_b_hi), f7f6_hi);
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
       const int16x8_t out_0123 = vpaddq_s16(out_01, out_23);
       const int16x8_t out_4567 = vpaddq_s16(out_45, out_67);
       const int16x8_t out_01234567 = vpaddq_s16(out_0123, out_4567);
@@ -137,7 +139,7 @@ void av1_filter_intra_predictor_neon(uint8_t *dst, ptrdiff_t stride,
                                               vqmovn_s32(vpaddlq_s16(out_67)));
       const int16x8_t out_01234567 = vcombine_s16(
           vqmovn_s32(vpaddlq_s16(out_0123)), vqmovn_s32(vpaddlq_s16(out_4567)));
-#endif  // (__aarch64__)
+#endif  // AOM_ARCH_AARCH64
       const uint32x2_t out_r =
           vreinterpret_u32_u8(vqmovun_s16(vrshrq_n_s16(out_01234567, 4)));
       // Storing

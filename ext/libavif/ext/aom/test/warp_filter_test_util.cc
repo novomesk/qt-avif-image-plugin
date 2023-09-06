@@ -185,7 +185,6 @@ void AV1WarpFilterTest::RunCheckOutput(warp_affine_func test_impl) {
   const int is_delta_zero = GET_PARAM(4);
   const int out_w = std::get<0>(params), out_h = std::get<1>(params);
   const int num_iters = std::get<2>(params);
-  int i, j, sub_x, sub_y;
   const int bd = 8;
 
   // The warp functions always write rows with widths that are multiples of 8.
@@ -209,7 +208,7 @@ void AV1WarpFilterTest::RunCheckOutput(warp_affine_func test_impl) {
   ASSERT_NE(dstb, nullptr);
   for (int i = 0; i < output_n; ++i) output[i] = output2[i] = rnd_.Rand8();
 
-  for (i = 0; i < num_iters; ++i) {
+  for (int i = 0; i < num_iters; ++i) {
     // Generate an input block and extend its borders horizontally
     for (int r = 0; r < h; ++r)
       for (int c = 0; c < w; ++c) input[r * stride + c] = rnd_.Rand8();
@@ -218,8 +217,8 @@ void AV1WarpFilterTest::RunCheckOutput(warp_affine_func test_impl) {
       memset(input + r * stride + w, input[r * stride + (w - 1)], border);
     }
     const int use_no_round = rnd_.Rand8() & 1;
-    for (sub_x = 0; sub_x < 2; ++sub_x)
-      for (sub_y = 0; sub_y < 2; ++sub_y) {
+    for (int sub_x = 0; sub_x < 2; ++sub_x)
+      for (int sub_y = 0; sub_y < 2; ++sub_y) {
         generate_warped_model(&rnd_, mat, &alpha, &beta, &gamma, &delta,
                               is_alpha_zero, is_beta_zero, is_gamma_zero,
                               is_delta_zero);
@@ -258,18 +257,18 @@ void AV1WarpFilterTest::RunCheckOutput(warp_affine_func test_impl) {
                         out_h, out_w, sub_x, sub_y, &conv_params, alpha, beta,
                         gamma, delta);
               if (use_no_round) {
-                for (j = 0; j < out_w * out_h; ++j)
+                for (int j = 0; j < out_w * out_h; ++j)
                   ASSERT_EQ(dsta[j], dstb[j])
                       << "Pixel mismatch at index " << j << " = ("
                       << (j % out_w) << ", " << (j / out_w) << ") on iteration "
                       << i;
-                for (j = 0; j < out_w * out_h; ++j)
+                for (int j = 0; j < out_w * out_h; ++j)
                   ASSERT_EQ(output[j], output2[j])
                       << "Pixel mismatch at index " << j << " = ("
                       << (j % out_w) << ", " << (j / out_w) << ") on iteration "
                       << i;
               } else {
-                for (j = 0; j < out_w * out_h; ++j)
+                for (int j = 0; j < out_w * out_h; ++j)
                   ASSERT_EQ(output[j], output2[j])
                       << "Pixel mismatch at index " << j << " = ("
                       << (j % out_w) << ", " << (j / out_w) << ") on iteration "
@@ -386,7 +385,6 @@ void AV1HighbdWarpFilterTest::RunCheckOutput(
   const int bd = std::get<3>(param);
   const int num_iters = std::get<2>(param);
   const int mask = (1 << bd) - 1;
-  int i, j, sub_x, sub_y;
 
   // The warp functions always write rows with widths that are multiples of 8.
   // So to avoid a buffer overflow, we may need to pad rows to a multiple of 8.
@@ -409,7 +407,7 @@ void AV1HighbdWarpFilterTest::RunCheckOutput(
   ASSERT_NE(dstb, nullptr);
   for (int i = 0; i < output_n; ++i) output[i] = output2[i] = rnd_.Rand16();
 
-  for (i = 0; i < num_iters; ++i) {
+  for (int i = 0; i < num_iters; ++i) {
     // Generate an input block and extend its borders horizontally
     for (int r = 0; r < h; ++r)
       for (int c = 0; c < w; ++c) input[r * stride + c] = rnd_.Rand16() & mask;
@@ -420,8 +418,8 @@ void AV1HighbdWarpFilterTest::RunCheckOutput(
       }
     }
     const int use_no_round = rnd_.Rand8() & 1;
-    for (sub_x = 0; sub_x < 2; ++sub_x)
-      for (sub_y = 0; sub_y < 2; ++sub_y) {
+    for (int sub_x = 0; sub_x < 2; ++sub_x)
+      for (int sub_y = 0; sub_y < 2; ++sub_y) {
         generate_warped_model(&rnd_, mat, &alpha, &beta, &gamma, &delta,
                               is_alpha_zero, is_beta_zero, is_gamma_zero,
                               is_delta_zero);
@@ -464,18 +462,18 @@ void AV1HighbdWarpFilterTest::RunCheckOutput(
                         beta, gamma, delta);
 
               if (use_no_round) {
-                for (j = 0; j < out_w * out_h; ++j)
+                for (int j = 0; j < out_w * out_h; ++j)
                   ASSERT_EQ(dsta[j], dstb[j])
                       << "Pixel mismatch at index " << j << " = ("
                       << (j % out_w) << ", " << (j / out_w) << ") on iteration "
                       << i;
-                for (j = 0; j < out_w * out_h; ++j)
+                for (int j = 0; j < out_w * out_h; ++j)
                   ASSERT_EQ(output[j], output2[j])
                       << "Pixel mismatch at index " << j << " = ("
                       << (j % out_w) << ", " << (j / out_w) << ") on iteration "
                       << i;
               } else {
-                for (j = 0; j < out_w * out_h; ++j)
+                for (int j = 0; j < out_w * out_h; ++j)
                   ASSERT_EQ(output[j], output2[j])
                       << "Pixel mismatch at index " << j << " = ("
                       << (j % out_w) << ", " << (j / out_w) << ") on iteration "

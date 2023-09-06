@@ -17,6 +17,9 @@ set(CMAKE_SYSTEM_PROCESSOR "x86_64")
 set(CMAKE_SYSTEM_NAME "Windows")
 
 if("${CROSS}" STREQUAL "")
+
+  # Default the cross compiler prefix to one used by Debian and other package
+  # management systems.
   set(CROSS x86_64-w64-mingw32-)
 endif()
 

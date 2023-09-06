@@ -105,7 +105,7 @@ void av1_rd_pick_inter_mode(struct AV1_COMP *cpi, struct TileDataEnc *tile_data,
  * based on calculated modelled RD cost. Only 4 intra modes are checked as
  * specified in \c intra_mode_list. When calculating RD cost Hadamard transform
  * of residual is used to calculate rate. Estmation of RD cost is performed
- * in \c estimate_block_intra which is called from this function
+ * in \c av1_estimate_block_intra which is called from this function
  *
  * \param[in]    cpi            Top-level encoder structure
  * \param[in]    x              Pointer to structure holding all the data for

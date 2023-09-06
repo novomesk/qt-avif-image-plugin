@@ -30,11 +30,11 @@
 
 // This function will determine whether or not to create a warped
 // prediction.
-int av1_allow_warp(const MB_MODE_INFO *const mbmi,
-                   const WarpTypesAllowed *const warp_types,
-                   const WarpedMotionParams *const gm_params,
-                   int build_for_obmc, const struct scale_factors *const sf,
-                   WarpedMotionParams *final_warp_params) {
+static int allow_warp(const MB_MODE_INFO *const mbmi,
+                      const WarpTypesAllowed *const warp_types,
+                      const WarpedMotionParams *const gm_params,
+                      int build_for_obmc, const struct scale_factors *const sf,
+                      WarpedMotionParams *final_warp_params) {
   // Note: As per the spec, we must test the fixed point scales here, which are
   // at a higher precision (1 << 14) than the xs and ys in subpel_params (that
   // have 1 << 10 precision).
@@ -65,9 +65,9 @@ void av1_init_warp_params(InterPredParams *inter_pred_params,
 
   if (xd->cur_frame_force_integer_mv) return;
 
-  if (av1_allow_warp(mi, warp_types, &xd->global_motion[mi->ref_frame[ref]], 0,
-                     inter_pred_params->scale_factors,
-                     &inter_pred_params->warp_params)) {
+  if (allow_warp(mi, warp_types, &xd->global_motion[mi->ref_frame[ref]], 0,
+                 inter_pred_params->scale_factors,
+                 &inter_pred_params->warp_params)) {
     inter_pred_params->mode = WARP_PRED;
   }
 }
@@ -819,11 +819,11 @@ int av1_skip_u4x4_pred_in_obmc(BLOCK_SIZE bsize,
 #if DISABLE_CHROMA_U8X8_OBMC
     case BLOCK_4X4:
     case BLOCK_8X4:
-    case BLOCK_4X8: return 1; break;
+    case BLOCK_4X8: return 1;
 #else
     case BLOCK_4X4:
     case BLOCK_8X4:
-    case BLOCK_4X8: return dir == 0; break;
+    case BLOCK_4X8: return dir == 0;
 #endif
     default: return 0;
   }
@@ -832,8 +832,6 @@ int av1_skip_u4x4_pred_in_obmc(BLOCK_SIZE bsize,
 void av1_modify_neighbor_predictor_for_obmc(MB_MODE_INFO *mbmi) {
   mbmi->ref_frame[1] = NONE_FRAME;
   mbmi->interinter_comp.type = COMPOUND_AVERAGE;
-
-  return;
 }
 
 struct obmc_inter_pred_ctxt {

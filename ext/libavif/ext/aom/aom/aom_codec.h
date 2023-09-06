@@ -417,19 +417,21 @@ const char *aom_codec_err_to_string(aom_codec_err_t err);
  * \param[in]    ctx     Pointer to this instance's context.
  *
  */
-const char *aom_codec_error(aom_codec_ctx_t *ctx);
+const char *aom_codec_error(const aom_codec_ctx_t *ctx);
 
 /*!\brief Retrieve detailed error information for codec context
  *
  * Returns a human readable string providing detailed information about
- * the last error.
+ * the last error. The returned string is only valid until the next
+ * aom_codec_* function call (except aom_codec_error and
+ * aom_codec_error_detail) on the codec context.
  *
  * \param[in]    ctx     Pointer to this instance's context.
  *
  * \retval NULL
  *     No detailed information is available.
  */
-const char *aom_codec_error_detail(aom_codec_ctx_t *ctx);
+const char *aom_codec_error_detail(const aom_codec_ctx_t *ctx);
 
 /* REQUIRED FUNCTIONS
  *
@@ -444,9 +446,11 @@ const char *aom_codec_error_detail(aom_codec_ctx_t *ctx);
  * \param[in] ctx   Pointer to this instance's context
  *
  * \retval #AOM_CODEC_OK
- *     The codec algorithm initialized.
- * \retval #AOM_CODEC_MEM_ERROR
- *     Memory allocation failed.
+ *     The codec instance has been destroyed.
+ * \retval #AOM_CODEC_INVALID_PARAM
+ *     ctx is a null pointer.
+ * \retval #AOM_CODEC_ERROR
+ *     Codec context not initialized.
  */
 aom_codec_err_t aom_codec_destroy(aom_codec_ctx_t *ctx);
 

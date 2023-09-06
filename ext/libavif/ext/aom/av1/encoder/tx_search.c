@@ -2809,10 +2809,10 @@ static void ml_predict_intra_tx_depth_prune(MACROBLOCK *x, int blk_row,
 
   int feature_idx = get_mean_dev_features(diff, diff_stride, bw, bh, features);
 
-  features[feature_idx++] = logf(1.0f + (float)x->source_variance);
+  features[feature_idx++] = log1pf((float)x->source_variance);
 
   const int dc_q = av1_dc_quant_QTX(x->qindex, 0, xd->bd) >> (xd->bd - 8);
-  const float log_dc_q_square = logf(1.0f + (float)(dc_q * dc_q) / 256.0f);
+  const float log_dc_q_square = log1pf((float)(dc_q * dc_q) / 256.0f);
   features[feature_idx++] = log_dc_q_square;
   assert(feature_idx == NUM_INTRA_TX_SPLIT_FEATURES);
   for (int i = 0; i < NUM_INTRA_TX_SPLIT_FEATURES; i++) {
@@ -2895,7 +2895,13 @@ static AOM_INLINE void choose_tx_size_type_from_rd(const AV1_COMP *const cpi,
 #endif
 
     RD_STATS this_rd_stats;
-    rd[depth] = av1_uniform_txfm_yrd(cpi, x, &this_rd_stats, ref_best_rd, bs,
+    // When the speed feature use_rd_based_breakout_for_intra_tx_search is
+    // enabled, use the known minimum best_rd for early termination.
+    const int64_t rd_thresh =
+        cpi->sf.tx_sf.use_rd_based_breakout_for_intra_tx_search
+            ? AOMMIN(ref_best_rd, best_rd)
+            : ref_best_rd;
+    rd[depth] = av1_uniform_txfm_yrd(cpi, x, &this_rd_stats, rd_thresh, bs,
                                      tx_size, FTXS_NONE, skip_trellis);
     if (rd[depth] < best_rd) {
       av1_copy_array(best_blk_skip, txfm_info->blk_skip, num_blks);

@@ -14,6 +14,10 @@
 #include "aom_dsp/grain_table.h"
 #include "aom/internal/aom_codec_internal.h"
 #include "av1/encoder/grain_test_vectors.h"
+#include "test/codec_factory.h"
+#include "test/encode_test_driver.h"
+#include "test/i420_video_source.h"
+#include "test/util.h"
 #include "test/video_source.h"
 
 void grain_equal(const aom_film_grain_t *expected,
@@ -267,3 +271,66 @@ TEST_F(FilmGrainTableIOTest, RoundTripSplit) {
 
   EXPECT_EQ(0, remove(grain_file.c_str()));
 }
+
+const ::libaom_test::TestMode kFilmGrainEncodeTestModes[] = {
+  ::libaom_test::kRealTime,
+#if !CONFIG_REALTIME_ONLY
+  ::libaom_test::kOnePassGood
+#endif
+};
+
+class FilmGrainEncodeTest
+    : public ::libaom_test::CodecTestWith2Params<bool, ::libaom_test::TestMode>,
+      public ::libaom_test::EncoderTest {
+ protected:
+  FilmGrainEncodeTest()
+      : EncoderTest(GET_PARAM(0)), test_monochrome_(GET_PARAM(1)),
+        test_mode_(GET_PARAM(2)) {}
+  ~FilmGrainEncodeTest() override = default;
+
+  void SetUp() override {
+    InitializeConfig(test_mode_);
+    cfg_.monochrome = test_monochrome_;
+    cfg_.rc_target_bitrate = 300;
+    cfg_.kf_max_dist = 0;
+  }
+
+  void PreEncodeFrameHook(::libaom_test::VideoSource *video,
+                          ::libaom_test::Encoder *encoder) override {
+    if (video->frame() == 0) {
+      encoder->Control(AOME_SET_CPUUSED, 5);
+      encoder->Control(AV1E_SET_TUNE_CONTENT, AOM_CONTENT_FILM);
+      encoder->Control(AV1E_SET_DENOISE_NOISE_LEVEL, 1);
+    } else if (video->frame() == 1) {
+      cfg_.monochrome = 0;
+      encoder->Config(&cfg_);
+    } else {
+      cfg_.monochrome = test_monochrome_;
+      encoder->Config(&cfg_);
+    }
+  }
+
+  bool DoDecode() const override { return false; }
+
+  void DoTest() {
+    if (test_monochrome_ && test_mode_ == ::libaom_test::kRealTime) {
+      // TODO(bohanli): Running real time mode with monochrome will cause the
+      // encoder to crash. Check if this is intended or there is a bug.
+      GTEST_SKIP();
+    }
+    ::libaom_test::I420VideoSource video("hantro_collage_w352h288.yuv", 352,
+                                         288, 30, 1, 0, 3);
+    cfg_.g_w = video.img()->d_w;
+    cfg_.g_h = video.img()->d_h;
+    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+  }
+
+ private:
+  bool test_monochrome_;
+  ::libaom_test::TestMode test_mode_;
+};
+
+TEST_P(FilmGrainEncodeTest, Test) { DoTest(); }
+
+AV1_INSTANTIATE_TEST_SUITE(FilmGrainEncodeTest, ::testing::Bool(),
+                           ::testing::ValuesIn(kFilmGrainEncodeTestModes));

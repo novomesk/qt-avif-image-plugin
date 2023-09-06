@@ -190,11 +190,10 @@ TEST_P(ErrorBlockTest, DISABLED_Speed) {
   int64_t ssz;
   int num_iters = 100000;
   int64_t ref_ssz;
-  int k;
   const int msb = bit_depth_ + 8 - 1;
   for (int i = 0; i < 9; ++i) {
     block_size = 16 << (i % 9);  // All block sizes from 4x4, 8x4 ..64x64
-    for (k = 0; k < 9; k++) {
+    for (int k = 0; k < 9; k++) {
       for (int j = 0; j < block_size; j++) {
         if (k < 5) {
           if (rnd(2)) {
@@ -221,7 +220,7 @@ TEST_P(ErrorBlockTest, DISABLED_Speed) {
       aom_usec_timer ref_timer, test_timer;
 
       aom_usec_timer_start(&ref_timer);
-      for (int i = 0; i < num_iters; ++i) {
+      for (int iter = 0; iter < num_iters; ++iter) {
         ref_error_block_op_(coeff, dqcoeff, block_size, &ref_ssz, bit_depth_);
       }
       aom_usec_timer_mark(&ref_timer);
@@ -229,7 +228,7 @@ TEST_P(ErrorBlockTest, DISABLED_Speed) {
           static_cast<int>(aom_usec_timer_elapsed(&ref_timer));
 
       aom_usec_timer_start(&test_timer);
-      for (int i = 0; i < num_iters; ++i) {
+      for (int iter = 0; iter < num_iters; ++iter) {
         error_block_op_(coeff, dqcoeff, block_size, &ssz, bit_depth_);
       }
       aom_usec_timer_mark(&test_timer);

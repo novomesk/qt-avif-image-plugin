@@ -123,6 +123,10 @@ void RENAME(av1_k_means)(const int16_t *data, int16_t *centroids,
     l = (l == 1) ? 0 : 1;
 
     RENAME(calc_centroids)(data, meta_centroids[l], meta_indices[prev_l], n, k);
+    if (!memcmp(meta_centroids[l], meta_centroids[prev_l],
+                sizeof(centroids[0]) * k * AV1_K_MEANS_DIM)) {
+      break;
+    }
 #if AV1_K_MEANS_DIM == 1
     av1_calc_indices_dim1(data, meta_centroids[l], meta_indices[l], &this_dist,
                           n, k);
@@ -135,9 +139,6 @@ void RENAME(av1_k_means)(const int16_t *data, int16_t *centroids,
       best_l = prev_l;
       break;
     }
-    if (!memcmp(meta_centroids[l], meta_centroids[prev_l],
-                sizeof(centroids[0]) * k * AV1_K_MEANS_DIM))
-      break;
   }
   if (i == max_itr) best_l = l;
   if (best_l != 0) {

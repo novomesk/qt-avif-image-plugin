@@ -269,6 +269,95 @@ static INLINE void comp_mask_pred_line_avx2(const __m256i s0, const __m256i s1,
   _mm256_storeu_si256((__m256i *)(comp_pred), roundA);
 }
 
+void aom_comp_avg_pred_avx2(uint8_t *comp_pred, const uint8_t *pred, int width,
+                            int height, const uint8_t *ref, int ref_stride) {
+  int row = 0;
+  if (width == 8) {
+    do {
+      const __m256i pred_0123 = _mm256_loadu_si256((const __m256i *)(pred));
+      const __m128i ref_0 = _mm_loadl_epi64((const __m128i *)(ref));
+      const __m128i ref_1 =
+          _mm_loadl_epi64((const __m128i *)(ref + ref_stride));
+      const __m128i ref_2 =
+          _mm_loadl_epi64((const __m128i *)(ref + 2 * ref_stride));
+      const __m128i ref_3 =
+          _mm_loadl_epi64((const __m128i *)(ref + 3 * ref_stride));
+      const __m128i ref_01 = _mm_unpacklo_epi64(ref_0, ref_1);
+      const __m128i ref_23 = _mm_unpacklo_epi64(ref_2, ref_3);
+
+      const __m256i ref_0123 =
+          _mm256_inserti128_si256(_mm256_castsi128_si256(ref_01), ref_23, 1);
+      const __m256i average = _mm256_avg_epu8(pred_0123, ref_0123);
+      _mm256_storeu_si256((__m256i *)(comp_pred), average);
+
+      row += 4;
+      pred += 32;
+      comp_pred += 32;
+      ref += 4 * ref_stride;
+    } while (row < height);
+  } else if (width == 16) {
+    do {
+      const __m256i pred_0 = _mm256_loadu_si256((const __m256i *)(pred));
+      const __m256i pred_1 = _mm256_loadu_si256((const __m256i *)(pred + 32));
+      const __m256i tmp0 =
+          _mm256_castsi128_si256(_mm_loadu_si128((const __m128i *)(ref)));
+      const __m256i ref_0 = _mm256_inserti128_si256(
+          tmp0, _mm_loadu_si128((const __m128i *)(ref + ref_stride)), 1);
+      const __m256i tmp1 = _mm256_castsi128_si256(
+          _mm_loadu_si128((const __m128i *)(ref + 2 * ref_stride)));
+      const __m256i ref_1 = _mm256_inserti128_si256(
+          tmp1, _mm_loadu_si128((const __m128i *)(ref + 3 * ref_stride)), 1);
+      const __m256i average_0 = _mm256_avg_epu8(pred_0, ref_0);
+      const __m256i average_1 = _mm256_avg_epu8(pred_1, ref_1);
+      _mm256_storeu_si256((__m256i *)(comp_pred), average_0);
+      _mm256_storeu_si256((__m256i *)(comp_pred + 32), average_1);
+
+      row += 4;
+      pred += 64;
+      comp_pred += 64;
+      ref += 4 * ref_stride;
+    } while (row < height);
+  } else if (width == 32) {
+    do {
+      const __m256i pred_0 = _mm256_loadu_si256((const __m256i *)(pred));
+      const __m256i pred_1 = _mm256_loadu_si256((const __m256i *)(pred + 32));
+      const __m256i ref_0 = _mm256_loadu_si256((const __m256i *)(ref));
+      const __m256i ref_1 =
+          _mm256_loadu_si256((const __m256i *)(ref + ref_stride));
+      const __m256i average_0 = _mm256_avg_epu8(pred_0, ref_0);
+      const __m256i average_1 = _mm256_avg_epu8(pred_1, ref_1);
+      _mm256_storeu_si256((__m256i *)(comp_pred), average_0);
+      _mm256_storeu_si256((__m256i *)(comp_pred + 32), average_1);
+
+      row += 2;
+      pred += 64;
+      comp_pred += 64;
+      ref += 2 * ref_stride;
+    } while (row < height);
+  } else if (width % 64 == 0) {
+    do {
+      for (int x = 0; x < width; x += 64) {
+        const __m256i pred_0 = _mm256_loadu_si256((const __m256i *)(pred + x));
+        const __m256i pred_1 =
+            _mm256_loadu_si256((const __m256i *)(pred + x + 32));
+        const __m256i ref_0 = _mm256_loadu_si256((const __m256i *)(ref + x));
+        const __m256i ref_1 =
+            _mm256_loadu_si256((const __m256i *)(ref + x + 32));
+        const __m256i average_0 = _mm256_avg_epu8(pred_0, ref_0);
+        const __m256i average_1 = _mm256_avg_epu8(pred_1, ref_1);
+        _mm256_storeu_si256((__m256i *)(comp_pred + x), average_0);
+        _mm256_storeu_si256((__m256i *)(comp_pred + x + 32), average_1);
+      }
+      row++;
+      pred += width;
+      comp_pred += width;
+      ref += ref_stride;
+    } while (row < height);
+  } else {
+    aom_comp_avg_pred_c(comp_pred, pred, width, height, ref, ref_stride);
+  }
+}
+
 void aom_comp_mask_pred_avx2(uint8_t *comp_pred, const uint8_t *pred, int width,
                              int height, const uint8_t *ref, int ref_stride,
                              const uint8_t *mask, int mask_stride,

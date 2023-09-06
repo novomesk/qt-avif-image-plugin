@@ -175,7 +175,7 @@ void NnPredictTest::RunNnPredictSpeedTest(const NN_CONFIG *const shape,
 // This is all the neural network shapes observed executed in a few different
 // runs of the encoder.  It also conveniently covers all the kernels
 // implemented.
-static const NN_CONFIG shapes[] = {
+static const NN_CONFIG kShapes[] = {
   { 10, 16, 1, { 64 }, { 0 }, { 0 } }, { 12, 1, 1, { 12 }, { 0 }, { 0 } },
   { 12, 1, 1, { 24 }, { 0 }, { 0 } },  { 12, 1, 1, { 32 }, { 0 }, { 0 } },
   { 18, 4, 1, { 24 }, { 0 }, { 0 } },  { 18, 4, 1, { 32 }, { 0 }, { 0 } },
@@ -198,11 +198,12 @@ void NnPredictTest::RunNnPredictSpeedTest_all(const NN_CONFIG *const shapes,
 }
 
 TEST_P(NnPredictTest, RandomValues) {
-  RunNnPredictTest_all(shapes, sizeof(shapes) / sizeof(*shapes));
+  RunNnPredictTest_all(kShapes, sizeof(kShapes) / sizeof(kShapes[0]));
 }
 
 TEST_P(NnPredictTest, DISABLED_Speed) {
-  RunNnPredictSpeedTest_all(shapes, sizeof(shapes) / sizeof(*shapes), 10000000);
+  RunNnPredictSpeedTest_all(kShapes, sizeof(kShapes) / sizeof(kShapes[0]),
+                            10000000);
 }
 
 #if HAVE_SSE3 && !CONFIG_EXCLUDE_SIMD_MISMATCH

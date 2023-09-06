@@ -60,29 +60,6 @@ static void aom_once(void (*func)(void)) {
   InitOnceComplete(&aom_init_once, 0, NULL);
 }
 
-#elif CONFIG_MULTITHREAD && defined(__OS2__)
-#define INCL_DOS
-#include <os2.h>
-static void aom_once(void (*func)(void)) {
-  static volatile int done;
-
-  /* If the initialization is complete, return early. */
-  if (done) return;
-
-  /* Causes all other threads in the process to block themselves
-   * and give up their time slice.
-   */
-  DosEnterCritSec();
-
-  if (!done) {
-    func();
-    done = 1;
-  }
-
-  /* Restores normal thread dispatching for the current process. */
-  DosExitCritSec();
-}
-
 #elif CONFIG_MULTITHREAD && HAVE_PTHREAD_H
 #include <pthread.h>
 static void aom_once(void (*func)(void)) {

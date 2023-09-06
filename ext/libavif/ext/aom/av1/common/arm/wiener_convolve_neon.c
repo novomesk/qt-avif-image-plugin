@@ -153,7 +153,7 @@ void av1_wiener_convolve_add_src_neon(const uint8_t *src, ptrdiff_t src_stride,
   height = intermediate_height;
 
   // For aarch_64.
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   int processed_height = 0;
   uint16_t *d_tmp;
   int width, remaining_height;
@@ -248,21 +248,11 @@ void av1_wiener_convolve_add_src_neon(const uint8_t *src, ptrdiff_t src_stride,
       int16x8_t s0, s1, s2, s3, s4, s5, s6, s7;
       uint8x8_t t0;
       s = src_tmp_ptr;
-      s0 = vld1q_s16(s);
-      s += src_stride;
-      s1 = vld1q_s16(s);
-      s += src_stride;
-      s2 = vld1q_s16(s);
-      s += src_stride;
-      s3 = vld1q_s16(s);
-      s += src_stride;
-      s4 = vld1q_s16(s);
-      s += src_stride;
-      s5 = vld1q_s16(s);
-      s += src_stride;
-      s6 = vld1q_s16(s);
-      s += src_stride;
       d = dst_tmp_ptr;
+
+      load_s16_8x7(s, src_stride, &s0, &s1, &s2, &s3, &s4, &s5, &s6);
+      s += 7 * src_stride;
+
       height = h;
 
       do {
@@ -273,14 +263,7 @@ void av1_wiener_convolve_add_src_neon(const uint8_t *src, ptrdiff_t src_stride,
         __builtin_prefetch(dst_tmp_ptr + 2 * dst_stride);
         __builtin_prefetch(dst_tmp_ptr + 3 * dst_stride);
 
-        s7 = vld1q_s16(s);
-        s += src_stride;
-        s8 = vld1q_s16(s);
-        s += src_stride;
-        s9 = vld1q_s16(s);
-        s += src_stride;
-        s10 = vld1q_s16(s);
-        s += src_stride;
+        load_s16_8x4(s, src_stride, &s7, &s8, &s9, &s10);
 
         t0 = wiener_convolve8_vert_4x8(s0, s1, s2, s3, s4, s5, s6, filter_y_tmp,
                                        bd, conv_params->round_1);
@@ -291,14 +274,7 @@ void av1_wiener_convolve_add_src_neon(const uint8_t *src, ptrdiff_t src_stride,
         t3 = wiener_convolve8_vert_4x8(s3, s4, s5, s6, s7, s8, s9, filter_y_tmp,
                                        bd, conv_params->round_1);
 
-        vst1_u8(d, t0);
-        d += dst_stride;
-        vst1_u8(d, t1);
-        d += dst_stride;
-        vst1_u8(d, t2);
-        d += dst_stride;
-        vst1_u8(d, t3);
-        d += dst_stride;
+        store_u8_8x4(d, dst_stride, t0, t1, t2, t3);
 
         s0 = s4;
         s1 = s5;
@@ -307,6 +283,8 @@ void av1_wiener_convolve_add_src_neon(const uint8_t *src, ptrdiff_t src_stride,
         s4 = s8;
         s5 = s9;
         s6 = s10;
+        s += 4 * src_stride;
+        d += 4 * dst_stride;
         height -= 4;
       } while (height > 3);
 
@@ -336,21 +314,11 @@ void av1_wiener_convolve_add_src_neon(const uint8_t *src, ptrdiff_t src_stride,
       uint8x8_t t0;
       int16x8_t s0, s1, s2, s3, s4, s5, s6, s7;
       s = src_tmp_ptr;
-      s0 = vld1q_s16(s);
-      s += src_stride;
-      s1 = vld1q_s16(s);
-      s += src_stride;
-      s2 = vld1q_s16(s);
-      s += src_stride;
-      s3 = vld1q_s16(s);
-      s += src_stride;
-      s4 = vld1q_s16(s);
-      s += src_stride;
-      s5 = vld1q_s16(s);
-      s += src_stride;
-      s6 = vld1q_s16(s);
-      s += src_stride;
       d = dst_tmp_ptr;
+
+      load_s16_8x7(s, src_stride, &s0, &s1, &s2, &s3, &s4, &s5, &s6);
+      s += 7 * src_stride;
+
       height = h;
       PROCESS_ROW_FOR_VERTICAL_FILTER
 

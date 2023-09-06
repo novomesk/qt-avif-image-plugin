@@ -42,6 +42,11 @@ typedef void (*GetSseSum8x8QuadFunc)(const uint8_t *a, int a_stride,
                                      uint32_t *sse8x8, int *sum8x8,
                                      unsigned int *tot_sse, int *tot_sum,
                                      uint32_t *var8x8);
+typedef void (*GetSseSum16x16DualFunc)(const uint8_t *a, int a_stride,
+                                       const uint8_t *b, int b_stride,
+                                       uint32_t *sse16x16,
+                                       unsigned int *tot_sse, int *tot_sum,
+                                       uint32_t *var16x16);
 typedef unsigned int (*SubpixVarMxNFunc)(const uint8_t *a, int a_stride,
                                          int xoffset, int yoffset,
                                          const uint8_t *b, int b_stride,
@@ -51,8 +56,6 @@ typedef unsigned int (*SubpixAvgVarMxNFunc)(const uint8_t *a, int a_stride,
                                             const uint8_t *b, int b_stride,
                                             uint32_t *sse,
                                             const uint8_t *second_pred);
-typedef unsigned int (*Get4x4SseFunc)(const uint8_t *a, int a_stride,
-                                      const uint8_t *b, int b_stride);
 typedef unsigned int (*SumOfSquaresFunction)(const int16_t *src);
 typedef unsigned int (*DistWtdSubpixAvgVarMxNFunc)(
     const uint8_t *a, int a_stride, int xoffset, int yoffset, const uint8_t *b,
@@ -707,6 +710,12 @@ class MainTestClass
   void MaxTestSseSum();
   void SseSum_SpeedTest();
 
+  // SSE&SUM dual tests
+  void RefTestSseSumDual();
+  void MinTestSseSumDual();
+  void MaxTestSseSumDual();
+  void SseSum_SpeedTestDual();
+
   // MSE/SSE tests
   void RefTestMse();
   void RefTestSse();
@@ -833,9 +842,11 @@ void MainTestClass<VarianceFunctionType>::SpeedTest() {
     if (!use_high_bit_depth()) {
       src_[j] = rnd_.Rand8();
       ref_[j] = rnd_.Rand8();
+#if CONFIG_AV1_HIGHBITDEPTH
     } else {
       CONVERT_TO_SHORTPTR(src_)[j] = rnd_.Rand16() & mask();
       CONVERT_TO_SHORTPTR(ref_)[j] = rnd_.Rand16() & mask();
+#endif  // CONFIG_AV1_HIGHBITDEPTH
     }
   }
   unsigned int sse;
@@ -872,14 +883,15 @@ void MainTestClass<GetSseSum8x8QuadFuncType>::RefTestSseSum() {
     const int stride = width();
     int k = 0;
 
-    for (int i = 0; i < height(); i += 8) {
-      for (int j = 0; j < width(); j += 32) {
-        API_REGISTER_STATE_CHECK(params_.func(
-            src_ + stride * i + j, stride, ref_ + stride * i + j, stride,
-            &sse1[k], &sum1[k], &sse_tot_simd, &sum_tot_simd, &var1[k]));
+    for (int row = 0; row < height(); row += 8) {
+      for (int col = 0; col < width(); col += 32) {
+        API_REGISTER_STATE_CHECK(params_.func(src_ + stride * row + col, stride,
+                                              ref_ + stride * row + col, stride,
+                                              &sse1[k], &sum1[k], &sse_tot_simd,
+                                              &sum_tot_simd, &var1[k]));
         aom_get_var_sse_sum_8x8_quad_c(
-            src_ + stride * i + j, stride, ref_ + stride * i + j, stride,
-            &sse2[k], &sum2[k], &sse_tot_c, &sum_tot_c, &var2[k]);
+            src_ + stride * row + col, stride, ref_ + stride * row + col,
+            stride, &sse2[k], &sum2[k], &sse_tot_c, &sum_tot_c, &var2[k]);
         k += 4;
       }
     }
@@ -976,12 +988,12 @@ void MainTestClass<GetSseSum8x8QuadFuncType>::SseSum_SpeedTest() {
     ref_[j] = rnd_.Rand8();
   }
 
-  unsigned int sse1 = 0;
-  unsigned int sse2 = 0;
-  unsigned int var1 = 0;
-  unsigned int var2 = 0;
-  int sum1 = 0;
-  int sum2 = 0;
+  unsigned int sse1[4] = { 0 };
+  unsigned int sse2[4] = { 0 };
+  unsigned int var1[4] = { 0 };
+  unsigned int var2[4] = { 0 };
+  int sum1[4] = { 0 };
+  int sum2[4] = { 0 };
   unsigned int sse_tot_c = 0;
   unsigned int sse_tot_simd = 0;
   int sum_tot_c = 0;
@@ -994,8 +1006,8 @@ void MainTestClass<GetSseSum8x8QuadFuncType>::SseSum_SpeedTest() {
     for (int i = 0; i < height(); i += 8) {
       for (int j = 0; j < width(); j += 32) {
         aom_get_var_sse_sum_8x8_quad_c(src_ + stride * i + j, stride,
-                                       ref_ + stride * i + j, stride, &sse2,
-                                       &sum2, &sse_tot_c, &sum_tot_c, &var2);
+                                       ref_ + stride * i + j, stride, sse2,
+                                       sum2, &sse_tot_c, &sum_tot_c, var2);
       }
     }
   }
@@ -1008,7 +1020,7 @@ void MainTestClass<GetSseSum8x8QuadFuncType>::SseSum_SpeedTest() {
     for (int i = 0; i < height(); i += 8) {
       for (int j = 0; j < width(); j += 32) {
         params_.func(src_ + stride * i + j, stride, ref_ + stride * i + j,
-                     stride, &sse1, &sum1, &sse_tot_simd, &sum_tot_simd, &var1);
+                     stride, sse1, sum1, &sse_tot_simd, &sum_tot_simd, var1);
       }
     }
   }
@@ -1022,6 +1034,171 @@ void MainTestClass<GetSseSum8x8QuadFuncType>::SseSum_SpeedTest() {
       width(), height(), elapsed_time_ref, elapsed_time_simd,
       elapsed_time_ref / elapsed_time_simd);
 }
+
+template <typename GetSseSum16x16DualFuncType>
+void MainTestClass<GetSseSum16x16DualFuncType>::RefTestSseSumDual() {
+  for (int iter = 0; iter < 10; ++iter) {
+    for (int idx = 0; idx < block_size(); ++idx) {
+      src_[idx] = rnd_.Rand8();
+      ref_[idx] = rnd_.Rand8();
+    }
+    unsigned int sse1[64] = { 0 };
+    unsigned int sse2[64] = { 0 };
+    unsigned int var1[64] = { 0 };
+    unsigned int var2[64] = { 0 };
+    unsigned int sse_tot_c = 0;
+    unsigned int sse_tot_simd = 0;
+    int sum_tot_c = 0;
+    int sum_tot_simd = 0;
+    const int stride = width();
+    int k = 0;
+
+    for (int row = 0; row < height(); row += 16) {
+      for (int col = 0; col < width(); col += 32) {
+        API_REGISTER_STATE_CHECK(params_.func(
+            src_ + stride * row + col, stride, ref_ + stride * row + col,
+            stride, &sse1[k], &sse_tot_simd, &sum_tot_simd, &var1[k]));
+        aom_get_var_sse_sum_16x16_dual_c(
+            src_ + stride * row + col, stride, ref_ + stride * row + col,
+            stride, &sse2[k], &sse_tot_c, &sum_tot_c, &var2[k]);
+        k += 2;
+      }
+    }
+    EXPECT_EQ(sse_tot_c, sse_tot_simd);
+    EXPECT_EQ(sum_tot_c, sum_tot_simd);
+    for (int p = 0; p < 64; p++) {
+      EXPECT_EQ(sse1[p], sse2[p]);
+      EXPECT_EQ(sse_tot_simd, sse_tot_c);
+      EXPECT_EQ(sum_tot_simd, sum_tot_c);
+      EXPECT_EQ(var1[p], var2[p]);
+    }
+  }
+}
+
+template <typename GetSseSum16x16DualFuncType>
+void MainTestClass<GetSseSum16x16DualFuncType>::MinTestSseSumDual() {
+  memset(src_, 0, block_size());
+  memset(ref_, 255, block_size());
+  unsigned int sse1[64] = { 0 };
+  unsigned int sse2[64] = { 0 };
+  unsigned int var1[64] = { 0 };
+  unsigned int var2[64] = { 0 };
+  unsigned int sse_tot_c = 0;
+  unsigned int sse_tot_simd = 0;
+  int sum_tot_c = 0;
+  int sum_tot_simd = 0;
+  const int stride = width();
+  int k = 0;
+
+  for (int row = 0; row < height(); row += 16) {
+    for (int col = 0; col < width(); col += 32) {
+      API_REGISTER_STATE_CHECK(params_.func(
+          src_ + stride * row + col, stride, ref_ + stride * row + col, stride,
+          &sse1[k], &sse_tot_simd, &sum_tot_simd, &var1[k]));
+      aom_get_var_sse_sum_16x16_dual_c(
+          src_ + stride * row + col, stride, ref_ + stride * row + col, stride,
+          &sse2[k], &sse_tot_c, &sum_tot_c, &var2[k]);
+      k += 2;
+    }
+  }
+  EXPECT_EQ(sse_tot_simd, sse_tot_c);
+  EXPECT_EQ(sum_tot_simd, sum_tot_c);
+  for (int p = 0; p < 64; p++) {
+    EXPECT_EQ(sse1[p], sse2[p]);
+    EXPECT_EQ(var1[p], var2[p]);
+  }
+}
+
+template <typename GetSseSum16x16DualFuncType>
+void MainTestClass<GetSseSum16x16DualFuncType>::MaxTestSseSumDual() {
+  memset(src_, 255, block_size());
+  memset(ref_, 0, block_size());
+  unsigned int sse1[64] = { 0 };
+  unsigned int sse2[64] = { 0 };
+  unsigned int var1[64] = { 0 };
+  unsigned int var2[64] = { 0 };
+  unsigned int sse_tot_c = 0;
+  unsigned int sse_tot_simd = 0;
+  int sum_tot_c = 0;
+  int sum_tot_simd = 0;
+  const int stride = width();
+  int k = 0;
+
+  for (int row = 0; row < height(); row += 16) {
+    for (int col = 0; col < width(); col += 32) {
+      API_REGISTER_STATE_CHECK(params_.func(
+          src_ + stride * row + col, stride, ref_ + stride * row + col, stride,
+          &sse1[k], &sse_tot_simd, &sum_tot_simd, &var1[k]));
+      aom_get_var_sse_sum_16x16_dual_c(
+          src_ + stride * row + col, stride, ref_ + stride * row + col, stride,
+          &sse2[k], &sse_tot_c, &sum_tot_c, &var2[k]);
+      k += 2;
+    }
+  }
+  EXPECT_EQ(sse_tot_c, sse_tot_simd);
+  EXPECT_EQ(sum_tot_c, sum_tot_simd);
+
+  for (int p = 0; p < 64; p++) {
+    EXPECT_EQ(sse1[p], sse2[p]);
+    EXPECT_EQ(var1[p], var2[p]);
+  }
+}
+
+template <typename GetSseSum16x16DualFuncType>
+void MainTestClass<GetSseSum16x16DualFuncType>::SseSum_SpeedTestDual() {
+  const int loop_count = 1000000000 / block_size();
+  for (int idx = 0; idx < block_size(); ++idx) {
+    src_[idx] = rnd_.Rand8();
+    ref_[idx] = rnd_.Rand8();
+  }
+
+  unsigned int sse1[2] = { 0 };
+  unsigned int sse2[2] = { 0 };
+  unsigned int var1[2] = { 0 };
+  unsigned int var2[2] = { 0 };
+  unsigned int sse_tot_c = 0;
+  unsigned int sse_tot_simd = 0;
+  int sum_tot_c = 0;
+  int sum_tot_simd = 0;
+  const int stride = width();
+
+  aom_usec_timer timer;
+  aom_usec_timer_start(&timer);
+  for (int r = 0; r < loop_count; ++r) {
+    for (int row = 0; row < height(); row += 16) {
+      for (int col = 0; col < width(); col += 32) {
+        aom_get_var_sse_sum_16x16_dual_c(src_ + stride * row + col, stride,
+                                         ref_ + stride * row + col, stride,
+                                         sse2, &sse_tot_c, &sum_tot_c, var2);
+      }
+    }
+  }
+  aom_usec_timer_mark(&timer);
+  const double elapsed_time_ref =
+      static_cast<double>(aom_usec_timer_elapsed(&timer));
+
+  aom_usec_timer_start(&timer);
+  for (int r = 0; r < loop_count; ++r) {
+    for (int row = 0; row < height(); row += 16) {
+      for (int col = 0; col < width(); col += 32) {
+        params_.func(src_ + stride * row + col, stride,
+                     ref_ + stride * row + col, stride, sse1, &sse_tot_simd,
+                     &sum_tot_simd, var1);
+      }
+    }
+  }
+  aom_usec_timer_mark(&timer);
+  const double elapsed_time_simd =
+      static_cast<double>(aom_usec_timer_elapsed(&timer));
+
+  printf(
+      "aom_getvar_16x16_dual for block=%dx%d : ref_time=%lf \t simd_time=%lf "
+      "\t "
+      "gain=%lf \n",
+      width(), height(), elapsed_time_ref, elapsed_time_simd,
+      elapsed_time_ref / elapsed_time_simd);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Tests related to MSE / SSE.
 
@@ -1029,14 +1206,21 @@ template <typename FunctionType>
 void MainTestClass<FunctionType>::RefTestMse() {
   for (int i = 0; i < 10; ++i) {
     for (int j = 0; j < block_size(); ++j) {
-      src_[j] = rnd_.Rand8();
-      ref_[j] = rnd_.Rand8();
+      if (!use_high_bit_depth()) {
+        src_[j] = rnd_.Rand8();
+        ref_[j] = rnd_.Rand8();
+#if CONFIG_AV1_HIGHBITDEPTH
+      } else {
+        CONVERT_TO_SHORTPTR(src_)[j] = rnd_.Rand16() & mask();
+        CONVERT_TO_SHORTPTR(ref_)[j] = rnd_.Rand16() & mask();
+#endif  // CONFIG_AV1_HIGHBITDEPTH
+      }
     }
     unsigned int sse1, sse2;
     const int stride = width();
     API_REGISTER_STATE_CHECK(params_.func(src_, stride, ref_, stride, &sse1));
     variance_ref(src_, ref_, params_.log2width, params_.log2height, stride,
-                 stride, &sse2, false, AOM_BITS_8);
+                 stride, &sse2, use_high_bit_depth(), params_.bit_depth);
     EXPECT_EQ(sse1, sse2);
   }
 }
@@ -1060,11 +1244,25 @@ void MainTestClass<FunctionType>::RefTestSse() {
 
 template <typename FunctionType>
 void MainTestClass<FunctionType>::MaxTestMse() {
-  memset(src_, 255, block_size());
-  memset(ref_, 0, block_size());
+  int max_value = (1 << params_.bit_depth) - 1;
+  if (!use_high_bit_depth()) {
+    memset(src_, max_value, block_size());
+    memset(ref_, 0, block_size());
+#if CONFIG_AV1_HIGHBITDEPTH
+  } else {
+    aom_memset16(CONVERT_TO_SHORTPTR(src_), max_value, block_size());
+    aom_memset16(CONVERT_TO_SHORTPTR(ref_), 0, block_size());
+#endif  // CONFIG_AV1_HIGHBITDEPTH
+  }
   unsigned int sse;
   API_REGISTER_STATE_CHECK(params_.func(src_, width(), ref_, width(), &sse));
-  const unsigned int expected = block_size() * 255 * 255;
+  unsigned int expected = (unsigned int)block_size() * max_value * max_value;
+  switch (params_.bit_depth) {
+    case AOM_BITS_12: expected = ROUND_POWER_OF_TWO(expected, 8); break;
+    case AOM_BITS_10: expected = ROUND_POWER_OF_TWO(expected, 4); break;
+    case AOM_BITS_8:
+    default: break;
+  }
   EXPECT_EQ(expected, sse);
 }
 
@@ -1496,10 +1694,10 @@ void ObmcVarianceTest<ObmcSubpelVarFunc>::SpeedTest() {
 
 typedef MseWxHTestClass<MseWxH16bitFunc> MseWxHTest;
 typedef Mse16xHTestClass<Mse16xH16bitFunc> Mse16xHTest;
-typedef MainTestClass<Get4x4SseFunc> AvxSseTest;
 typedef MainTestClass<VarianceMxNFunc> AvxMseTest;
 typedef MainTestClass<VarianceMxNFunc> AvxVarianceTest;
 typedef MainTestClass<GetSseSum8x8QuadFunc> GetSseSum8x8QuadTest;
+typedef MainTestClass<GetSseSum16x16DualFunc> GetSseSum16x16DualTest;
 typedef SubpelVarianceTest<SubpixVarMxNFunc> AvxSubpelVarianceTest;
 typedef SubpelVarianceTest<SubpixAvgVarMxNFunc> AvxSubpelAvgVarianceTest;
 typedef SubpelVarianceTest<DistWtdSubpixAvgVarMxNFunc>
@@ -1510,8 +1708,6 @@ typedef ObmcVarianceTest<ObmcSubpelVarFunc> AvxObmcSubpelVarianceTest;
 typedef TestParams<MseWxH16bitFunc> MseWxHParams;
 typedef TestParams<Mse16xH16bitFunc> Mse16xHParams;
 
-TEST_P(AvxSseTest, RefSse) { RefTestSse(); }
-TEST_P(AvxSseTest, MaxSse) { MaxTestSse(); }
 TEST_P(MseWxHTest, RefMse) { RefMatchTestMse(); }
 TEST_P(MseWxHTest, DISABLED_SpeedMse) { SpeedTest(); }
 TEST_P(Mse16xHTest, RefMse) { RefMatchTestMse(); }
@@ -1528,6 +1724,10 @@ TEST_P(GetSseSum8x8QuadTest, RefMseSum) { RefTestSseSum(); }
 TEST_P(GetSseSum8x8QuadTest, MinSseSum) { MinTestSseSum(); }
 TEST_P(GetSseSum8x8QuadTest, MaxMseSum) { MaxTestSseSum(); }
 TEST_P(GetSseSum8x8QuadTest, DISABLED_Speed) { SseSum_SpeedTest(); }
+TEST_P(GetSseSum16x16DualTest, RefMseSum) { RefTestSseSumDual(); }
+TEST_P(GetSseSum16x16DualTest, MinSseSum) { MinTestSseSumDual(); }
+TEST_P(GetSseSum16x16DualTest, MaxMseSum) { MaxTestSseSumDual(); }
+TEST_P(GetSseSum16x16DualTest, DISABLED_Speed) { SseSum_SpeedTestDual(); }
 TEST_P(SumOfSquaresTest, Const) { ConstTest(); }
 TEST_P(SumOfSquaresTest, Ref) { RefTest(); }
 TEST_P(AvxSubpelVarianceTest, Ref) { RefTest(); }
@@ -1557,11 +1757,6 @@ INSTANTIATE_TEST_SUITE_P(
 
 INSTANTIATE_TEST_SUITE_P(C, SumOfSquaresTest,
                          ::testing::Values(aom_get_mb_ss_c));
-
-typedef TestParams<Get4x4SseFunc> SseParams;
-INSTANTIATE_TEST_SUITE_P(C, AvxSseTest,
-                         ::testing::Values(SseParams(2, 2,
-                                                     &aom_get4x4sse_cs_c)));
 
 typedef TestParams<VarianceMxNFunc> MseParams;
 INSTANTIATE_TEST_SUITE_P(C, AvxMseTest,
@@ -1609,6 +1804,17 @@ const GetSseSumParams kArrayGetSseSum8x8Quad_c[] = {
 };
 INSTANTIATE_TEST_SUITE_P(C, GetSseSum8x8QuadTest,
                          ::testing::ValuesIn(kArrayGetSseSum8x8Quad_c));
+
+typedef TestParams<GetSseSum16x16DualFunc> GetSseSumParamsDual;
+const GetSseSumParamsDual kArrayGetSseSum16x16Dual_c[] = {
+  GetSseSumParamsDual(7, 7, &aom_get_var_sse_sum_16x16_dual_c, 0),
+  GetSseSumParamsDual(6, 6, &aom_get_var_sse_sum_16x16_dual_c, 0),
+  GetSseSumParamsDual(5, 5, &aom_get_var_sse_sum_16x16_dual_c, 0),
+  GetSseSumParamsDual(5, 4, &aom_get_var_sse_sum_16x16_dual_c, 0)
+};
+
+INSTANTIATE_TEST_SUITE_P(C, GetSseSum16x16DualTest,
+                         ::testing::ValuesIn(kArrayGetSseSum16x16Dual_c));
 
 typedef TestParams<SubpixVarMxNFunc> SubpelVarianceParams;
 const SubpelVarianceParams kArraySubpelVariance_c[] = {
@@ -1865,6 +2071,7 @@ TEST_P(MseHBDWxHTest, RefMse) { RefMatchTestMse(); }
 TEST_P(MseHBDWxHTest, DISABLED_SpeedMse) { SpeedTest(); }
 TEST_P(AvxHBDMseTest, RefMse) { RefTestMse(); }
 TEST_P(AvxHBDMseTest, MaxMse) { MaxTestMse(); }
+TEST_P(AvxHBDMseTest, DISABLED_SpeedMse) { SpeedTest(); }
 TEST_P(AvxHBDVarianceTest, Zero) { ZeroTest(); }
 TEST_P(AvxHBDVarianceTest, Ref) { RefTest(); }
 TEST_P(AvxHBDVarianceTest, RefStride) { RefStrideTest(); }
@@ -1882,22 +2089,37 @@ INSTANTIATE_TEST_SUITE_P(
                       MseHBDWxHParams(2, 3, &aom_mse_wxh_16bit_highbd_c, 10),
                       MseHBDWxHParams(2, 2, &aom_mse_wxh_16bit_highbd_c, 10)));
 
-/* TODO(debargha): This test does not support the highbd version
 INSTANTIATE_TEST_SUITE_P(
     C, AvxHBDMseTest,
-    ::testing::Values(make_tuple(4, 4, &aom_highbd_12_mse16x16_c),
-                      make_tuple(4, 4, &aom_highbd_12_mse16x8_c),
-                      make_tuple(4, 4, &aom_highbd_12_mse8x16_c),
-                      make_tuple(4, 4, &aom_highbd_12_mse8x8_c),
-                      make_tuple(4, 4, &aom_highbd_10_mse16x16_c),
-                      make_tuple(4, 4, &aom_highbd_10_mse16x8_c),
-                      make_tuple(4, 4, &aom_highbd_10_mse8x16_c),
-                      make_tuple(4, 4, &aom_highbd_10_mse8x8_c),
-                      make_tuple(4, 4, &aom_highbd_8_mse16x16_c),
-                      make_tuple(4, 4, &aom_highbd_8_mse16x8_c),
-                      make_tuple(4, 4, &aom_highbd_8_mse8x16_c),
-                      make_tuple(4, 4, &aom_highbd_8_mse8x8_c)));
-*/
+    ::testing::Values(MseParams(4, 4, &aom_highbd_12_mse16x16_c, 12),
+                      MseParams(4, 3, &aom_highbd_12_mse16x8_c, 12),
+                      MseParams(3, 4, &aom_highbd_12_mse8x16_c, 12),
+                      MseParams(3, 3, &aom_highbd_12_mse8x8_c, 12),
+                      MseParams(4, 4, &aom_highbd_10_mse16x16_c, 10),
+                      MseParams(4, 3, &aom_highbd_10_mse16x8_c, 10),
+                      MseParams(3, 4, &aom_highbd_10_mse8x16_c, 10),
+                      MseParams(3, 3, &aom_highbd_10_mse8x8_c, 10),
+                      MseParams(4, 4, &aom_highbd_8_mse16x16_c, 8),
+                      MseParams(4, 3, &aom_highbd_8_mse16x8_c, 8),
+                      MseParams(3, 4, &aom_highbd_8_mse8x16_c, 8),
+                      MseParams(3, 3, &aom_highbd_8_mse8x8_c, 8)));
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, AvxHBDMseTest,
+    ::testing::Values(MseParams(4, 4, &aom_highbd_12_mse16x16_neon, 12),
+                      MseParams(4, 3, &aom_highbd_12_mse16x8_neon, 12),
+                      MseParams(3, 4, &aom_highbd_12_mse8x16_neon, 12),
+                      MseParams(3, 3, &aom_highbd_12_mse8x8_neon, 12),
+                      MseParams(4, 4, &aom_highbd_10_mse16x16_neon, 10),
+                      MseParams(4, 3, &aom_highbd_10_mse16x8_neon, 10),
+                      MseParams(3, 4, &aom_highbd_10_mse8x16_neon, 10),
+                      MseParams(3, 3, &aom_highbd_10_mse8x8_neon, 10),
+                      MseParams(4, 4, &aom_highbd_8_mse16x16_neon, 8),
+                      MseParams(4, 3, &aom_highbd_8_mse16x8_neon, 8),
+                      MseParams(3, 4, &aom_highbd_8_mse8x16_neon, 8),
+                      MseParams(3, 3, &aom_highbd_8_mse8x8_neon, 8)));
+#endif  // HAVE_NEON
 
 const VarianceParams kArrayHBDVariance_c[] = {
   VarianceParams(7, 7, &aom_highbd_12_variance128x128_c, 12),
@@ -2351,6 +2573,15 @@ const GetSseSumParams kArrayGetSseSum8x8Quad_sse2[] = {
 INSTANTIATE_TEST_SUITE_P(SSE2, GetSseSum8x8QuadTest,
                          ::testing::ValuesIn(kArrayGetSseSum8x8Quad_sse2));
 
+const GetSseSumParamsDual kArrayGetSseSum16x16Dual_sse2[] = {
+  GetSseSumParamsDual(7, 7, &aom_get_var_sse_sum_16x16_dual_sse2, 0),
+  GetSseSumParamsDual(6, 6, &aom_get_var_sse_sum_16x16_dual_sse2, 0),
+  GetSseSumParamsDual(5, 5, &aom_get_var_sse_sum_16x16_dual_sse2, 0),
+  GetSseSumParamsDual(5, 4, &aom_get_var_sse_sum_16x16_dual_sse2, 0)
+};
+INSTANTIATE_TEST_SUITE_P(SSE2, GetSseSum16x16DualTest,
+                         ::testing::ValuesIn(kArrayGetSseSum16x16Dual_sse2));
+
 const SubpelVarianceParams kArraySubpelVariance_sse2[] = {
   SubpelVarianceParams(7, 7, &aom_sub_pixel_variance128x128_sse2, 0),
   SubpelVarianceParams(7, 6, &aom_sub_pixel_variance128x64_sse2, 0),
@@ -2444,22 +2675,14 @@ INSTANTIATE_TEST_SUITE_P(
                                 12)));
 #endif  // HAVE_SSE4_1
 
-/* TODO(debargha): This test does not support the highbd version
 INSTANTIATE_TEST_SUITE_P(
     SSE2, AvxHBDMseTest,
-    ::testing::Values(MseParams(4, 4, &aom_highbd_12_mse16x16_sse2),
-                      MseParams(4, 3, &aom_highbd_12_mse16x8_sse2),
-                      MseParams(3, 4, &aom_highbd_12_mse8x16_sse2),
-                      MseParams(3, 3, &aom_highbd_12_mse8x8_sse2),
-                      MseParams(4, 4, &aom_highbd_10_mse16x16_sse2),
-                      MseParams(4, 3, &aom_highbd_10_mse16x8_sse2),
-                      MseParams(3, 4, &aom_highbd_10_mse8x16_sse2),
-                      MseParams(3, 3, &aom_highbd_10_mse8x8_sse2),
-                      MseParams(4, 4, &aom_highbd_8_mse16x16_sse2),
-                      MseParams(4, 3, &aom_highbd_8_mse16x8_sse2),
-                      MseParams(3, 4, &aom_highbd_8_mse8x16_sse2),
-                      MseParams(3, 3, &aom_highbd_8_mse8x8_sse2)));
-*/
+    ::testing::Values(MseParams(4, 4, &aom_highbd_12_mse16x16_sse2, 12),
+                      MseParams(3, 3, &aom_highbd_12_mse8x8_sse2, 12),
+                      MseParams(4, 4, &aom_highbd_10_mse16x16_sse2, 10),
+                      MseParams(3, 3, &aom_highbd_10_mse8x8_sse2, 10),
+                      MseParams(4, 4, &aom_highbd_8_mse16x16_sse2, 8),
+                      MseParams(3, 3, &aom_highbd_8_mse8x8_sse2, 8)));
 
 const VarianceParams kArrayHBDVariance_sse2[] = {
   VarianceParams(7, 7, &aom_highbd_12_variance128x128_sse2, 12),
@@ -2969,6 +3192,15 @@ const GetSseSumParams kArrayGetSseSum8x8Quad_avx2[] = {
 INSTANTIATE_TEST_SUITE_P(AVX2, GetSseSum8x8QuadTest,
                          ::testing::ValuesIn(kArrayGetSseSum8x8Quad_avx2));
 
+const GetSseSumParamsDual kArrayGetSseSum16x16Dual_avx2[] = {
+  GetSseSumParamsDual(7, 7, &aom_get_var_sse_sum_16x16_dual_avx2, 0),
+  GetSseSumParamsDual(6, 6, &aom_get_var_sse_sum_16x16_dual_avx2, 0),
+  GetSseSumParamsDual(5, 5, &aom_get_var_sse_sum_16x16_dual_avx2, 0),
+  GetSseSumParamsDual(5, 4, &aom_get_var_sse_sum_16x16_dual_avx2, 0)
+};
+INSTANTIATE_TEST_SUITE_P(AVX2, GetSseSum16x16DualTest,
+                         ::testing::ValuesIn(kArrayGetSseSum16x16Dual_avx2));
+
 const SubpelVarianceParams kArraySubpelVariance_avx2[] = {
   SubpelVarianceParams(7, 7, &aom_sub_pixel_variance128x128_avx2, 0),
   SubpelVarianceParams(7, 6, &aom_sub_pixel_variance128x64_avx2, 0),
@@ -3014,10 +3246,6 @@ INSTANTIATE_TEST_SUITE_P(
                       MseWxHParams(3, 2, &aom_mse_wxh_16bit_neon, 8),
                       MseWxHParams(2, 3, &aom_mse_wxh_16bit_neon, 8),
                       MseWxHParams(2, 2, &aom_mse_wxh_16bit_neon, 8)));
-
-INSTANTIATE_TEST_SUITE_P(NEON, AvxSseTest,
-                         ::testing::Values(SseParams(2, 2,
-                                                     &aom_get4x4sse_cs_neon)));
 
 INSTANTIATE_TEST_SUITE_P(NEON, AvxMseTest,
                          ::testing::Values(MseParams(3, 3, &aom_mse8x8_neon),
@@ -3114,6 +3342,35 @@ const SubpelAvgVarianceParams kArraySubpelAvgVariance_neon[] = {
 INSTANTIATE_TEST_SUITE_P(NEON, AvxSubpelAvgVarianceTest,
                          ::testing::ValuesIn(kArraySubpelAvgVariance_neon));
 
+#if !CONFIG_REALTIME_ONLY
+const ObmcSubpelVarianceParams kArrayObmcSubpelVariance_neon[] = {
+  ObmcSubpelVarianceParams(7, 7, &aom_obmc_sub_pixel_variance128x128_neon, 0),
+  ObmcSubpelVarianceParams(7, 6, &aom_obmc_sub_pixel_variance128x64_neon, 0),
+  ObmcSubpelVarianceParams(6, 7, &aom_obmc_sub_pixel_variance64x128_neon, 0),
+  ObmcSubpelVarianceParams(6, 6, &aom_obmc_sub_pixel_variance64x64_neon, 0),
+  ObmcSubpelVarianceParams(6, 5, &aom_obmc_sub_pixel_variance64x32_neon, 0),
+  ObmcSubpelVarianceParams(5, 6, &aom_obmc_sub_pixel_variance32x64_neon, 0),
+  ObmcSubpelVarianceParams(5, 5, &aom_obmc_sub_pixel_variance32x32_neon, 0),
+  ObmcSubpelVarianceParams(5, 4, &aom_obmc_sub_pixel_variance32x16_neon, 0),
+  ObmcSubpelVarianceParams(4, 5, &aom_obmc_sub_pixel_variance16x32_neon, 0),
+  ObmcSubpelVarianceParams(4, 4, &aom_obmc_sub_pixel_variance16x16_neon, 0),
+  ObmcSubpelVarianceParams(4, 3, &aom_obmc_sub_pixel_variance16x8_neon, 0),
+  ObmcSubpelVarianceParams(3, 4, &aom_obmc_sub_pixel_variance8x16_neon, 0),
+  ObmcSubpelVarianceParams(3, 3, &aom_obmc_sub_pixel_variance8x8_neon, 0),
+  ObmcSubpelVarianceParams(3, 2, &aom_obmc_sub_pixel_variance8x4_neon, 0),
+  ObmcSubpelVarianceParams(2, 3, &aom_obmc_sub_pixel_variance4x8_neon, 0),
+  ObmcSubpelVarianceParams(2, 2, &aom_obmc_sub_pixel_variance4x4_neon, 0),
+  ObmcSubpelVarianceParams(6, 4, &aom_obmc_sub_pixel_variance64x16_neon, 0),
+  ObmcSubpelVarianceParams(4, 6, &aom_obmc_sub_pixel_variance16x64_neon, 0),
+  ObmcSubpelVarianceParams(5, 3, &aom_obmc_sub_pixel_variance32x8_neon, 0),
+  ObmcSubpelVarianceParams(3, 5, &aom_obmc_sub_pixel_variance8x32_neon, 0),
+  ObmcSubpelVarianceParams(4, 2, &aom_obmc_sub_pixel_variance16x4_neon, 0),
+  ObmcSubpelVarianceParams(2, 4, &aom_obmc_sub_pixel_variance4x16_neon, 0),
+};
+INSTANTIATE_TEST_SUITE_P(NEON, AvxObmcSubpelVarianceTest,
+                         ::testing::ValuesIn(kArrayObmcSubpelVariance_neon));
+#endif
+
 const GetSseSumParams kArrayGetSseSum8x8Quad_neon[] = {
   GetSseSumParams(7, 7, &aom_get_var_sse_sum_8x8_quad_neon, 0),
   GetSseSumParams(6, 6, &aom_get_var_sse_sum_8x8_quad_neon, 0),
@@ -3123,8 +3380,33 @@ const GetSseSumParams kArrayGetSseSum8x8Quad_neon[] = {
 INSTANTIATE_TEST_SUITE_P(NEON, GetSseSum8x8QuadTest,
                          ::testing::ValuesIn(kArrayGetSseSum8x8Quad_neon));
 
+const GetSseSumParamsDual kArrayGetSseSum16x16Dual_neon[] = {
+  GetSseSumParamsDual(7, 7, &aom_get_var_sse_sum_16x16_dual_neon, 0),
+  GetSseSumParamsDual(6, 6, &aom_get_var_sse_sum_16x16_dual_neon, 0),
+  GetSseSumParamsDual(5, 5, &aom_get_var_sse_sum_16x16_dual_neon, 0),
+  GetSseSumParamsDual(5, 4, &aom_get_var_sse_sum_16x16_dual_neon, 0)
+};
+INSTANTIATE_TEST_SUITE_P(NEON, GetSseSum16x16DualTest,
+                         ::testing::ValuesIn(kArrayGetSseSum16x16Dual_neon));
+
 #if CONFIG_AV1_HIGHBITDEPTH
 const VarianceParams kArrayHBDVariance_neon[] = {
+  VarianceParams(7, 7, &aom_highbd_12_variance128x128_neon, 12),
+  VarianceParams(7, 6, &aom_highbd_12_variance128x64_neon, 12),
+  VarianceParams(6, 7, &aom_highbd_12_variance64x128_neon, 12),
+  VarianceParams(6, 6, &aom_highbd_12_variance64x64_neon, 12),
+  VarianceParams(6, 5, &aom_highbd_12_variance64x32_neon, 12),
+  VarianceParams(5, 6, &aom_highbd_12_variance32x64_neon, 12),
+  VarianceParams(5, 5, &aom_highbd_12_variance32x32_neon, 12),
+  VarianceParams(5, 4, &aom_highbd_12_variance32x16_neon, 12),
+  VarianceParams(4, 5, &aom_highbd_12_variance16x32_neon, 12),
+  VarianceParams(4, 4, &aom_highbd_12_variance16x16_neon, 12),
+  VarianceParams(4, 3, &aom_highbd_12_variance16x8_neon, 12),
+  VarianceParams(3, 4, &aom_highbd_12_variance8x16_neon, 12),
+  VarianceParams(3, 3, &aom_highbd_12_variance8x8_neon, 12),
+  VarianceParams(3, 2, &aom_highbd_12_variance8x4_neon, 12),
+  VarianceParams(2, 3, &aom_highbd_12_variance4x8_neon, 12),
+  VarianceParams(2, 2, &aom_highbd_12_variance4x4_neon, 12),
   VarianceParams(7, 7, &aom_highbd_10_variance128x128_neon, 10),
   VarianceParams(7, 6, &aom_highbd_10_variance128x64_neon, 10),
   VarianceParams(6, 7, &aom_highbd_10_variance64x128_neon, 10),
@@ -3141,13 +3423,41 @@ const VarianceParams kArrayHBDVariance_neon[] = {
   VarianceParams(3, 2, &aom_highbd_10_variance8x4_neon, 10),
   VarianceParams(2, 3, &aom_highbd_10_variance4x8_neon, 10),
   VarianceParams(2, 2, &aom_highbd_10_variance4x4_neon, 10),
+  VarianceParams(7, 7, &aom_highbd_8_variance128x128_neon, 8),
+  VarianceParams(7, 6, &aom_highbd_8_variance128x64_neon, 8),
+  VarianceParams(6, 7, &aom_highbd_8_variance64x128_neon, 8),
+  VarianceParams(6, 6, &aom_highbd_8_variance64x64_neon, 8),
+  VarianceParams(6, 5, &aom_highbd_8_variance64x32_neon, 8),
+  VarianceParams(5, 6, &aom_highbd_8_variance32x64_neon, 8),
+  VarianceParams(5, 5, &aom_highbd_8_variance32x32_neon, 8),
+  VarianceParams(5, 4, &aom_highbd_8_variance32x16_neon, 8),
+  VarianceParams(4, 5, &aom_highbd_8_variance16x32_neon, 8),
+  VarianceParams(4, 4, &aom_highbd_8_variance16x16_neon, 8),
+  VarianceParams(4, 3, &aom_highbd_8_variance16x8_neon, 8),
+  VarianceParams(3, 4, &aom_highbd_8_variance8x16_neon, 8),
+  VarianceParams(3, 3, &aom_highbd_8_variance8x8_neon, 8),
+  VarianceParams(3, 2, &aom_highbd_8_variance8x4_neon, 8),
+  VarianceParams(2, 3, &aom_highbd_8_variance4x8_neon, 8),
+  VarianceParams(2, 2, &aom_highbd_8_variance4x4_neon, 8),
 #if !CONFIG_REALTIME_ONLY
+  VarianceParams(6, 4, &aom_highbd_12_variance64x16_neon, 12),
+  VarianceParams(4, 6, &aom_highbd_12_variance16x64_neon, 12),
+  VarianceParams(5, 3, &aom_highbd_12_variance32x8_neon, 12),
+  VarianceParams(3, 5, &aom_highbd_12_variance8x32_neon, 12),
+  VarianceParams(4, 2, &aom_highbd_12_variance16x4_neon, 12),
+  VarianceParams(2, 4, &aom_highbd_12_variance4x16_neon, 12),
   VarianceParams(6, 4, &aom_highbd_10_variance64x16_neon, 10),
   VarianceParams(4, 6, &aom_highbd_10_variance16x64_neon, 10),
   VarianceParams(5, 3, &aom_highbd_10_variance32x8_neon, 10),
   VarianceParams(3, 5, &aom_highbd_10_variance8x32_neon, 10),
   VarianceParams(4, 2, &aom_highbd_10_variance16x4_neon, 10),
   VarianceParams(2, 4, &aom_highbd_10_variance4x16_neon, 10),
+  VarianceParams(6, 4, &aom_highbd_8_variance64x16_neon, 8),
+  VarianceParams(4, 6, &aom_highbd_8_variance16x64_neon, 8),
+  VarianceParams(5, 3, &aom_highbd_8_variance32x8_neon, 8),
+  VarianceParams(3, 5, &aom_highbd_8_variance8x32_neon, 8),
+  VarianceParams(4, 2, &aom_highbd_8_variance16x4_neon, 8),
+  VarianceParams(2, 4, &aom_highbd_8_variance4x16_neon, 8),
 #endif
 };
 

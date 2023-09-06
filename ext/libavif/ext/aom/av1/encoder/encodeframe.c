@@ -81,7 +81,7 @@
 //  purposes of activity masking.
 // Eventually this should be replaced by custom no-reference routines,
 //  which will be faster.
-const uint8_t AV1_VAR_OFFS[MAX_SB_SIZE] = {
+static const uint8_t AV1_VAR_OFFS[MAX_SB_SIZE] = {
   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
@@ -93,6 +93,7 @@ const uint8_t AV1_VAR_OFFS[MAX_SB_SIZE] = {
   128, 128, 128, 128, 128, 128, 128, 128
 };
 
+#if CONFIG_AV1_HIGHBITDEPTH
 static const uint16_t AV1_HIGH_VAR_OFFS_8[MAX_SB_SIZE] = {
   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
@@ -145,7 +146,30 @@ static const uint16_t AV1_HIGH_VAR_OFFS_12[MAX_SB_SIZE] = {
   128 * 16, 128 * 16, 128 * 16, 128 * 16, 128 * 16, 128 * 16, 128 * 16,
   128 * 16, 128 * 16
 };
+#endif  // CONFIG_AV1_HIGHBITDEPTH
 /*!\endcond */
+
+// For the given bit depth, returns a constant array used to assist the
+// calculation of source block variance, which will then be used to decide
+// adaptive quantizers.
+static const uint8_t *get_var_offs(int use_hbd, int bd) {
+#if CONFIG_AV1_HIGHBITDEPTH
+  if (use_hbd) {
+    assert(bd == 8 || bd == 10 || bd == 12);
+    const int off_index = (bd - 8) >> 1;
+    static const uint16_t *high_var_offs[3] = { AV1_HIGH_VAR_OFFS_8,
+                                                AV1_HIGH_VAR_OFFS_10,
+                                                AV1_HIGH_VAR_OFFS_12 };
+    return CONVERT_TO_BYTEPTR(high_var_offs[off_index]);
+  }
+#else
+  (void)use_hbd;
+  (void)bd;
+  assert(!use_hbd);
+#endif
+  assert(bd == 8);
+  return AV1_VAR_OFFS;
+}
 
 void av1_init_rtc_counters(MACROBLOCK *const x) {
   av1_init_cyclic_refresh_counters(x);
@@ -167,21 +191,9 @@ unsigned int av1_get_perpixel_variance(const AV1_COMP *cpi,
   const int subsampling_y = xd->plane[plane].subsampling_y;
   const BLOCK_SIZE plane_bsize =
       get_plane_block_size(bsize, subsampling_x, subsampling_y);
-  unsigned int var, sse;
-  if (use_hbd) {
-    const int bd = xd->bd;
-    assert(bd == 8 || bd == 10 || bd == 12);
-    const int off_index = (bd - 8) >> 1;
-    static const uint16_t *high_var_offs[3] = { AV1_HIGH_VAR_OFFS_8,
-                                                AV1_HIGH_VAR_OFFS_10,
-                                                AV1_HIGH_VAR_OFFS_12 };
-    var = cpi->ppi->fn_ptr[plane_bsize].vf(
-        ref->buf, ref->stride, CONVERT_TO_BYTEPTR(high_var_offs[off_index]), 0,
-        &sse);
-  } else {
-    var = cpi->ppi->fn_ptr[plane_bsize].vf(ref->buf, ref->stride, AV1_VAR_OFFS,
-                                           0, &sse);
-  }
+  unsigned int sse;
+  const unsigned int var = cpi->ppi->fn_ptr[plane_bsize].vf(
+      ref->buf, ref->stride, get_var_offs(use_hbd, xd->bd), 0, &sse);
   return ROUND_POWER_OF_TWO(var, num_pels_log2_lookup[plane_bsize]);
 }
 
@@ -247,7 +259,7 @@ static AOM_INLINE void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
     const int sb_row = mi_row >> cm->seq_params->mib_size_log2;
     const int sb_col = mi_col >> cm->seq_params->mib_size_log2;
     const int sb_cols =
-        CEIL_POWER_OF_TWO(cm->mi_params.mi_cols, MAX_MIB_SIZE_LOG2);
+        CEIL_POWER_OF_TWO(cm->mi_params.mi_cols, cm->seq_params->mib_size_log2);
     const int sb_index = sb_row * sb_cols + sb_col;
     current_qindex =
         cpi->ducky_encode_info.frame_info.superblock_encode_qindex[sb_index];
@@ -599,7 +611,7 @@ static INLINE void init_encode_rd_sb(AV1_COMP *cpi, ThreadData *td,
       }
 
       // TODO(jingning): revisit this function.
-      if (cpi->oxcf.algo_cfg.enable_tpl_model && 0) {
+      if (cpi->oxcf.algo_cfg.enable_tpl_model && (0)) {
         adjust_rdmult_tpl_model(cpi, x, mi_row, mi_col);
       }
     }
@@ -778,7 +790,8 @@ static AOM_INLINE void encode_rd_sb(AV1_COMP *cpi, ThreadData *td,
     PC_TREE *const pc_root = av1_alloc_pc_tree_node(sb_size);
     av1_rd_use_partition(cpi, td, tile_data, mi, tp, mi_row, mi_col, sb_size,
                          &dummy_rate, &dummy_dist, 1, pc_root);
-    av1_free_pc_tree_recursive(pc_root, num_planes, 0, 0);
+    av1_free_pc_tree_recursive(pc_root, num_planes, 0, 0,
+                               sf->part_sf.partition_search_type);
 #if CONFIG_COLLECT_COMPONENT_TIMING
     end_timing(cpi, rd_use_partition_time);
 #endif
@@ -793,7 +806,8 @@ static AOM_INLINE void encode_rd_sb(AV1_COMP *cpi, ThreadData *td,
     PC_TREE *const pc_root = av1_alloc_pc_tree_node(sb_size);
     av1_rd_use_partition(cpi, td, tile_data, mi, tp, mi_row, mi_col, sb_size,
                          &dummy_rate, &dummy_dist, 1, pc_root);
-    av1_free_pc_tree_recursive(pc_root, num_planes, 0, 0);
+    av1_free_pc_tree_recursive(pc_root, num_planes, 0, 0,
+                               sf->part_sf.partition_search_type);
   } else {
     SB_FIRST_PASS_STATS *sb_org_stats = NULL;
 
@@ -1132,12 +1146,10 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
     av1_set_cost_upd_freq(cpi, td, tile_info, mi_row, mi_col);
 
     // Reset color coding related parameters
-    x->color_sensitivity_sb[0] = 0;
-    x->color_sensitivity_sb[1] = 0;
-    x->color_sensitivity_sb_g[0] = 0;
-    x->color_sensitivity_sb_g[1] = 0;
-    x->color_sensitivity[0] = 0;
-    x->color_sensitivity[1] = 0;
+    av1_zero(x->color_sensitivity_sb);
+    av1_zero(x->color_sensitivity_sb_g);
+    av1_zero(x->color_sensitivity_sb_alt);
+    av1_zero(x->color_sensitivity);
     x->content_state_sb.source_sad_nonrd = kMedSad;
     x->content_state_sb.source_sad_rd = kMedSad;
     x->content_state_sb.lighting_change = 0;
@@ -1419,9 +1431,11 @@ static AOM_INLINE void encode_tiles(AV1_COMP *cpi) {
       cpi->td.mb.e_mbd.tile_ctx = &this_tile->tctx;
       cpi->td.mb.tile_pb_ctx = &this_tile->tctx;
       av1_init_rtc_counters(&cpi->td.mb);
+      cpi->td.mb.palette_pixels = 0;
       av1_encode_tile(cpi, &cpi->td, tile_row, tile_col);
       if (!frame_is_intra_only(&cpi->common))
         av1_accumulate_rtc_counters(cpi, &cpi->td.mb);
+      cpi->palette_pixel_num += cpi->td.mb.palette_pixels;
       cpi->intrabc_used |= cpi->td.intrabc_used;
       cpi->deltaq_used |= cpi->td.deltaq_used;
     }
@@ -1857,11 +1871,12 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
     // base_qindex
     cm->delta_q_info.delta_q_present_flag &= quant_params->base_qindex > 0;
     cm->delta_q_info.delta_lf_present_flag &= quant_params->base_qindex > 0;
-  } else {
+  } else if (cpi->cyclic_refresh->apply_cyclic_refresh ||
+             cpi->svc.number_temporal_layers == 1) {
     cpi->cyclic_refresh->actual_num_seg1_blocks = 0;
     cpi->cyclic_refresh->actual_num_seg2_blocks = 0;
-    cpi->rc.cnt_zeromv = 0;
   }
+  cpi->rc.cnt_zeromv = 0;
 
   av1_frame_init_quantizer(cpi);
   init_encode_frame_mb_context(cpi);
@@ -1946,7 +1961,8 @@ static AOM_INLINE void encode_frame_internal(AV1_COMP *cpi) {
                            ? av1_alloc_pc_tree_node(cm->seq_params->sb_size)
                            : NULL;
       encode_tiles(cpi);
-      av1_free_pc_tree_recursive(td->rt_pc_root, av1_num_planes(cm), 0, 0);
+      av1_free_pc_tree_recursive(td->rt_pc_root, av1_num_planes(cm), 0, 0,
+                                 cpi->sf.part_sf.partition_search_type);
     }
   }
 
@@ -2215,7 +2231,6 @@ void av1_encode_frame(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
   CurrentFrame *const current_frame = &cm->current_frame;
   FeatureFlags *const features = &cm->features;
-  const int num_planes = av1_num_planes(cm);
   RD_COUNTS *const rdc = &cpi->td.rd_counts;
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   // Indicates whether or not to use a default reduced set for ext-tx
@@ -2244,13 +2259,27 @@ void av1_encode_frame(AV1_COMP *cpi) {
                      cpi->ref_frame_flags);
   av1_setup_frame_sign_bias(cm);
 
+  // If global motion is enabled, then every buffer which is used as either
+  // a source or a ref frame should have an image pyramid allocated.
+  // Check here so that issues can be caught early in debug mode
+#if !defined(NDEBUG) && !CONFIG_REALTIME_ONLY
+  if (cpi->image_pyramid_levels > 0) {
+    assert(cpi->source->y_pyramid);
+    for (int ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
+      const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
+      if (buf != NULL) {
+        assert(buf->buf.y_pyramid);
+      }
+    }
+  }
+#endif  // !defined(NDEBUG) && !CONFIG_REALTIME_ONLY
+
 #if CONFIG_MISMATCH_DEBUG
-  mismatch_reset_frame(num_planes);
-#else
-  (void)num_planes;
+  mismatch_reset_frame(av1_num_planes(cm));
 #endif
 
   rdc->newmv_or_intra_blocks = 0;
+  cpi->palette_pixel_num = 0;
 
   if (cpi->sf.hl_sf.frame_parameter_update ||
       cpi->sf.rt_sf.use_comp_ref_nonrd) {

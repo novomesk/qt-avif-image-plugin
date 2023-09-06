@@ -20,6 +20,9 @@ set(CMAKE_CXX_FLAGS_INIT "-m32")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-m32")
 
 if("${CROSS}" STREQUAL "")
+
+  # Default the cross compiler prefix to one used by Debian and other package
+  # management systems.
   set(CROSS i686-w64-mingw32-)
 endif()
 

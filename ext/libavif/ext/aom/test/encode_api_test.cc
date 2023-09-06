@@ -106,6 +106,30 @@ TEST(EncodeAPI, SetSFrameOnFirstFrame) {
   EXPECT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
 }
 
+TEST(EncodeAPI, MonochromeInProfiles) {
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  ASSERT_EQ(AOM_CODEC_OK, aom_codec_enc_config_default(iface, &cfg, kUsage));
+  cfg.g_w = 128;
+  cfg.g_h = 128;
+  cfg.monochrome = 1;
+  aom_codec_ctx_t enc;
+
+  // Test Profile 0
+  cfg.g_profile = 0;
+  ASSERT_EQ(AOM_CODEC_OK, aom_codec_enc_init(&enc, iface, &cfg, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&enc));
+
+  // Test Profile 1
+  cfg.g_profile = 1;
+  ASSERT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_enc_init(&enc, iface, &cfg, 0));
+
+  // Test Profile 3
+  cfg.g_profile = 2;
+  ASSERT_EQ(AOM_CODEC_OK, aom_codec_enc_init(&enc, iface, &cfg, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&enc));
+}
+
 #if !CONFIG_REALTIME_ONLY
 TEST(EncodeAPI, AllIntraMode) {
   aom_codec_iface_t *iface = aom_codec_av1_cx();

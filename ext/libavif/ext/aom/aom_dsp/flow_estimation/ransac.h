@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <memory.h>
+#include <stdbool.h>
 
 #include "aom_dsp/flow_estimation/flow_estimation.h"
 
@@ -23,14 +24,9 @@
 extern "C" {
 #endif
 
-typedef int (*RansacFunc)(int *matched_points, int npoints,
-                          int *num_inliers_by_motion,
-                          MotionModel *params_by_motion, int num_motions);
-typedef int (*RansacFuncDouble)(double *matched_points, int npoints,
-                                int *num_inliers_by_motion,
-                                MotionModel *params_by_motion, int num_motions);
-RansacFunc av1_get_ransac_type(TransformationType type);
-RansacFuncDouble av1_get_ransac_double_prec_type(TransformationType type);
+bool ransac(const Correspondence *matched_points, int npoints,
+            TransformationType type, MotionModel *motion_models,
+            int num_desired_motions);
 
 #ifdef __cplusplus
 }

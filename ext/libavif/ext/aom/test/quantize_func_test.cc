@@ -768,7 +768,7 @@ INSTANTIATE_TEST_SUITE_P(NEON, FullPrecisionQuantizeTest,
                          ::testing::ValuesIn(kQParamArrayNEON));
 #endif
 
-#if HAVE_SSSE3 && ARCH_X86_64
+#if HAVE_SSSE3 && AOM_ARCH_X86_64
 INSTANTIATE_TEST_SUITE_P(
     SSSE3, FullPrecisionQuantizeTest,
     ::testing::Values(
@@ -779,7 +779,7 @@ INSTANTIATE_TEST_SUITE_P(
         make_tuple(&aom_quantize_b_64x64_c, &aom_quantize_b_64x64_ssse3,
                    static_cast<TX_SIZE>(TX_64X64), TYPE_B, AOM_BITS_8)));
 
-#endif  // HAVE_SSSE3 && ARCH_X86_64
+#endif  // HAVE_SSSE3 && AOM_ARCH_X86_64
 
 #if HAVE_AVX
 INSTANTIATE_TEST_SUITE_P(

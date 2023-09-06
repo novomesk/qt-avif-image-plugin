@@ -783,7 +783,7 @@ void av1_resize_and_extend_frame_neon(const YV12_BUFFER_CONFIG *src,
         const int buffer_height = (4 * dst_y_h + SUBPEL_TAPS - 2 + 7) & ~7;
         uint8_t *const temp_buffer =
             (uint8_t *)malloc(buffer_stride * buffer_height);
-        if (temp_buffer) {
+        if (!temp_buffer) {
           malloc_failed = 1;
           break;
         }

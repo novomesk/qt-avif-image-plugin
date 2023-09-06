@@ -39,3 +39,5 @@ Remove Fast 10, 11 and 12
 Convert tabs to spaces
 Prefix global functions with "aom_"
 Add error checking
+Add output argument to hold the scores of the detected features
+Add assertion and rewrite comparisons to appease the scan-build static analyzer

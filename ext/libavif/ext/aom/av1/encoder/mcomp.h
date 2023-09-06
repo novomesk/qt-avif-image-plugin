@@ -144,7 +144,7 @@ void av1_init_obmc_buffer(OBMCBuffer *obmc_buffer);
 
 void av1_make_default_fullpel_ms_params(
     FULLPEL_MOTION_SEARCH_PARAMS *ms_params, const struct AV1_COMP *cpi,
-    MACROBLOCK *x, BLOCK_SIZE bsize, const MV *ref_mv,
+    MACROBLOCK *x, BLOCK_SIZE bsize, const MV *ref_mv, FULLPEL_MV start_mv,
     const search_site_config search_sites[NUM_DISTINCT_SEARCH_METHODS],
     int fine_search_interval);
 
@@ -176,14 +176,9 @@ void av1_init_motion_compensation_square(search_site_config *cfg, int stride,
 typedef void (*av1_init_search_site_config)(search_site_config *cfg, int stride,
                                             int level);
 
-/*! Array of function pointer used to set the motion search config. */
-static const av1_init_search_site_config
-    av1_init_motion_compensation[NUM_DISTINCT_SEARCH_METHODS] = {
-      av1_init_dsmotion_compensation,     av1_init_motion_compensation_nstep,
-      av1_init_motion_compensation_nstep, av1_init_dsmotion_compensation,
-      av1_init_motion_compensation_hex,   av1_init_motion_compensation_bigdia,
-      av1_init_motion_compensation_square
-    };
+/*! Array of function pointers used to set the motion search config. */
+extern const av1_init_search_site_config
+    av1_init_motion_compensation[NUM_DISTINCT_SEARCH_METHODS];
 
 // Array to inform which all search methods are having
 // same candidates and different in number of search steps.
@@ -344,7 +339,9 @@ extern fractional_mv_step_fp av1_find_best_obmc_sub_pixel_tree_up;
 unsigned int av1_refine_warped_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
                                   const SUBPEL_MOTION_SEARCH_PARAMS *ms_params,
                                   BLOCK_SIZE bsize, const int *pts0,
-                                  const int *pts_inref0, int total_samples);
+                                  const int *pts_inref0, int total_samples,
+                                  WARP_SEARCH_METHOD search_method,
+                                  int num_iterations);
 
 static INLINE void av1_set_fractional_mv(int_mv *fractional_best_mv) {
   for (int z = 0; z < 3; z++) {
@@ -356,14 +353,13 @@ static INLINE void av1_set_subpel_mv_search_range(SubpelMvLimits *subpel_limits,
                                                   const FullMvLimits *mv_limits,
                                                   const MV *ref_mv) {
   const int max_mv = GET_MV_SUBPEL(MAX_FULL_PEL_VAL);
-  const int minc =
-      AOMMAX(GET_MV_SUBPEL(mv_limits->col_min), ref_mv->col - max_mv);
-  const int maxc =
-      AOMMIN(GET_MV_SUBPEL(mv_limits->col_max), ref_mv->col + max_mv);
-  const int minr =
-      AOMMAX(GET_MV_SUBPEL(mv_limits->row_min), ref_mv->row - max_mv);
-  const int maxr =
-      AOMMIN(GET_MV_SUBPEL(mv_limits->row_max), ref_mv->row + max_mv);
+  int minc = AOMMAX(GET_MV_SUBPEL(mv_limits->col_min), ref_mv->col - max_mv);
+  int maxc = AOMMIN(GET_MV_SUBPEL(mv_limits->col_max), ref_mv->col + max_mv);
+  int minr = AOMMAX(GET_MV_SUBPEL(mv_limits->row_min), ref_mv->row - max_mv);
+  int maxr = AOMMIN(GET_MV_SUBPEL(mv_limits->row_max), ref_mv->row + max_mv);
+
+  maxc = AOMMAX(minc, maxc);
+  maxr = AOMMAX(minr, maxr);
 
   subpel_limits->col_min = AOMMAX(MV_LOW + 1, minc);
   subpel_limits->col_max = AOMMIN(MV_UPP - 1, maxc);

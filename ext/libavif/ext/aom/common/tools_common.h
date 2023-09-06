@@ -157,7 +157,7 @@ AOM_NO_RETURN void usage_exit(void);
 // The AOM library can support different encoders / decoders. These
 // functions provide different ways to lookup / iterate through them.
 // The return result may be NULL to indicate no codec was found.
-int get_aom_encoder_count();
+int get_aom_encoder_count(void);
 aom_codec_iface_t *get_aom_encoder_by_index(int i);
 aom_codec_iface_t *get_aom_encoder_by_short_name(const char *name);
 // If the interface is unknown, returns NULL.
@@ -165,13 +165,15 @@ const char *get_short_name_by_aom_encoder(aom_codec_iface_t *encoder);
 // If the interface is unknown, returns 0.
 uint32_t get_fourcc_by_aom_encoder(aom_codec_iface_t *iface);
 
-int get_aom_decoder_count();
+int get_aom_decoder_count(void);
 aom_codec_iface_t *get_aom_decoder_by_index(int i);
 aom_codec_iface_t *get_aom_decoder_by_short_name(const char *name);
 aom_codec_iface_t *get_aom_decoder_by_fourcc(uint32_t fourcc);
 const char *get_short_name_by_aom_decoder(aom_codec_iface_t *decoder);
 // If the interface is unknown, returns 0.
 uint32_t get_fourcc_by_aom_decoder(aom_codec_iface_t *iface);
+
+const char *image_format_to_string(aom_img_fmt_t fmt);
 
 int read_yuv_frame(struct AvxInputContext *input_ctx, aom_image_t *yuv_frame);
 

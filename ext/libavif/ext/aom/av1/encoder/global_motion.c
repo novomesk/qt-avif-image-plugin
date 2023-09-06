@@ -37,7 +37,6 @@ int av1_is_enough_erroradvantage(double best_erroradvantage, int params_cost) {
 
 static void convert_to_params(const double *params, int32_t *model) {
   int i;
-  int alpha_present = 0;
   model[0] = (int32_t)floor(params[0] * (1 << GM_TRANS_PREC_BITS) + 0.5);
   model[1] = (int32_t)floor(params[1] * (1 << GM_TRANS_PREC_BITS) + 0.5);
   model[0] = (int32_t)clamp(model[0], GM_TRANS_MIN, GM_TRANS_MAX) *
@@ -50,21 +49,7 @@ static void convert_to_params(const double *params, int32_t *model) {
     model[i] = (int32_t)floor(params[i] * (1 << GM_ALPHA_PREC_BITS) + 0.5);
     model[i] =
         (int32_t)clamp(model[i] - diag_value, GM_ALPHA_MIN, GM_ALPHA_MAX);
-    alpha_present |= (model[i] != 0);
     model[i] = (model[i] + diag_value) * GM_ALPHA_DECODE_FACTOR;
-  }
-  for (; i < 8; ++i) {
-    model[i] = (int32_t)floor(params[i] * (1 << GM_ROW3HOMO_PREC_BITS) + 0.5);
-    model[i] = (int32_t)clamp(model[i], GM_ROW3HOMO_MIN, GM_ROW3HOMO_MAX) *
-               GM_ROW3HOMO_DECODE_FACTOR;
-    alpha_present |= (model[i] != 0);
-  }
-
-  if (!alpha_present) {
-    if (abs(model[0]) < MIN_TRANS_THRESH && abs(model[1]) < MIN_TRANS_THRESH) {
-      model[0] = 0;
-      model[1] = 0;
-    }
   }
 }
 
@@ -80,11 +65,10 @@ void av1_convert_model_to_params(const double *params,
 // zero-centering.
 static int32_t add_param_offset(int param_index, int32_t param_value,
                                 int32_t offset) {
-  const int scale_vals[3] = { GM_TRANS_PREC_DIFF, GM_ALPHA_PREC_DIFF,
-                              GM_ROW3HOMO_PREC_DIFF };
-  const int clamp_vals[3] = { GM_TRANS_MAX, GM_ALPHA_MAX, GM_ROW3HOMO_MAX };
-  // type of param: 0 - translation, 1 - affine, 2 - homography
-  const int param_type = (param_index < 2 ? 0 : (param_index < 6 ? 1 : 2));
+  const int scale_vals[2] = { GM_TRANS_PREC_DIFF, GM_ALPHA_PREC_DIFF };
+  const int clamp_vals[2] = { GM_TRANS_MAX, GM_ALPHA_MAX };
+  // type of param: 0 - translation, 1 - affine
+  const int param_type = (param_index < 2 ? 0 : 1);
   const int is_one_centered = (param_index == 2 || param_index == 5);
 
   // Make parameter zero-centered and offset the shift that was done to make
@@ -206,8 +190,9 @@ int64_t av1_warp_error(WarpedMotionParams *wm, int use_hbd, int bd,
                        int p_height, int p_stride, int subsampling_x,
                        int subsampling_y, int64_t best_error,
                        uint8_t *segment_map, int segment_map_stride) {
-  if (wm->wmtype <= AFFINE)
-    if (!av1_get_shear_params(wm)) return INT64_MAX;
+  force_wmtype(wm, wm->wmtype);
+  assert(wm->wmtype <= AFFINE);
+  if (!av1_get_shear_params(wm)) return INT64_MAX;
 #if CONFIG_AV1_HIGHBITDEPTH
   if (use_hbd)
     return highbd_warp_error(wm, CONVERT_TO_SHORTPTR(ref), width, height,
@@ -224,8 +209,8 @@ int64_t av1_warp_error(WarpedMotionParams *wm, int use_hbd, int bd,
 }
 
 // Factors used to calculate the thresholds for av1_warp_error
-static double thresh_factors[GM_REFINEMENT_COUNT] = { 1.25, 1.20, 1.15, 1.10,
-                                                      1.05 };
+static double thresh_factors[GM_MAX_REFINEMENT_STEPS] = { 1.25, 1.20, 1.15,
+                                                          1.10, 1.05 };
 
 static INLINE int64_t calc_approx_erroradv_threshold(
     double scaling_factor, int64_t erroradv_threshold) {
@@ -258,6 +243,12 @@ int64_t av1_refine_integerized_param(
                      dst + border * d_stride + border, border, border,
                      d_width - 2 * border, d_height - 2 * border, d_stride, 0,
                      0, best_frame_error, segment_map, segment_map_stride);
+
+  if (n_refinements == 0) {
+    wm->wmtype = get_wmtype(wm);
+    return best_error;
+  }
+
   best_error = AOMMIN(best_error, best_frame_error);
   step = 1 << (n_refinements - 1);
   for (i = 0; i < n_refinements; i++, step >>= 1) {
@@ -324,7 +315,7 @@ int64_t av1_refine_integerized_param(
 }
 
 #define FEAT_COUNT_TR 3
-#define SEG_COUNT_TR 0.40
+#define SEG_COUNT_TR 48
 void av1_compute_feature_segmentation_map(uint8_t *segment_map, int width,
                                           int height, int *inliers,
                                           int num_inliers) {
@@ -349,6 +340,6 @@ void av1_compute_feature_segmentation_map(uint8_t *segment_map, int width,
 
   // If this motion does not make up a large enough portion of the frame,
   // use the unsegmented version of the error metric
-  if (seg_count < (width * height * SEG_COUNT_TR))
+  if (seg_count < SEG_COUNT_TR)
     memset(segment_map, 1, width * height * sizeof(*segment_map));
 }

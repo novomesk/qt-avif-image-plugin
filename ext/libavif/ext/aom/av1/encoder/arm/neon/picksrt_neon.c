@@ -141,10 +141,10 @@ int64_t av1_lowbd_pixel_proj_error_neon(
     }
     sum64 = vpaddlq_u32(err0);
   }
-#if defined(__aarch64__)
+#if AOM_ARCH_AARCH64
   err += vaddvq_u64(sum64);
 #else
   err += vget_lane_u64(vadd_u64(vget_low_u64(sum64), vget_high_u64(sum64)), 0);
-#endif  // __aarch64__
+#endif  // AOM_ARCH_AARCH64
   return err;
 }

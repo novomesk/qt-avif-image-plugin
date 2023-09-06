@@ -44,9 +44,9 @@ static int64_t encoder_sse(const uint8_t *a, int a_stride, const uint8_t *b,
 }
 
 #if CONFIG_AV1_HIGHBITDEPTH
-static int64_t encoder_highbd_8_sse(const uint8_t *a8, int a_stride,
-                                    const uint8_t *b8, int b_stride, int w,
-                                    int h) {
+static int64_t encoder_highbd_sse(const uint8_t *a8, int a_stride,
+                                  const uint8_t *b8, int b_stride, int w,
+                                  int h) {
   const uint16_t *a = CONVERT_TO_SHORTPTR(a8);
   const uint16_t *b = CONVERT_TO_SHORTPTR(b8);
   int64_t sse = 0;
@@ -84,10 +84,8 @@ static int64_t get_sse(const uint8_t *a, int a_stride, const uint8_t *b,
   for (y = 0; y < height / 16; ++y) {
     const uint8_t *pa = a;
     const uint8_t *pb = b;
-    unsigned int sse;
     for (x = 0; x < width / 16; ++x) {
-      aom_mse16x16(pa, a_stride, pb, b_stride, &sse);
-      total_sse += sse;
+      total_sse += aom_sse(pa, a_stride, pb, b_stride, 16, 16);
 
       pa += 16;
       pb += 16;
@@ -128,22 +126,20 @@ static int64_t highbd_get_sse(const uint8_t *a, int a_stride, const uint8_t *b,
   const int dh = height % 16;
 
   if (dw > 0) {
-    total_sse += encoder_highbd_8_sse(&a[width - dw], a_stride, &b[width - dw],
-                                      b_stride, dw, height);
+    total_sse += encoder_highbd_sse(&a[width - dw], a_stride, &b[width - dw],
+                                    b_stride, dw, height);
   }
   if (dh > 0) {
-    total_sse += encoder_highbd_8_sse(&a[(height - dh) * a_stride], a_stride,
-                                      &b[(height - dh) * b_stride], b_stride,
-                                      width - dw, dh);
+    total_sse += encoder_highbd_sse(&a[(height - dh) * a_stride], a_stride,
+                                    &b[(height - dh) * b_stride], b_stride,
+                                    width - dw, dh);
   }
 
   for (y = 0; y < height / 16; ++y) {
     const uint8_t *pa = a;
     const uint8_t *pb = b;
-    unsigned int sse;
     for (x = 0; x < width / 16; ++x) {
-      aom_highbd_8_mse16x16(pa, a_stride, pb, b_stride, &sse);
-      total_sse += sse;
+      total_sse += aom_highbd_sse(pa, a_stride, pb, b_stride, 16, 16);
       pa += 16;
       pb += 16;
     }

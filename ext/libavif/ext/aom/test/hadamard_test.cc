@@ -242,6 +242,12 @@ class HadamardTestBase
 
   virtual void SetUp() { rnd_.Reset(ACMRandom::DeterministicSeed()); }
 
+  // The Rand() function generates values in the range [-((1 << BitDepth) - 1),
+  // (1 << BitDepth) - 1]. This is because the input to the Hadamard transform
+  // is the residual pixel, which is defined as 'source pixel - predicted
+  // pixel'. Source pixel and predicted pixel take values in the range
+  // [0, (1 << BitDepth) - 1] and thus the residual pixel ranges from
+  // -((1 << BitDepth) - 1) to ((1 << BitDepth) - 1).
   virtual int16_t Rand() = 0;
 
   void CompareReferenceRandom() {
@@ -259,7 +265,35 @@ class HadamardTestBase
     for (int i = 0; i < block_size_; ++i) a[i] = Rand();
     ReferenceHadamard(a, bw_, b_ref, bw_, bh_, shift_);
     API_REGISTER_STATE_CHECK(h_func_(a, bw_, b));
+
+    // The order of the output is not important. Sort before checking.
+    std::sort(b, b + block_size_);
+    std::sort(b_ref, b_ref + block_size_);
     EXPECT_EQ(memcmp(b, b_ref, sizeof(b)), 0);
+  }
+
+  void CompareReferenceExtreme() {
+    const int kMaxBlockSize = 32 * 32;
+    const int block_size = bw_ * bh_;
+    const int kBitDepth = 8;
+    DECLARE_ALIGNED(16, int16_t, a[kMaxBlockSize]);
+    DECLARE_ALIGNED(16, OutputType, b[kMaxBlockSize]);
+    memset(b, 0, sizeof(b));
+
+    OutputType b_ref[kMaxBlockSize];
+    memset(b_ref, 0, sizeof(b_ref));
+    for (int i = 0; i < 2; ++i) {
+      const int sign = (i == 0) ? 1 : -1;
+      for (int j = 0; j < block_size; ++j) a[j] = sign * ((1 << kBitDepth) - 1);
+
+      ReferenceHadamard(a, bw_, b_ref, bw_, bh_, shift_);
+      API_REGISTER_STATE_CHECK(h_func_(a, bw_, b));
+
+      // The order of the output is not important. Sort before checking.
+      std::sort(b, b + block_size);
+      std::sort(b_ref, b_ref + block_size);
+      EXPECT_EQ(memcmp(b, b_ref, sizeof(b)), 0);
+    }
   }
 
   void VaryStride() {
@@ -278,6 +312,10 @@ class HadamardTestBase
 
       ReferenceHadamard(a, i, b_ref, bw_, bh_, shift_);
       API_REGISTER_STATE_CHECK(h_func_(a, i, b));
+
+      // The order of the output is not important. Sort before checking.
+      std::sort(b, b + block_size_);
+      std::sort(b_ref, b_ref + block_size_);
       EXPECT_EQ(0, memcmp(b, b_ref, sizeof(b)));
     }
   }
@@ -312,10 +350,19 @@ class HadamardTestBase
 class HadamardLowbdTest : public HadamardTestBase<tran_low_t, HadamardFunc> {
  public:
   HadamardLowbdTest() : HadamardTestBase(GetParam(), /*do_shift=*/true) {}
-  virtual int16_t Rand() { return rnd_.Rand9Signed(); }
+  // Use values between -255 (0xFF01) and 255 (0x00FF)
+  virtual int16_t Rand() {
+    int16_t src = rnd_.Rand8();
+    int16_t pred = rnd_.Rand8();
+    return src - pred;
+  }
 };
 
 TEST_P(HadamardLowbdTest, CompareReferenceRandom) { CompareReferenceRandom(); }
+
+TEST_P(HadamardLowbdTest, CompareReferenceExtreme) {
+  CompareReferenceExtreme();
+}
 
 TEST_P(HadamardLowbdTest, VaryStride) { VaryStride(); }
 
@@ -349,15 +396,62 @@ INSTANTIATE_TEST_SUITE_P(
 #if HAVE_NEON
 INSTANTIATE_TEST_SUITE_P(
     NEON, HadamardLowbdTest,
-    ::testing::Values(HadamardFuncWithSize(&aom_hadamard_8x8_neon, 8, 8),
-                      HadamardFuncWithSize(&aom_hadamard_16x16_neon, 16, 16)));
+    ::testing::Values(HadamardFuncWithSize(&aom_hadamard_4x4_neon, 4, 4),
+                      HadamardFuncWithSize(&aom_hadamard_8x8_neon, 8, 8),
+                      HadamardFuncWithSize(&aom_hadamard_16x16_neon, 16, 16),
+                      HadamardFuncWithSize(&aom_hadamard_32x32_neon, 32, 32)));
 #endif  // HAVE_NEON
+
+#if CONFIG_AV1_HIGHBITDEPTH
+class HadamardHighbdTest : public HadamardTestBase<tran_low_t, HadamardFunc> {
+ protected:
+  HadamardHighbdTest() : HadamardTestBase(GetParam(), /*do_shift=*/true) {}
+  // Use values between -4095 (0xF001) and 4095 (0x0FFF)
+  virtual int16_t Rand() {
+    int16_t src = rnd_.Rand12();
+    int16_t pred = rnd_.Rand12();
+    return src - pred;
+  }
+};
+
+TEST_P(HadamardHighbdTest, CompareReferenceRandom) { CompareReferenceRandom(); }
+
+TEST_P(HadamardHighbdTest, VaryStride) { VaryStride(); }
+
+TEST_P(HadamardHighbdTest, DISABLED_Speed) {
+  SpeedTest(10);
+  SpeedTest(10000);
+  SpeedTest(10000000);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    C, HadamardHighbdTest,
+    ::testing::Values(
+        HadamardFuncWithSize(&aom_highbd_hadamard_8x8_c, 8, 8),
+        HadamardFuncWithSize(&aom_highbd_hadamard_16x16_c, 16, 16),
+        HadamardFuncWithSize(&aom_highbd_hadamard_32x32_c, 32, 32)));
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, HadamardHighbdTest,
+    ::testing::Values(
+        HadamardFuncWithSize(&aom_highbd_hadamard_8x8_neon, 8, 8),
+        HadamardFuncWithSize(&aom_highbd_hadamard_16x16_neon, 16, 16),
+        HadamardFuncWithSize(&aom_highbd_hadamard_32x32_neon, 32, 32)));
+#endif  // HAVE_NEON
+
+#endif  // CONFIG_AV1_HIGHBITDEPTH
 
 // Tests for low precision
 class HadamardLowbdLPTest : public HadamardTestBase<int16_t, HadamardLPFunc> {
  public:
   HadamardLowbdLPTest() : HadamardTestBase(GetParam(), /*do_shift=*/false) {}
-  virtual int16_t Rand() { return rnd_.Rand9Signed(); }
+  // Use values between -255 (0xFF01) and 255 (0x00FF)
+  virtual int16_t Rand() {
+    int16_t src = rnd_.Rand8();
+    int16_t pred = rnd_.Rand8();
+    return src - pred;
+  }
 };
 
 TEST_P(HadamardLowbdLPTest, CompareReferenceRandom) {
@@ -402,7 +496,12 @@ class HadamardLowbdLP8x8DualTest
  public:
   HadamardLowbdLP8x8DualTest()
       : HadamardTestBase(GetParam(), /*do_shift=*/false) {}
-  virtual int16_t Rand() { return rnd_.Rand9Signed(); }
+  // Use values between -255 (0xFF01) and 255 (0x00FF)
+  virtual int16_t Rand() {
+    int16_t src = rnd_.Rand8();
+    int16_t pred = rnd_.Rand8();
+    return src - pred;
+  }
 };
 
 TEST_P(HadamardLowbdLP8x8DualTest, CompareReferenceRandom) {

@@ -571,7 +571,6 @@ int aom_flat_block_finder_run(const aom_flat_block_finder_t *block_finder,
   const int num_blocks_w = (w + block_size - 1) / block_size;
   const int num_blocks_h = (h + block_size - 1) / block_size;
   int num_flat = 0;
-  int bx = 0, by = 0;
   double *plane = (double *)aom_malloc(n * sizeof(*plane));
   double *block = (double *)aom_malloc(n * sizeof(*block));
   index_and_score_t *scores = (index_and_score_t *)aom_malloc(
@@ -587,19 +586,18 @@ int aom_flat_block_finder_run(const aom_flat_block_finder_t *block_finder,
 #ifdef NOISE_MODEL_LOG_SCORE
   fprintf(stderr, "score = [");
 #endif
-  for (by = 0; by < num_blocks_h; ++by) {
-    for (bx = 0; bx < num_blocks_w; ++bx) {
+  for (int by = 0; by < num_blocks_h; ++by) {
+    for (int bx = 0; bx < num_blocks_w; ++bx) {
       // Compute gradient covariance matrix.
-      double Gxx = 0, Gxy = 0, Gyy = 0;
-      double var = 0;
-      double mean = 0;
-      int xi, yi;
       aom_flat_block_finder_extract_block(block_finder, data, w, h, stride,
                                           bx * block_size, by * block_size,
                                           plane, block);
+      double Gxx = 0, Gxy = 0, Gyy = 0;
+      double mean = 0;
+      double var = 0;
 
-      for (yi = 1; yi < block_size - 1; ++yi) {
-        for (xi = 1; xi < block_size - 1; ++xi) {
+      for (int yi = 1; yi < block_size - 1; ++yi) {
+        for (int xi = 1; xi < block_size - 1; ++xi) {
           const double gx = (block[yi * block_size + xi + 1] -
                              block[yi * block_size + xi - 1]) /
                             2;
@@ -1623,6 +1621,8 @@ static int denoise_and_model_realloc_if_necessary(
   return 1;
 }
 
+// TODO(aomedia:3151): Handle a monochrome image (sd->u_buffer and sd->v_buffer
+// are null pointers) correctly.
 int aom_denoise_and_model_run(struct aom_denoise_and_model_t *ctx,
                               YV12_BUFFER_CONFIG *sd,
                               aom_film_grain_t *film_grain, int apply_denoise) {
@@ -1680,10 +1680,12 @@ int aom_denoise_and_model_run(struct aom_denoise_and_model_t *ctx,
     if (apply_denoise) {
       memcpy(raw_data[0], ctx->denoised[0],
              (strides[0] * sd->y_height) << use_highbd);
-      memcpy(raw_data[1], ctx->denoised[1],
-             (strides[1] * sd->uv_height) << use_highbd);
-      memcpy(raw_data[2], ctx->denoised[2],
-             (strides[2] * sd->uv_height) << use_highbd);
+      if (!sd->monochrome) {
+        memcpy(raw_data[1], ctx->denoised[1],
+               (strides[1] * sd->uv_height) << use_highbd);
+        memcpy(raw_data[2], ctx->denoised[2],
+               (strides[2] * sd->uv_height) << use_highbd);
+      }
     }
   }
   return 1;

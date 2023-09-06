@@ -299,8 +299,13 @@ class LowBDConvolveHorizRSTest
 TEST_P(LowBDConvolveHorizRSTest, Correctness) { CorrectnessTest(); }
 TEST_P(LowBDConvolveHorizRSTest, DISABLED_Speed) { SpeedTest(); }
 
+INSTANTIATE_TEST_SUITE_P(C, LowBDConvolveHorizRSTest,
+                         ::testing::Values(av1_convolve_horiz_rs_c));
+
+#if HAVE_SSE4_1
 INSTANTIATE_TEST_SUITE_P(SSE4_1, LowBDConvolveHorizRSTest,
                          ::testing::Values(av1_convolve_horiz_rs_sse4_1));
+#endif
 
 #if CONFIG_AV1_HIGHBITDEPTH
 typedef void (*HighBDConvolveHorizRsFunc)(const uint16_t *src, int src_stride,
@@ -358,9 +363,24 @@ TEST_P(HighBDConvolveHorizRSTest, Correctness) { CorrectnessTest(); }
 TEST_P(HighBDConvolveHorizRSTest, DISABLED_Speed) { SpeedTest(); }
 
 INSTANTIATE_TEST_SUITE_P(
+    C, HighBDConvolveHorizRSTest,
+    ::testing::Combine(::testing::Values(av1_highbd_convolve_horiz_rs_c),
+                       ::testing::ValuesIn(kBDs)));
+
+#if HAVE_SSE4_1
+INSTANTIATE_TEST_SUITE_P(
     SSE4_1, HighBDConvolveHorizRSTest,
     ::testing::Combine(::testing::Values(av1_highbd_convolve_horiz_rs_sse4_1),
                        ::testing::ValuesIn(kBDs)));
+#endif  // HAVE_SSE4_1
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(
+    NEON, HighBDConvolveHorizRSTest,
+    ::testing::Combine(::testing::Values(av1_highbd_convolve_horiz_rs_neon),
+                       ::testing::ValuesIn(kBDs)));
+#endif  // HAVE_NEON
+
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
 }  // namespace

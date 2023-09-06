@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "aom_mem/aom_mem.h"
 #include "config/aom_config.h"
 #include "config/aom_scale_rtcd.h"
 
@@ -513,12 +514,12 @@ static void accumulate_this_frame_stats(const FIRSTPASS_STATS *stats,
   gf_stats->gf_group_inactive_zone_rows += stats->inactive_zone_rows;
 }
 
-void av1_accumulate_next_frame_stats(const FIRSTPASS_STATS *stats,
-                                     const int flash_detected,
-                                     const int frames_since_key,
-                                     const int cur_idx,
-                                     GF_GROUP_STATS *gf_stats, int f_w,
-                                     int f_h) {
+static void accumulate_next_frame_stats(const FIRSTPASS_STATS *stats,
+                                        const int flash_detected,
+                                        const int frames_since_key,
+                                        const int cur_idx,
+                                        GF_GROUP_STATS *gf_stats, int f_w,
+                                        int f_h) {
   accumulate_frame_motion_stats(stats, gf_stats, f_w, f_h);
   // sum up the metric values of current gf group
   gf_stats->avg_sr_coded_error += stats->sr_coded_error;
@@ -1034,9 +1035,9 @@ static INLINE int detect_gf_cut(AV1_COMP *cpi, int frame_index, int cur_start,
   return 0;
 }
 
-static int is_shorter_gf_interval_better(AV1_COMP *cpi,
-                                         EncodeFrameParams *frame_params) {
-  RATE_CONTROL *const rc = &cpi->rc;
+static int is_shorter_gf_interval_better(
+    AV1_COMP *cpi, const EncodeFrameParams *frame_params) {
+  const RATE_CONTROL *const rc = &cpi->rc;
   PRIMARY_RATE_CONTROL *const p_rc = &cpi->ppi->p_rc;
   int gop_length_decision_method = cpi->sf.tpl_sf.gop_length_decision_method;
   int shorten_gf_interval;
@@ -1938,9 +1939,8 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
       flash_detected = detect_flash(twopass, &cpi->twopass_frame, 0);
       // TODO(bohanli): remove redundant accumulations here, or unify
       // this and the ones in define_gf_group
-      av1_accumulate_next_frame_stats(&next_frame, flash_detected,
-                                      rc->frames_since_key, i, &gf_stats, f_w,
-                                      f_h);
+      accumulate_next_frame_stats(&next_frame, flash_detected,
+                                  rc->frames_since_key, i, &gf_stats, f_w, f_h);
 
       cut_here = detect_gf_cut(cpi, i, cur_start, flash_detected,
                                active_max_gf_interval, active_min_gf_interval,
@@ -2044,8 +2044,9 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
                 temp_accu_coeff *= stats[n].cor_coeff;
                 this_score +=
                     temp_accu_coeff *
-                    (1 - stats[n].noise_var /
-                             AOMMAX(regions[this_reg].avg_intra_err, 0.001));
+                    sqrt(AOMMAX(0.5,
+                                1 - stats[n].noise_var /
+                                        AOMMAX(stats[n].intra_error, 0.001)));
                 count_f++;
               }
               // preceding frames
@@ -2055,8 +2056,9 @@ static void calculate_gf_length(AV1_COMP *cpi, int max_gop_length,
                 temp_accu_coeff *= stats[n].cor_coeff;
                 this_score +=
                     temp_accu_coeff *
-                    (1 - stats[n].noise_var /
-                             AOMMAX(regions[this_reg].avg_intra_err, 0.001));
+                    sqrt(AOMMAX(0.5,
+                                1 - stats[n].noise_var /
+                                        AOMMAX(stats[n].intra_error, 0.001)));
               }
 
               if (this_score > best_score) {
@@ -2276,9 +2278,8 @@ static void accumulate_gop_stats(AV1_COMP *cpi, int is_intra_only, int f_w,
     flash_detected = detect_flash(twopass, &cpi->twopass_frame, 0);
 
     // accumulate stats for next frame
-    av1_accumulate_next_frame_stats(next_frame, flash_detected,
-                                    rc->frames_since_key, i, gf_stats, f_w,
-                                    f_h);
+    accumulate_next_frame_stats(next_frame, flash_detected,
+                                rc->frames_since_key, i, gf_stats, f_w, f_h);
 
     ++i;
   }
@@ -3410,13 +3411,13 @@ static INLINE void set_twopass_params_based_on_fp_stats(
   TWO_PASS_FRAME *twopass_frame = &cpi->twopass_frame;
   // The multiplication by 256 reverses a scaling factor of (>> 8)
   // applied when combining MB error values for the frame.
-  twopass_frame->mb_av_energy = log((this_frame_ptr->intra_error) + 1.0);
+  twopass_frame->mb_av_energy = log1p(this_frame_ptr->intra_error);
 
   const FIRSTPASS_STATS *const total_stats =
       cpi->ppi->twopass.stats_buf_ctx->total_stats;
   if (is_fp_wavelet_energy_invalid(total_stats) == 0) {
     twopass_frame->frame_avg_haar_energy =
-        log((this_frame_ptr->frame_avg_wavelet_energy) + 1.0);
+        log1p(this_frame_ptr->frame_avg_wavelet_energy);
   }
 
   // Set the frame content type flag.
@@ -3510,6 +3511,39 @@ void av1_mark_flashes(FIRSTPASS_STATS *first_stats,
   }
 }
 
+// Smooth-out the noise variance so it is more stable
+// TODO(bohanli): Use a better low-pass filter than averaging
+static void smooth_filter_noise(FIRSTPASS_STATS *first_stats,
+                                FIRSTPASS_STATS *last_stats) {
+  int len = (int)(last_stats - first_stats);
+  double *smooth_noise = aom_malloc(len * sizeof(*smooth_noise));
+  if (!smooth_noise) return;
+
+  for (int i = 0; i < len; i++) {
+    double total_noise = 0;
+    double total_wt = 0;
+    for (int j = -HALF_FILT_LEN; j <= HALF_FILT_LEN; j++) {
+      int idx = AOMMIN(AOMMAX(i + j, 0), len - 1);
+      if (first_stats[idx].is_flash) continue;
+
+      total_noise += first_stats[idx].noise_var;
+      total_wt += 1.0;
+    }
+    if (total_wt > 0.01) {
+      total_noise /= total_wt;
+    } else {
+      total_noise = first_stats[i].noise_var;
+    }
+    smooth_noise[i] = total_noise;
+  }
+
+  for (int i = 0; i < len; i++) {
+    first_stats[i].noise_var = smooth_noise[i];
+  }
+
+  aom_free(smooth_noise);
+}
+
 // Estimate the noise variance of each frame from the first pass stats
 void av1_estimate_noise(FIRSTPASS_STATS *first_stats,
                         FIRSTPASS_STATS *last_stats) {
@@ -3597,6 +3631,8 @@ void av1_estimate_noise(FIRSTPASS_STATS *first_stats,
        this_stats++) {
     this_stats->noise_var = (first_stats + 2)->noise_var;
   }
+
+  smooth_filter_noise(first_stats, last_stats);
 }
 
 // Estimate correlation coefficient of each frame with its previous frame.
@@ -3638,6 +3674,10 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
     frame_params->show_frame =
         !(gf_group->update_type[cpi->gf_frame_index] == ARF_UPDATE ||
           gf_group->update_type[cpi->gf_frame_index] == INTNL_ARF_UPDATE);
+    if (cpi->gf_frame_index == 0) {
+      av1_tf_info_reset(&cpi->ppi->tf_info);
+      av1_tf_info_filtering(&cpi->ppi->tf_info, cpi, gf_group);
+    }
     return;
   }
 
@@ -3678,17 +3718,6 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
 
   if (oxcf->rc_cfg.mode == AOM_Q)
     rc->active_worst_quality = oxcf->rc_cfg.cq_level;
-  FIRSTPASS_STATS this_frame;
-  av1_zero(this_frame);
-  // call above fn
-  if (is_stat_consumption_stage(cpi)) {
-    if (cpi->gf_frame_index < gf_group->size || rc->frames_to_key == 0) {
-      process_first_pass_stats(cpi, &this_frame);
-      update_total_stats = 1;
-    }
-  } else {
-    rc->active_worst_quality = oxcf->rc_cfg.cq_level;
-  }
 
   if (cpi->gf_frame_index == gf_group->size) {
     if (cpi->ppi->lap_enabled && cpi->ppi->p_rc.enable_scenecut_detection) {
@@ -3699,6 +3728,18 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
       if (frames_to_key != -1)
         rc->frames_to_key = AOMMIN(rc->frames_to_key, frames_to_key);
     }
+  }
+
+  FIRSTPASS_STATS this_frame;
+  av1_zero(this_frame);
+  // call above fn
+  if (is_stat_consumption_stage(cpi)) {
+    if (cpi->gf_frame_index < gf_group->size || rc->frames_to_key == 0) {
+      process_first_pass_stats(cpi, &this_frame);
+      update_total_stats = 1;
+    }
+  } else {
+    rc->active_worst_quality = oxcf->rc_cfg.cq_level;
   }
 
   // Keyframe and section processing.
@@ -4160,33 +4201,50 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
 
   // If the rate control is drifting consider adjustment to min or maxq.
   if ((rc_cfg->mode != AOM_Q) && !cpi->rc.is_src_frame_alt_ref) {
-    int maxq_adj_limit;
     int minq_adj_limit;
-    maxq_adj_limit = rc->worst_quality - rc->active_worst_quality;
+    int maxq_adj_limit;
     minq_adj_limit =
         (rc_cfg->mode == AOM_CQ ? MINQ_ADJ_LIMIT_CQ : MINQ_ADJ_LIMIT);
-    // Undershoot.
-    if (p_rc->rate_error_estimate > rc_cfg->under_shoot_pct) {
-      --twopass->extend_maxq;
-      if (p_rc->rolling_target_bits >= p_rc->rolling_actual_bits)
-        ++twopass->extend_minq;
-      // Overshoot.
-    } else if (p_rc->rate_error_estimate < -rc_cfg->over_shoot_pct) {
-      --twopass->extend_minq;
-      if (p_rc->rolling_target_bits < p_rc->rolling_actual_bits)
-        ++twopass->extend_maxq;
+    maxq_adj_limit = rc->worst_quality - rc->active_worst_quality;
+
+    // Undershoot
+    if ((rc_cfg->under_shoot_pct < 100) &&
+        (p_rc->rolling_actual_bits < p_rc->rolling_target_bits)) {
+      int pct_error =
+          ((p_rc->rolling_target_bits - p_rc->rolling_actual_bits) * 100) /
+          p_rc->rolling_target_bits;
+
+      if ((pct_error >= rc_cfg->under_shoot_pct) &&
+          (p_rc->rate_error_estimate > 0)) {
+        twopass->extend_minq += 1;
+      }
+      twopass->extend_maxq -= 1;
+      // Overshoot
+    } else if ((rc_cfg->over_shoot_pct < 100) &&
+               (p_rc->rolling_actual_bits > p_rc->rolling_target_bits)) {
+      int pct_error =
+          ((p_rc->rolling_actual_bits - p_rc->rolling_target_bits) * 100) /
+          p_rc->rolling_target_bits;
+
+      pct_error = clamp(pct_error, 0, 100);
+      if ((pct_error >= rc_cfg->over_shoot_pct) &&
+          (p_rc->rate_error_estimate < 0)) {
+        twopass->extend_maxq += 1;
+      }
+      twopass->extend_minq -= 1;
     } else {
       // Adjustment for extreme local overshoot.
+      // Only applies when normal adjustment above is not used (e.g.
+      // when threshold is set to 100).
       if (rc->projected_frame_size > (2 * rc->base_frame_target) &&
           rc->projected_frame_size > (2 * rc->avg_frame_bandwidth))
         ++twopass->extend_maxq;
-      // Unwind undershoot or overshoot adjustment.
-      if (p_rc->rolling_target_bits < p_rc->rolling_actual_bits)
-        --twopass->extend_minq;
+      // Unwind extreme overshoot adjustment.
       else if (p_rc->rolling_target_bits > p_rc->rolling_actual_bits)
         --twopass->extend_maxq;
     }
-    twopass->extend_minq = clamp(twopass->extend_minq, 0, minq_adj_limit);
+    twopass->extend_minq =
+        clamp(twopass->extend_minq, -minq_adj_limit, minq_adj_limit);
     twopass->extend_maxq = clamp(twopass->extend_maxq, 0, maxq_adj_limit);
 
     // If there is a big and undexpected undershoot then feed the extra
@@ -4200,19 +4258,6 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
             fast_extra_thresh - rc->projected_frame_size;
         p_rc->vbr_bits_off_target_fast = AOMMIN(p_rc->vbr_bits_off_target_fast,
                                                 (4 * rc->avg_frame_bandwidth));
-
-        // Fast adaptation of minQ if necessary to use up the extra bits.
-        if (rc->avg_frame_bandwidth) {
-          twopass->extend_minq_fast = (int)(p_rc->vbr_bits_off_target_fast * 8 /
-                                            rc->avg_frame_bandwidth);
-        }
-        twopass->extend_minq_fast = AOMMIN(
-            twopass->extend_minq_fast, minq_adj_limit - twopass->extend_minq);
-      } else if (p_rc->vbr_bits_off_target_fast) {
-        twopass->extend_minq_fast = AOMMIN(
-            twopass->extend_minq_fast, minq_adj_limit - twopass->extend_minq);
-      } else {
-        twopass->extend_minq_fast = 0;
       }
     }
 
@@ -4223,7 +4268,6 @@ void av1_twopass_postencode_update(AV1_COMP *cpi) {
           p_rc->vbr_bits_off_target_fast;
       cpi->ppi->p_rc.temp_extend_minq = twopass->extend_minq;
       cpi->ppi->p_rc.temp_extend_maxq = twopass->extend_maxq;
-      cpi->ppi->p_rc.temp_extend_minq_fast = twopass->extend_minq_fast;
     }
 #endif
   }

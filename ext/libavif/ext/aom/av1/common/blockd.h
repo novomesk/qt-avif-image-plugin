@@ -518,11 +518,6 @@ typedef struct {
 
 /*!\cond */
 
-#if CONFIG_DEBUG
-#define CFL_SUB8X8_VAL_MI_SIZE (4)
-#define CFL_SUB8X8_VAL_MI_SQUARE \
-  (CFL_SUB8X8_VAL_MI_SIZE * CFL_SUB8X8_VAL_MI_SIZE)
-#endif  // CONFIG_DEBUG
 #define CFL_MAX_BLOCK_SIZE (BLOCK_32X32)
 #define CFL_BUF_LINE (32)
 #define CFL_BUF_LINE_I128 (CFL_BUF_LINE >> 3)
@@ -537,9 +532,10 @@ typedef struct cfl_ctx {
 
   // Cache the DC_PRED when performing RDO, so it does not have to be recomputed
   // for every scaling parameter
-  int dc_pred_is_cached[CFL_PRED_PLANES];
-  // The DC_PRED cache is disable when decoding
-  int use_dc_pred_cache;
+  bool dc_pred_is_cached[CFL_PRED_PLANES];
+  // Whether the DC_PRED cache is enabled. The DC_PRED cache is disabled when
+  // decoding.
+  bool use_dc_pred_cache;
   // Only cache the first row of the DC_PRED
   int16_t dc_pred_cache[CFL_PRED_PLANES][CFL_BUF_LINE];
 

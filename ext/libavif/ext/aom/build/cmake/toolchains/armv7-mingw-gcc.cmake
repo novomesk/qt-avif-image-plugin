@@ -17,6 +17,8 @@ set(CMAKE_SYSTEM_PROCESSOR "armv7")
 set(CMAKE_SYSTEM_NAME "Windows")
 
 if("${CROSS}" STREQUAL "")
+
+  # Default the cross compiler prefix to one used by MSYS2.
   set(CROSS armv7-w64-mingw32-)
 endif()
 

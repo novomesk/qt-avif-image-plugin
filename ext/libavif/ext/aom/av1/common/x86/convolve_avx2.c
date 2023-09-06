@@ -714,32 +714,32 @@ static AOM_INLINE void av1_convolve_x_sr_general_avx2(
                 (__m128i *)(&src_ptr[i * src_stride + src_stride]))),
             0x20);
         // row0 0..7 row1 0..7
-        const __m256i s_16l = _mm256_unpacklo_epi8(data, v_zero);
+        const __m256i s_16lo = _mm256_unpacklo_epi8(data, v_zero);
         // row0 8..F row1 8..F
-        const __m256i s_16h = _mm256_unpackhi_epi8(data, v_zero);
+        const __m256i s_16hi = _mm256_unpackhi_epi8(data, v_zero);
 
         // row0 00 00 01 01 .. 03 03 row1 00 00 01 01 .. 03 03
-        const __m256i s_ll = _mm256_unpacklo_epi16(s_16l, s_16l);
+        const __m256i s_lolo = _mm256_unpacklo_epi16(s_16lo, s_16lo);
         // row0 04 04 .. 07 07 row1 04 04 .. 07 07
-        const __m256i s_lh = _mm256_unpackhi_epi16(s_16l, s_16l);
+        const __m256i s_lohi = _mm256_unpackhi_epi16(s_16lo, s_16lo);
 
         // row0 08 08 09 09 .. 0B 0B row1 08 08 09 09 .. 0B 0B
-        const __m256i s_hl = _mm256_unpacklo_epi16(s_16h, s_16h);
+        const __m256i s_hilo = _mm256_unpacklo_epi16(s_16hi, s_16hi);
         // row0 0C 0C .. 0F 0F row1 0C 0C .. 0F 0F
-        const __m256i s_hh = _mm256_unpackhi_epi16(s_16h, s_16h);
+        const __m256i s_hihi = _mm256_unpackhi_epi16(s_16hi, s_16hi);
 
         // 00 01 01 02 02 03 03 04 10 11 11 12 12 13 13 14
-        s[0] = _mm256_alignr_epi8(s_lh, s_ll, 2);
+        s[0] = _mm256_alignr_epi8(s_lohi, s_lolo, 2);
         // 02 03 03 04 04 05 05 06 12 13 13 14 14 15 15 16
-        s[1] = _mm256_alignr_epi8(s_lh, s_ll, 10);
+        s[1] = _mm256_alignr_epi8(s_lohi, s_lolo, 10);
         // 04 05 05 06 06 07 07 08 14 15 15 16 16 17 17 18
-        s[2] = _mm256_alignr_epi8(s_hl, s_lh, 2);
+        s[2] = _mm256_alignr_epi8(s_hilo, s_lohi, 2);
         // 06 07 07 08 08 09 09 0A 16 17 17 18 18 19 19 1A
-        s[3] = _mm256_alignr_epi8(s_hl, s_lh, 10);
+        s[3] = _mm256_alignr_epi8(s_hilo, s_lohi, 10);
         // 08 09 09 0A 0A 0B 0B 0C 18 19 19 1A 1A 1B 1B 1C
-        s[4] = _mm256_alignr_epi8(s_hh, s_hl, 2);
+        s[4] = _mm256_alignr_epi8(s_hihi, s_hilo, 2);
         // 0A 0B 0B 0C 0C 0D 0D 0E 1A 1B 1B 1C 1C 1D 1D 1E
-        s[5] = _mm256_alignr_epi8(s_hh, s_hl, 10);
+        s[5] = _mm256_alignr_epi8(s_hihi, s_hilo, 10);
 
         const __m256i res_lo = convolve_12taps(s, coeffs);
 
@@ -784,26 +784,26 @@ static AOM_INLINE void av1_convolve_x_sr_general_avx2(
                   (__m128i *)(&src_ptr[i * src_stride + j + 4]))),
               0x20);
           // row0 0..7 4..B
-          const __m256i s_16l = _mm256_unpacklo_epi8(data, v_zero);
+          const __m256i s_16lo = _mm256_unpacklo_epi8(data, v_zero);
           // row0 8..F C..13
-          const __m256i s_16h = _mm256_unpackhi_epi8(data, v_zero);
+          const __m256i s_16hi = _mm256_unpackhi_epi8(data, v_zero);
 
           // row0 00 00 01 01 .. 03 03 04 04 05 05 .. 07 07
-          const __m256i s_ll = _mm256_unpacklo_epi16(s_16l, s_16l);
+          const __m256i s_lolo = _mm256_unpacklo_epi16(s_16lo, s_16lo);
           // row0 04 04 .. 07 07 08 08 .. 0B 0B
-          const __m256i s_lh = _mm256_unpackhi_epi16(s_16l, s_16l);
+          const __m256i s_lohi = _mm256_unpackhi_epi16(s_16lo, s_16lo);
 
           // row0 08 08 09 09 .. 0B 0B 0C 0C 0D 0D .. 0F 0F
-          const __m256i s_hl = _mm256_unpacklo_epi16(s_16h, s_16h);
+          const __m256i s_hilo = _mm256_unpacklo_epi16(s_16hi, s_16hi);
           // row0 0C 0C 0D 0D .. 0F 0F 10 10 11 11 .. 13 13
-          const __m256i s_hh = _mm256_unpackhi_epi16(s_16h, s_16h);
+          const __m256i s_hihi = _mm256_unpackhi_epi16(s_16hi, s_16hi);
 
-          s[0] = _mm256_alignr_epi8(s_lh, s_ll, 2);
-          s[1] = _mm256_alignr_epi8(s_lh, s_ll, 10);
-          s[2] = _mm256_alignr_epi8(s_hl, s_lh, 2);
-          s[3] = _mm256_alignr_epi8(s_hl, s_lh, 10);
-          s[4] = _mm256_alignr_epi8(s_hh, s_hl, 2);
-          s[5] = _mm256_alignr_epi8(s_hh, s_hl, 10);
+          s[0] = _mm256_alignr_epi8(s_lohi, s_lolo, 2);
+          s[1] = _mm256_alignr_epi8(s_lohi, s_lolo, 10);
+          s[2] = _mm256_alignr_epi8(s_hilo, s_lohi, 2);
+          s[3] = _mm256_alignr_epi8(s_hilo, s_lohi, 10);
+          s[4] = _mm256_alignr_epi8(s_hihi, s_hilo, 2);
+          s[5] = _mm256_alignr_epi8(s_hihi, s_hilo, 10);
 
           const __m256i res_lo = convolve_12taps(s, coeffs);
 

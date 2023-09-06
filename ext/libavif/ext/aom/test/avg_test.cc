@@ -847,7 +847,13 @@ INSTANTIATE_TEST_SUITE_P(
                       make_tuple(32, 32, 10, 15, 4, &aom_highbd_avg_4x4_neon),
                       make_tuple(16, 16, 12, 0, 4, &aom_highbd_avg_4x4_neon),
                       make_tuple(16, 16, 12, 5, 4, &aom_highbd_avg_4x4_neon),
-                      make_tuple(32, 32, 12, 15, 4, &aom_highbd_avg_4x4_neon)));
+                      make_tuple(32, 32, 12, 15, 4, &aom_highbd_avg_4x4_neon),
+                      make_tuple(16, 16, 10, 0, 8, &aom_highbd_avg_8x8_neon),
+                      make_tuple(16, 16, 10, 5, 8, &aom_highbd_avg_8x8_neon),
+                      make_tuple(32, 32, 10, 15, 8, &aom_highbd_avg_8x8_neon),
+                      make_tuple(16, 16, 12, 0, 8, &aom_highbd_avg_8x8_neon),
+                      make_tuple(16, 16, 12, 5, 8, &aom_highbd_avg_8x8_neon),
+                      make_tuple(32, 32, 12, 15, 8, &aom_highbd_avg_8x8_neon)));
 #endif  // HAVE_NEON
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 

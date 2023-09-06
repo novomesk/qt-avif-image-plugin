@@ -17,6 +17,14 @@
 #include "aom_dsp/x86/mem_sse2.h"
 #include "aom_ports/mem.h"
 
+static INLINE void sign_extend_16bit_to_32bit_sse2(__m128i in, __m128i zero,
+                                                   __m128i *out_lo,
+                                                   __m128i *out_hi) {
+  const __m128i sign_bits = _mm_cmplt_epi16(in, zero);
+  *out_lo = _mm_unpacklo_epi16(in, sign_bits);
+  *out_hi = _mm_unpackhi_epi16(in, sign_bits);
+}
+
 void aom_minmax_8x8_sse2(const uint8_t *s, int p, const uint8_t *d, int dp,
                          int *min, int *max) {
   __m128i u0, s0, d0, diff, maxabsdiff, minabsdiff, negdiff, absdiff0, absdiff;
@@ -344,56 +352,6 @@ void aom_hadamard_8x8_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
   hadamard_8x8_sse2(src_diff, src_stride, coeff, 1);
 }
 
-void aom_pixel_scale_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
-                          int16_t *coeff, int log_scale, int h8, int w8) {
-  __m128i src[8];
-  const int16_t *org_src_diff = src_diff;
-  int16_t *org_coeff = coeff;
-  int coeff_stride = w8 << 3;
-  for (int idy = 0; idy < h8; ++idy) {
-    for (int idx = 0; idx < w8; ++idx) {
-      src_diff = org_src_diff + (idx << 3);
-      coeff = org_coeff + (idx << 3);
-
-      src[0] = _mm_load_si128((const __m128i *)src_diff);
-      src[1] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-      src[2] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-      src[3] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-      src[4] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-      src[5] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-      src[6] = _mm_load_si128((const __m128i *)(src_diff += src_stride));
-      src[7] = _mm_load_si128((const __m128i *)(src_diff + src_stride));
-
-      src[0] = _mm_slli_epi16(src[0], log_scale);
-      src[1] = _mm_slli_epi16(src[1], log_scale);
-      src[2] = _mm_slli_epi16(src[2], log_scale);
-      src[3] = _mm_slli_epi16(src[3], log_scale);
-      src[4] = _mm_slli_epi16(src[4], log_scale);
-      src[5] = _mm_slli_epi16(src[5], log_scale);
-      src[6] = _mm_slli_epi16(src[6], log_scale);
-      src[7] = _mm_slli_epi16(src[7], log_scale);
-
-      _mm_store_si128((__m128i *)coeff, src[0]);
-      coeff += coeff_stride;
-      _mm_store_si128((__m128i *)coeff, src[1]);
-      coeff += coeff_stride;
-      _mm_store_si128((__m128i *)coeff, src[2]);
-      coeff += coeff_stride;
-      _mm_store_si128((__m128i *)coeff, src[3]);
-      coeff += coeff_stride;
-      _mm_store_si128((__m128i *)coeff, src[4]);
-      coeff += coeff_stride;
-      _mm_store_si128((__m128i *)coeff, src[5]);
-      coeff += coeff_stride;
-      _mm_store_si128((__m128i *)coeff, src[6]);
-      coeff += coeff_stride;
-      _mm_store_si128((__m128i *)coeff, src[7]);
-    }
-    org_src_diff += (src_stride << 3);
-    org_coeff += (coeff_stride << 3);
-  }
-}
-
 static INLINE void hadamard_lp_8x8_sse2(const int16_t *src_diff,
                                         ptrdiff_t src_stride, int16_t *coeff) {
   __m128i src[8];
@@ -552,6 +510,12 @@ void aom_hadamard_32x32_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
   DECLARE_ALIGNED(32, int16_t, temp_coeff[32 * 32]);
   int16_t *t_coeff = temp_coeff;
   int idx;
+  __m128i coeff0_lo, coeff1_lo, coeff2_lo, coeff3_lo, b0_lo, b1_lo, b2_lo,
+      b3_lo;
+  __m128i coeff0_hi, coeff1_hi, coeff2_hi, coeff3_hi, b0_hi, b1_hi, b2_hi,
+      b3_hi;
+  __m128i b0, b1, b2, b3;
+  const __m128i zero = _mm_setzero_si128();
   for (idx = 0; idx < 4; ++idx) {
     const int16_t *src_ptr =
         src_diff + (idx >> 1) * 16 * src_stride + (idx & 0x01) * 16;
@@ -565,15 +529,38 @@ void aom_hadamard_32x32_sse2(const int16_t *src_diff, ptrdiff_t src_stride,
     __m128i coeff2 = _mm_load_si128((const __m128i *)(t_coeff + 512));
     __m128i coeff3 = _mm_load_si128((const __m128i *)(t_coeff + 768));
 
-    __m128i b0 = _mm_add_epi16(coeff0, coeff1);
-    __m128i b1 = _mm_sub_epi16(coeff0, coeff1);
-    __m128i b2 = _mm_add_epi16(coeff2, coeff3);
-    __m128i b3 = _mm_sub_epi16(coeff2, coeff3);
+    // Sign extend 16 bit to 32 bit.
+    sign_extend_16bit_to_32bit_sse2(coeff0, zero, &coeff0_lo, &coeff0_hi);
+    sign_extend_16bit_to_32bit_sse2(coeff1, zero, &coeff1_lo, &coeff1_hi);
+    sign_extend_16bit_to_32bit_sse2(coeff2, zero, &coeff2_lo, &coeff2_hi);
+    sign_extend_16bit_to_32bit_sse2(coeff3, zero, &coeff3_lo, &coeff3_hi);
 
-    b0 = _mm_srai_epi16(b0, 2);
-    b1 = _mm_srai_epi16(b1, 2);
-    b2 = _mm_srai_epi16(b2, 2);
-    b3 = _mm_srai_epi16(b3, 2);
+    b0_lo = _mm_add_epi32(coeff0_lo, coeff1_lo);
+    b0_hi = _mm_add_epi32(coeff0_hi, coeff1_hi);
+
+    b1_lo = _mm_sub_epi32(coeff0_lo, coeff1_lo);
+    b1_hi = _mm_sub_epi32(coeff0_hi, coeff1_hi);
+
+    b2_lo = _mm_add_epi32(coeff2_lo, coeff3_lo);
+    b2_hi = _mm_add_epi32(coeff2_hi, coeff3_hi);
+
+    b3_lo = _mm_sub_epi32(coeff2_lo, coeff3_lo);
+    b3_hi = _mm_sub_epi32(coeff2_hi, coeff3_hi);
+
+    b0_lo = _mm_srai_epi32(b0_lo, 2);
+    b1_lo = _mm_srai_epi32(b1_lo, 2);
+    b2_lo = _mm_srai_epi32(b2_lo, 2);
+    b3_lo = _mm_srai_epi32(b3_lo, 2);
+
+    b0_hi = _mm_srai_epi32(b0_hi, 2);
+    b1_hi = _mm_srai_epi32(b1_hi, 2);
+    b2_hi = _mm_srai_epi32(b2_hi, 2);
+    b3_hi = _mm_srai_epi32(b3_hi, 2);
+
+    b0 = _mm_packs_epi32(b0_lo, b0_hi);
+    b1 = _mm_packs_epi32(b1_lo, b1_hi);
+    b2 = _mm_packs_epi32(b2_lo, b2_hi);
+    b3 = _mm_packs_epi32(b3_lo, b3_hi);
 
     coeff0 = _mm_add_epi16(b0, b2);
     coeff1 = _mm_add_epi16(b1, b3);

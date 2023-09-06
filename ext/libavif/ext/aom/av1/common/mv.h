@@ -94,11 +94,9 @@ static AOM_INLINE void convert_fullmv_to_mv(int_mv *mv) {
 
 // Bits of precision used for the model
 #define WARPEDMODEL_PREC_BITS 16
-#define WARPEDMODEL_ROW3HOMO_PREC_BITS 16
 
 #define WARPEDMODEL_TRANS_CLAMP (128 << WARPEDMODEL_PREC_BITS)
 #define WARPEDMODEL_NONDIAGAFFINE_CLAMP (1 << (WARPEDMODEL_PREC_BITS - 3))
-#define WARPEDMODEL_ROW3HOMO_CLAMP (1 << (WARPEDMODEL_PREC_BITS - 2))
 
 // Bits of subpel precision for warped interpolation
 #define WARPEDPIXEL_PREC_BITS 6
@@ -108,26 +106,18 @@ static AOM_INLINE void convert_fullmv_to_mv(int_mv *mv) {
 
 #define WARPEDDIFF_PREC_BITS (WARPEDMODEL_PREC_BITS - WARPEDPIXEL_PREC_BITS)
 
-// Number of types used for global motion (must be >= 3 and <= TRANS_TYPES)
-// The following can be useful:
-// GLOBAL_TRANS_TYPES 3 - up to rotation-zoom
-// GLOBAL_TRANS_TYPES 4 - up to affine
-// GLOBAL_TRANS_TYPES 6 - up to hor/ver trapezoids
-// GLOBAL_TRANS_TYPES 7 - up to full homography
-#define GLOBAL_TRANS_TYPES 4
-
 typedef struct {
   int global_warp_allowed;
   int local_warp_allowed;
 } WarpTypesAllowed;
 
 // The order of values in the wmmat matrix below is best described
-// by the homography:
+// by the affine transformation:
 //      [x'     (m2 m3 m0   [x
 //  z .  y'  =   m4 m5 m1 *  y
-//       1]      m6 m7 1)    1]
+//       1]       0  0 1)    1]
 typedef struct {
-  int32_t wmmat[6];
+  int32_t wmmat[MAX_PARAMDIM];
   int16_t alpha, beta, gamma, delta;
   TransformationType wmtype;
   int8_t invalid;
@@ -184,19 +174,11 @@ static const WarpedMotionParams default_warp_params = {
 #define GM_ALPHA_PREC_DIFF (WARPEDMODEL_PREC_BITS - GM_ALPHA_PREC_BITS)
 #define GM_ALPHA_DECODE_FACTOR (1 << GM_ALPHA_PREC_DIFF)
 
-#define GM_ROW3HOMO_PREC_BITS 16
-#define GM_ABS_ROW3HOMO_BITS 11
-#define GM_ROW3HOMO_PREC_DIFF \
-  (WARPEDMODEL_ROW3HOMO_PREC_BITS - GM_ROW3HOMO_PREC_BITS)
-#define GM_ROW3HOMO_DECODE_FACTOR (1 << GM_ROW3HOMO_PREC_DIFF)
-
 #define GM_TRANS_MAX (1 << GM_ABS_TRANS_BITS)
 #define GM_ALPHA_MAX (1 << GM_ABS_ALPHA_BITS)
-#define GM_ROW3HOMO_MAX (1 << GM_ABS_ROW3HOMO_BITS)
 
 #define GM_TRANS_MIN -GM_TRANS_MAX
 #define GM_ALPHA_MIN -GM_ALPHA_MAX
-#define GM_ROW3HOMO_MIN -GM_ROW3HOMO_MAX
 
 static INLINE int block_center_x(int mi_col, BLOCK_SIZE bs) {
   const int bw = block_size_wide[bs];

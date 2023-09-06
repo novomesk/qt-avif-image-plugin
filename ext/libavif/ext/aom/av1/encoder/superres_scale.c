@@ -403,7 +403,7 @@ void av1_superres_post_encode(AV1_COMP *cpi) {
   assert(!is_lossless_requested(&cpi->oxcf.rc_cfg));
   assert(!cm->features.all_lossless);
 
-  av1_superres_upscale(cm, NULL);
+  av1_superres_upscale(cm, NULL, cpi->image_pyramid_levels);
 
   // If regular resizing is occurring the source will need to be downscaled to
   // match the upscaled superres resolution. Otherwise the original source is

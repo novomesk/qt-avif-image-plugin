@@ -33,18 +33,22 @@ TEST(AVIFProgressiveTest, QualityChange) {
   aom_image_t img;
   EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I444, kWidth, kHeight, 1,
                                buffer.data()));
+  img.cp = AOM_CICP_CP_UNSPECIFIED;
+  img.tc = AOM_CICP_TC_UNSPECIFIED;
+  img.mc = AOM_CICP_MC_UNSPECIFIED;
+  img.range = AOM_CR_FULL_RANGE;
 
   aom_codec_iface_t *iface = aom_codec_av1_cx();
   aom_codec_enc_cfg_t cfg;
-  const unsigned int usage = AOM_USAGE_GOOD_QUALITY;
-  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_default(iface, &cfg, usage));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_GOOD_QUALITY));
+  cfg.g_profile = 1;
   cfg.g_w = kWidth;
   cfg.g_h = kHeight;
-  cfg.rc_end_usage = AOM_Q;
-  cfg.g_profile = 1;
   cfg.g_bit_depth = AOM_BITS_8;
   cfg.g_input_bit_depth = 8;
   cfg.g_lag_in_frames = 0;
+  cfg.rc_end_usage = AOM_Q;
   cfg.rc_min_quantizer = 50;
   cfg.rc_max_quantizer = 50;
   aom_codec_ctx_t enc;
@@ -64,7 +68,7 @@ TEST(AVIFProgressiveTest, QualityChange) {
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
   aom_codec_iter_t iter = nullptr;
   const aom_codec_cx_pkt_t *pkt = aom_codec_get_cx_data(&enc, &iter);
-  EXPECT_NE(pkt, nullptr);
+  ASSERT_NE(pkt, nullptr);
   EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
   // pkt->data.frame.flags is 0x1f0011.
   EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, AOM_FRAME_IS_KEY);
@@ -85,7 +89,7 @@ TEST(AVIFProgressiveTest, QualityChange) {
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, encode_flags));
   iter = nullptr;
   pkt = aom_codec_get_cx_data(&enc, &iter);
-  EXPECT_NE(pkt, nullptr);
+  ASSERT_NE(pkt, nullptr);
   EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
   // pkt->data.frame.flags is 0.
   EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, 0u);
@@ -114,18 +118,22 @@ TEST(AVIFProgressiveTest, DimensionChange) {
   aom_image_t img;
   EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I444, kWidth, kHeight, 1,
                                buffer.data()));
+  img.cp = AOM_CICP_CP_UNSPECIFIED;
+  img.tc = AOM_CICP_TC_UNSPECIFIED;
+  img.mc = AOM_CICP_MC_UNSPECIFIED;
+  img.range = AOM_CR_FULL_RANGE;
 
   aom_codec_iface_t *iface = aom_codec_av1_cx();
   aom_codec_enc_cfg_t cfg;
-  const unsigned int usage = AOM_USAGE_GOOD_QUALITY;
-  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_default(iface, &cfg, usage));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_GOOD_QUALITY));
+  cfg.g_profile = 1;
   cfg.g_w = kWidth;
   cfg.g_h = kHeight;
-  cfg.rc_end_usage = AOM_Q;
-  cfg.g_profile = 1;
   cfg.g_bit_depth = AOM_BITS_8;
   cfg.g_input_bit_depth = 8;
   cfg.g_lag_in_frames = 0;
+  cfg.rc_end_usage = AOM_Q;
   cfg.rc_min_quantizer = 0;
   cfg.rc_max_quantizer = 0;
   aom_codec_ctx_t enc;
@@ -149,7 +157,7 @@ TEST(AVIFProgressiveTest, DimensionChange) {
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
   aom_codec_iter_t iter = nullptr;
   const aom_codec_cx_pkt_t *pkt = aom_codec_get_cx_data(&enc, &iter);
-  EXPECT_NE(pkt, nullptr);
+  ASSERT_NE(pkt, nullptr);
   EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
   // pkt->data.frame.flags is 0x1f0011.
   EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, AOM_FRAME_IS_KEY);
@@ -165,7 +173,7 @@ TEST(AVIFProgressiveTest, DimensionChange) {
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, encode_flags));
   iter = nullptr;
   pkt = aom_codec_get_cx_data(&enc, &iter);
-  EXPECT_NE(pkt, nullptr);
+  ASSERT_NE(pkt, nullptr);
   EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
   // pkt->data.frame.flags is 0.
   EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, 0u);
@@ -181,6 +189,9 @@ TEST(AVIFProgressiveTest, DimensionChange) {
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&enc));
 }
 
+// This test reproduces bug aomedia:3382. Certain parameters such as width,
+// height, g_threads, usage, etc. were carefully chosen based on the
+// complicated logic of av1_select_sb_size() to cause an inconsistent sb_size.
 TEST(AVIFProgressiveTest, DimensionChangeLargeImageMultiThread) {
   constexpr int kWidth = 1920;
   constexpr int kHeight = 1080;
@@ -233,7 +244,7 @@ TEST(AVIFProgressiveTest, DimensionChangeLargeImageMultiThread) {
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
   aom_codec_iter_t iter = nullptr;
   const aom_codec_cx_pkt_t *pkt = aom_codec_get_cx_data(&enc, &iter);
-  EXPECT_NE(pkt, nullptr);
+  ASSERT_NE(pkt, nullptr);
   EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
   // pkt->data.frame.flags is 0x1f0011.
   EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, AOM_FRAME_IS_KEY);
@@ -249,7 +260,7 @@ TEST(AVIFProgressiveTest, DimensionChangeLargeImageMultiThread) {
   EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, encode_flags));
   iter = nullptr;
   pkt = aom_codec_get_cx_data(&enc, &iter);
-  EXPECT_NE(pkt, nullptr);
+  ASSERT_NE(pkt, nullptr);
   EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
   // pkt->data.frame.flags is 0.
   EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, 0u);

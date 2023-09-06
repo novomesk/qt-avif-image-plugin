@@ -482,12 +482,6 @@ void av1_combine_interintra(MACROBLOCKD *xd, BLOCK_SIZE bsize, int plane,
                             const uint8_t *inter_pred, int inter_stride,
                             const uint8_t *intra_pred, int intra_stride);
 
-int av1_allow_warp(const MB_MODE_INFO *const mbmi,
-                   const WarpTypesAllowed *const warp_types,
-                   const WarpedMotionParams *const gm_params,
-                   int build_for_obmc, const struct scale_factors *const sf,
-                   WarpedMotionParams *final_warp_params);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -80,6 +80,10 @@ aom_codec_err_t aom_codec_enc_init_ver(aom_codec_ctx_t *ctx,
     res = ctx->iface->init(ctx);
 
     if (res) {
+      // IMPORTANT: ctx->priv->err_detail must be null or point to a string
+      // that remains valid after ctx->priv is destroyed, such as a C string
+      // literal. This makes it safe to call aom_codec_error_detail() after
+      // aom_codec_enc_init_ver() failed.
       ctx->err_detail = ctx->priv ? ctx->priv->err_detail : NULL;
       aom_codec_destroy(ctx);
     }
@@ -92,7 +96,6 @@ aom_codec_err_t aom_codec_enc_config_default(aom_codec_iface_t *iface,
                                              aom_codec_enc_cfg_t *cfg,
                                              unsigned int usage) {
   aom_codec_err_t res;
-  int i;
 
   if (!iface || !cfg)
     res = AOM_CODEC_INVALID_PARAM;
@@ -101,26 +104,24 @@ aom_codec_err_t aom_codec_enc_config_default(aom_codec_iface_t *iface,
   else {
     res = AOM_CODEC_INVALID_PARAM;
 
-    for (i = 0; i < iface->enc.cfg_count; ++i) {
+    for (int i = 0; i < iface->enc.cfg_count; ++i) {
       if (iface->enc.cfgs[i].g_usage == usage) {
         *cfg = iface->enc.cfgs[i];
         res = AOM_CODEC_OK;
+        /* default values */
+        memset(&cfg->encoder_cfg, 0, sizeof(cfg->encoder_cfg));
+        cfg->encoder_cfg.super_block_size = 0;  // Dynamic
+        cfg->encoder_cfg.max_partition_size = 128;
+        cfg->encoder_cfg.min_partition_size = 4;
+        cfg->encoder_cfg.disable_trellis_quant = 3;
         break;
       }
     }
   }
-  /* default values */
-  if (cfg) {
-    memset(&cfg->encoder_cfg, 0, sizeof(cfg->encoder_cfg));
-    cfg->encoder_cfg.super_block_size = 0;  // Dynamic
-    cfg->encoder_cfg.max_partition_size = 128;
-    cfg->encoder_cfg.min_partition_size = 4;
-    cfg->encoder_cfg.disable_trellis_quant = 3;
-  }
   return res;
 }
 
-#if ARCH_X86 || ARCH_X86_64
+#if AOM_ARCH_X86 || AOM_ARCH_X86_64
 /* On X86, disable the x87 unit's internal 80 bit precision for better
  * consistency with the SSE unit's 64 bit precision.
  */
@@ -131,15 +132,17 @@ aom_codec_err_t aom_codec_enc_config_default(aom_codec_iface_t *iface,
 #else
 #define FLOATING_POINT_SET_PRECISION
 #define FLOATING_POINT_RESTORE_PRECISION
-#endif  // ARCH_X86 || ARCH_X86_64
+#endif  // AOM_ARCH_X86 || AOM_ARCH_X86_64
 
 #if HAVE_FEXCEPT && CONFIG_DEBUG
 #define FLOATING_POINT_SET_EXCEPTIONS \
   const int float_excepts =           \
       feenableexcept(FE_DIVBYZERO | FE_UNDERFLOW | FE_OVERFLOW);
 #define FLOATING_POINT_RESTORE_EXCEPTIONS \
-  fedisableexcept(FE_ALL_EXCEPT);         \
-  feenableexcept(float_excepts);
+  if (float_excepts != -1) {              \
+    fedisableexcept(FE_ALL_EXCEPT);       \
+    feenableexcept(float_excepts);        \
+  }
 #else
 #define FLOATING_POINT_SET_EXCEPTIONS
 #define FLOATING_POINT_RESTORE_EXCEPTIONS

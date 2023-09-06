@@ -15,7 +15,9 @@
 // encode two frames of increasing sizes. The second aom_codec_encode() should
 // not crash or have memory errors.
 
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 #include "aom/aomcx.h"
 #include "aom/aom_encoder.h"
@@ -87,6 +89,114 @@ TEST(EncodeForcedMaxFrameWidthHeight, GoodQualityLag1TunePSNR) {
 
 TEST(EncodeForcedMaxFrameWidthHeight, GoodQualityLag1TuneSSIM) {
   RunTest(AOM_USAGE_GOOD_QUALITY, /*lag_in_frames=*/1, "ssim");
+}
+
+void FillImageGradient(aom_image_t *image, int bit_depth) {
+  assert(image->range == AOM_CR_FULL_RANGE);
+  for (int plane = 0; plane < 3; plane++) {
+    const int plane_width = aom_img_plane_width(image, plane);
+    const int plane_height = aom_img_plane_height(image, plane);
+    unsigned char *row = image->planes[plane];
+    const int stride = image->stride[plane];
+    for (int y = 0; y < plane_height; ++y) {
+      for (int x = 0; x < plane_width; ++x) {
+        const int value = (x + y) * ((1 << bit_depth) - 1) /
+                          std::max(1, plane_width + plane_height - 2);
+        assert(value >= 0 && value <= (1 << bit_depth) - 1);
+        if (bit_depth > 8) {
+          reinterpret_cast<uint16_t *>(row)[x] = static_cast<uint16_t>(value);
+        } else {
+          row[x] = static_cast<unsigned char>(value);
+        }
+      }
+      row += stride;
+    }
+  }
+}
+
+// A test that reproduces bug aomedia:3348: Assertion
+// `ms_params->ms_buffers.ref->stride == ms_params->search_sites->stride'
+// failed.
+TEST(EncodeForcedMaxFrameWidthHeight, DISABLED_DimensionDecreasing) {
+  constexpr int kWidth = 128;
+  constexpr int kHeight = 128;
+  constexpr size_t kBufferSize = 3 * kWidth * kHeight;
+  std::vector<unsigned char> buffer(kBufferSize);
+
+  aom_image_t img;
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I420, kWidth, kHeight, 1,
+                               buffer.data()));
+  img.cp = AOM_CICP_CP_UNSPECIFIED;
+  img.tc = AOM_CICP_TC_UNSPECIFIED;
+  img.mc = AOM_CICP_MC_UNSPECIFIED;
+  img.range = AOM_CR_FULL_RANGE;
+  FillImageGradient(&img, 8);
+
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_GOOD_QUALITY));
+  cfg.rc_end_usage = AOM_Q;
+  cfg.g_profile = 0;
+  cfg.g_bit_depth = AOM_BITS_8;
+  cfg.g_input_bit_depth = 8;
+  cfg.g_w = kWidth;
+  cfg.g_h = kHeight;
+  cfg.g_forced_max_frame_width = kWidth;
+  cfg.g_forced_max_frame_height = kHeight;
+  cfg.g_lag_in_frames = 1;
+  cfg.rc_min_quantizer = 20;
+  cfg.rc_max_quantizer = 40;
+  aom_codec_ctx_t enc;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_init(&enc, iface, &cfg, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_control(&enc, AOME_SET_CQ_LEVEL, 30));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_control(&enc, AOME_SET_CPUUSED, 6));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AV1E_SET_COLOR_RANGE, AOM_CR_FULL_RANGE));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AOME_SET_TUNING, AOM_TUNE_SSIM));
+
+  // First frame
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
+  aom_codec_iter_t iter = nullptr;
+  const aom_codec_cx_pkt_t *pkt = aom_codec_get_cx_data(&enc, &iter);
+  ASSERT_NE(pkt, nullptr);
+  EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
+  // pkt->data.frame.flags is 0x1f0011.
+  EXPECT_NE(pkt->data.frame.flags & AOM_FRAME_IS_KEY, 0u);
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  EXPECT_EQ(pkt, nullptr);
+
+  // Second frame
+  constexpr int kWidthSmall = 64;
+  constexpr int kHeightSmall = 64;
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I420, kWidthSmall,
+                               kHeightSmall, 1, buffer.data()));
+  img.cp = AOM_CICP_CP_UNSPECIFIED;
+  img.tc = AOM_CICP_TC_UNSPECIFIED;
+  img.mc = AOM_CICP_MC_UNSPECIFIED;
+  img.range = AOM_CR_FULL_RANGE;
+  FillImageGradient(&img, 8);
+  cfg.g_w = kWidthSmall;
+  cfg.g_h = kHeightSmall;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
+  iter = nullptr;
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  ASSERT_NE(pkt, nullptr);
+  EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
+  // pkt->data.frame.flags is 0.
+  EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, 0u);
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  EXPECT_EQ(pkt, nullptr);
+
+  // Flush encoder
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, nullptr, 0, 1, 0));
+  iter = nullptr;
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  EXPECT_EQ(pkt, nullptr);
+
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&enc));
 }
 
 #endif  // !CONFIG_REALTIME_ONLY

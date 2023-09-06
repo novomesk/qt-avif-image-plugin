@@ -16,6 +16,7 @@
 #include "config/aom_scale_rtcd.h"
 
 #include "aom_dsp/aom_dsp_common.h"
+#include "aom_dsp/mathutils.h"
 #include "aom_dsp/odintrin.h"
 #include "aom_mem/aom_mem.h"
 #include "aom_ports/aom_timer.h"
@@ -145,7 +146,7 @@ static void tf_motion_search(AV1_COMP *cpi, MACROBLOCK *mb,
   const int q = av1_get_q(cpi);
 
   av1_make_default_fullpel_ms_params(&full_ms_params, cpi, mb, block_size,
-                                     &baseline_mv, search_site_cfg,
+                                     &baseline_mv, start_mv, search_site_cfg,
                                      /*fine_search_interval=*/0);
   av1_set_mv_search_method(&full_ms_params, search_site_cfg, search_method);
   full_ms_params.run_mesh_search = 1;
@@ -204,7 +205,7 @@ static void tf_motion_search(AV1_COMP *cpi, MACROBLOCK *mb,
         mbd->plane[0].pre[0].buf = ref_frame->y_buffer + y_offset + offset;
         av1_make_default_fullpel_ms_params(&full_ms_params, cpi, mb,
                                            subblock_size, &baseline_mv,
-                                           search_site_cfg,
+                                           start_mv, search_site_cfg,
                                            /*fine_search_interval=*/0);
         av1_set_mv_search_method(&full_ms_params, search_site_cfg,
                                  search_method);
@@ -549,6 +550,8 @@ void compute_luma_sq_error_sum(uint32_t *square_diff, uint32_t *luma_sse_sum,
  *                              defined in libaom, converted from `qindex`
  * \param[in]   filter_strength Filtering strength. This value lies in range
  *                              [0, 6] where 6 is the maximum strength.
+ * \param[in]   tf_wgt_calc_lvl Controls the weight calculation method during
+ *                              temporal filtering
  * \param[out]  pred            Pointer to the well-built predictors
  * \param[out]  accum           Pointer to the pixel-wise accumulator for
  *                              filtering
@@ -563,7 +566,8 @@ void av1_apply_temporal_filter_c(
     const BLOCK_SIZE block_size, const int mb_row, const int mb_col,
     const int num_planes, const double *noise_levels, const MV *subblock_mvs,
     const int *subblock_mses, const int q_factor, const int filter_strength,
-    const uint8_t *pred, uint32_t *accum, uint16_t *count) {
+    int tf_wgt_calc_lvl, const uint8_t *pred, uint32_t *accum,
+    uint16_t *count) {
   // Block information.
   const int mb_height = block_size_high[block_size];
   const int mb_width = block_size_wide[block_size];
@@ -693,7 +697,14 @@ void av1_apply_temporal_filter_c(
         double scaled_error =
             combined_error * d_factor[subblock_idx] * decay_factor[plane];
         scaled_error = AOMMIN(scaled_error, 7);
-        const int weight = (int)(exp(-scaled_error) * TF_WEIGHT_SCALE);
+        int weight;
+        if (tf_wgt_calc_lvl == 0) {
+          weight = (int)(exp(-scaled_error) * TF_WEIGHT_SCALE);
+        } else {
+          const float fweight =
+              approx_exp((float)-scaled_error) * TF_WEIGHT_SCALE;
+          weight = iroundpf(fweight);
+        }
 
         const int idx = plane_offset + pred_idx;  // Index with plane shift.
         const int pred_value = is_high_bitdepth ? pred16[idx] : pred[idx];
@@ -716,11 +727,12 @@ void av1_highbd_apply_temporal_filter_c(
     const BLOCK_SIZE block_size, const int mb_row, const int mb_col,
     const int num_planes, const double *noise_levels, const MV *subblock_mvs,
     const int *subblock_mses, const int q_factor, const int filter_strength,
-    const uint8_t *pred, uint32_t *accum, uint16_t *count) {
+    int tf_wgt_calc_lvl, const uint8_t *pred, uint32_t *accum,
+    uint16_t *count) {
   av1_apply_temporal_filter_c(frame_to_filter, mbd, block_size, mb_row, mb_col,
                               num_planes, noise_levels, subblock_mvs,
-                              subblock_mses, q_factor, filter_strength, pred,
-                              accum, count);
+                              subblock_mses, q_factor, filter_strength,
+                              tf_wgt_calc_lvl, pred, accum, count);
 }
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 /*!\brief Normalizes the accumulated filtering result to produce the filtered
@@ -809,6 +821,7 @@ void av1_tf_do_filtering_row(AV1_COMP *cpi, ThreadData *td, int mb_row) {
   const int mi_h = mi_size_high_log2[block_size];
   const int mi_w = mi_size_wide_log2[block_size];
   const int num_planes = av1_num_planes(&cpi->common);
+  const int weight_calc_level_in_tf = cpi->sf.hl_sf.weight_calc_level_in_tf;
   uint32_t *accum = tf_data->accum;
   uint16_t *count = tf_data->count;
   uint8_t *pred = tf_data->pred;
@@ -865,27 +878,27 @@ void av1_tf_do_filtering_row(AV1_COMP *cpi, ThreadData *td, int mb_row) {
             av1_highbd_apply_temporal_filter(
                 frame_to_filter, mbd, block_size, mb_row, mb_col, num_planes,
                 noise_levels, subblock_mvs, subblock_mses, q_factor,
-                filter_strength, pred, accum, count);
+                filter_strength, weight_calc_level_in_tf, pred, accum, count);
           } else {
 #endif  // CONFIG_AV1_HIGHBITDEPTH
             av1_apply_temporal_filter_c(
                 frame_to_filter, mbd, block_size, mb_row, mb_col, num_planes,
                 noise_levels, subblock_mvs, subblock_mses, q_factor,
-                filter_strength, pred, accum, count);
+                filter_strength, weight_calc_level_in_tf, pred, accum, count);
 #if CONFIG_AV1_HIGHBITDEPTH
           }
 #endif            // CONFIG_AV1_HIGHBITDEPTH
         } else {  // for 8-bit
           if (TF_BLOCK_SIZE == BLOCK_32X32 && TF_WINDOW_LENGTH == 5) {
-            av1_apply_temporal_filter(frame_to_filter, mbd, block_size, mb_row,
-                                      mb_col, num_planes, noise_levels,
-                                      subblock_mvs, subblock_mses, q_factor,
-                                      filter_strength, pred, accum, count);
+            av1_apply_temporal_filter(
+                frame_to_filter, mbd, block_size, mb_row, mb_col, num_planes,
+                noise_levels, subblock_mvs, subblock_mses, q_factor,
+                filter_strength, weight_calc_level_in_tf, pred, accum, count);
           } else {
             av1_apply_temporal_filter_c(
                 frame_to_filter, mbd, block_size, mb_row, mb_col, num_planes,
                 noise_levels, subblock_mvs, subblock_mses, q_factor,
-                filter_strength, pred, accum, count);
+                filter_strength, weight_calc_level_in_tf, pred, accum, count);
           }
         }
       }
@@ -995,11 +1008,9 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
   const YV12_BUFFER_CONFIG *to_filter_frame = &to_filter_buf->img;
   const int num_planes = av1_num_planes(&cpi->common);
   double *noise_levels = tf_ctx->noise_levels;
-  for (int plane = 0; plane < num_planes; ++plane) {
-    noise_levels[plane] = av1_estimate_noise_from_single_plane(
-        to_filter_frame, plane, cpi->common.seq_params->bit_depth,
-        NOISE_ESTIMATION_EDGE_THRESHOLD);
-  }
+  av1_estimate_noise_level(to_filter_frame, noise_levels, AOM_PLANE_Y,
+                           num_planes - 1, cpi->common.seq_params->bit_depth,
+                           NOISE_ESTIMATION_EDGE_THRESHOLD);
   // Get quantization factor.
   const int q = av1_get_q(cpi);
   // Get correlation estimates from first-pass;
@@ -1040,6 +1051,18 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
     adjust_num = 0;
   } else if ((update_type == KF_UPDATE) && q <= 10) {
     adjust_num = 0;
+  } else if (cpi->sf.hl_sf.adjust_num_frames_for_arf_filtering &&
+             update_type != KF_UPDATE) {
+    // Adjust number of frames to be considered for filtering based on noise
+    // level of the current frame. For low-noise frame, use more frames to
+    // filter such that the filtered frame can provide better predictions for
+    // subsequent frames and vice versa.
+    if (noise_levels[AOM_PLANE_Y] < 0.5)
+      adjust_num = 4;
+    else if (noise_levels[AOM_PLANE_Y] < 1.0)
+      adjust_num = 2;
+    else
+      adjust_num = 0;
   }
   num_frames = AOMMIN(num_frames + adjust_num, lookahead_depth);
 
@@ -1054,10 +1077,6 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
 
     num_frames = AOMMIN(num_frames, gfu_boost / 150);
     num_frames += !(num_frames & 1);  // Make the number odd.
-
-    // Limit the number of frames if noise levels are low and high quantizers.
-    if (noise_levels[AOM_PLANE_Y] < 1.9 && cpi->ppi->p_rc.arf_q > 40)
-      num_frames = AOMMIN(num_frames, cpi->sf.hl_sf.num_frames_used_in_tf);
 
     // Only use 2 neighbours for the second ARF.
     if (update_type == INTNL_ARF_UPDATE) num_frames = AOMMIN(num_frames, 3);
@@ -1108,21 +1127,50 @@ static void tf_setup_filtering_buffer(AV1_COMP *cpi,
 
 /*!\cond */
 
-// A constant number, sqrt(pi / 2),  used for noise estimation.
-static const double SQRT_PI_BY_2 = 1.25331413732;
+double av1_estimate_noise_from_single_plane_c(const uint8_t *src, int height,
+                                              int width, int stride,
+                                              int edge_thresh) {
+  int64_t accum = 0;
+  int count = 0;
 
-double av1_estimate_noise_from_single_plane(const YV12_BUFFER_CONFIG *frame,
-                                            const int plane,
-                                            const int bit_depth,
-                                            const int edge_thresh) {
-  const int is_y_plane = (plane == 0);
-  const int height = frame->crop_heights[is_y_plane ? 0 : 1];
-  const int width = frame->crop_widths[is_y_plane ? 0 : 1];
-  const int stride = frame->strides[is_y_plane ? 0 : 1];
-  const uint8_t *src = frame->buffers[plane];
-  const uint16_t *src16 = CONVERT_TO_SHORTPTR(src);
-  const int is_high_bitdepth = is_frame_high_bitdepth(frame);
+  for (int i = 1; i < height - 1; ++i) {
+    for (int j = 1; j < width - 1; ++j) {
+      // Setup a small 3x3 matrix.
+      const int center_idx = i * stride + j;
+      int mat[3][3];
+      for (int ii = -1; ii <= 1; ++ii) {
+        for (int jj = -1; jj <= 1; ++jj) {
+          const int idx = center_idx + ii * stride + jj;
+          mat[ii + 1][jj + 1] = src[idx];
+        }
+      }
+      // Compute sobel gradients.
+      const int Gx = (mat[0][0] - mat[0][2]) + (mat[2][0] - mat[2][2]) +
+                     2 * (mat[1][0] - mat[1][2]);
+      const int Gy = (mat[0][0] - mat[2][0]) + (mat[0][2] - mat[2][2]) +
+                     2 * (mat[0][1] - mat[2][1]);
+      const int Ga = ROUND_POWER_OF_TWO(abs(Gx) + abs(Gy), 0);
+      // Accumulate Laplacian.
+      if (Ga < edge_thresh) {  // Only count smooth pixels.
+        const int v = 4 * mat[1][1] -
+                      2 * (mat[0][1] + mat[2][1] + mat[1][0] + mat[1][2]) +
+                      (mat[0][0] + mat[0][2] + mat[2][0] + mat[2][2]);
+        accum += ROUND_POWER_OF_TWO(abs(v), 0);
+        ++count;
+      }
+    }
+  }
 
+  // Return -1.0 (unreliable estimation) if there are too few smooth pixels.
+  return (count < 16) ? -1.0 : (double)accum / (6 * count) * SQRT_PI_BY_2;
+}
+
+#if CONFIG_AV1_HIGHBITDEPTH
+double av1_highbd_estimate_noise_from_single_plane(const uint16_t *src16,
+                                                   int height, int width,
+                                                   const int stride,
+                                                   int bit_depth,
+                                                   int edge_thresh) {
   int64_t accum = 0;
   int count = 0;
   for (int i = 1; i < height - 1; ++i) {
@@ -1133,7 +1181,7 @@ double av1_estimate_noise_from_single_plane(const YV12_BUFFER_CONFIG *frame,
       for (int ii = -1; ii <= 1; ++ii) {
         for (int jj = -1; jj <= 1; ++jj) {
           const int idx = center_idx + ii * stride + jj;
-          mat[ii + 1][jj + 1] = is_high_bitdepth ? src16[idx] : src[idx];
+          mat[ii + 1][jj + 1] = src16[idx];
         }
       }
       // Compute sobel gradients.
@@ -1155,6 +1203,35 @@ double av1_estimate_noise_from_single_plane(const YV12_BUFFER_CONFIG *frame,
 
   // Return -1.0 (unreliable estimation) if there are too few smooth pixels.
   return (count < 16) ? -1.0 : (double)accum / (6 * count) * SQRT_PI_BY_2;
+}
+#endif
+
+void av1_estimate_noise_level(const YV12_BUFFER_CONFIG *frame,
+                              double *noise_level, int plane_from, int plane_to,
+                              int bit_depth, int edge_thresh) {
+  for (int plane = plane_from; plane <= plane_to; plane++) {
+    const bool is_uv_plane = (plane != AOM_PLANE_Y);
+    const int height = frame->crop_heights[is_uv_plane];
+    const int width = frame->crop_widths[is_uv_plane];
+    const int stride = frame->strides[is_uv_plane];
+    const uint8_t *src = frame->buffers[plane];
+
+#if CONFIG_AV1_HIGHBITDEPTH
+    const uint16_t *src16 = CONVERT_TO_SHORTPTR(src);
+    const int is_high_bitdepth = is_frame_high_bitdepth(frame);
+    if (is_high_bitdepth) {
+      noise_level[plane] = av1_highbd_estimate_noise_from_single_plane(
+          src16, height, width, stride, bit_depth, edge_thresh);
+    } else {
+      noise_level[plane] = av1_estimate_noise_from_single_plane(
+          src, height, width, stride, edge_thresh);
+    }
+#else
+    (void)bit_depth;
+    noise_level[plane] = av1_estimate_noise_from_single_plane(
+        src, height, width, stride, edge_thresh);
+#endif
+  }
 }
 
 // Initializes the members of TemporalFilterCtx
@@ -1293,7 +1370,7 @@ void av1_tf_info_alloc(TEMPORAL_FILTER_INFO *tf_info, const AV1_COMP *cpi) {
         seq_params->subsampling_x, seq_params->subsampling_y,
         seq_params->use_highbitdepth, cpi->oxcf.border_in_pixels,
         cm->features.byte_alignment, NULL, NULL, NULL,
-        cpi->oxcf.tool_cfg.enable_global_motion, 0);
+        cpi->image_pyramid_levels, 0);
     if (ret) {
       aom_internal_error(cm->error, AOM_CODEC_MEM_ERROR,
                          "Failed to allocate tf_info");

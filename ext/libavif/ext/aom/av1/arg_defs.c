@@ -47,6 +47,7 @@ static const struct arg_enum_list tuning_enum[] = {
   { "vmaf", AOM_TUNE_VMAF_MAX_GAIN },
   { "vmaf_neg", AOM_TUNE_VMAF_NEG_MAX_GAIN },
   { "butteraugli", AOM_TUNE_BUTTERAUGLI },
+  { "vmaf_saliency_map", AOM_TUNE_VMAF_SALIENCY_MAP },
   { NULL, 0 }
 };
 
@@ -226,13 +227,17 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "use-16bit-internal", 0, "Force use of 16-bit pipeline"),
   .dropframe_thresh =
       ARG_DEF(NULL, "drop-frame", 1, "Temporal resampling threshold (buf %)"),
-  .resize_mode = ARG_DEF(NULL, "resize-mode", 1, "Frame resize mode"),
+  .resize_mode = ARG_DEF(
+      NULL, "resize-mode", 1,
+      "Frame resize mode (0: off (default), 1: fixed, 2: random, 3: dynamic)"),
   .resize_denominator =
       ARG_DEF(NULL, "resize-denominator", 1, "Frame resize denominator"),
   .resize_kf_denominator = ARG_DEF(NULL, "resize-kf-denominator", 1,
                                    "Frame resize keyframe denominator"),
   .superres_mode =
-      ARG_DEF(NULL, "superres-mode", 1, "Frame super-resolution mode"),
+      ARG_DEF(NULL, "superres-mode", 1,
+              "Frame super-resolution mode (0: disabled (default), 1: fixed, "
+              "2: random, 3: qthresh, 4: auto)"),
   .superres_denominator = ARG_DEF(NULL, "superres-denominator", 1,
                                   "Frame super-resolution denominator"),
   .superres_kf_denominator =
@@ -495,6 +500,16 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
 #endif
   .partition_info_path = ARG_DEF(NULL, "partition-info-path", 1,
                                  "Partition information read and write path"),
+  .enable_rate_guide_deltaq =
+      ARG_DEF(NULL, "enable-rate-guide-deltaq", 1,
+              "Enable rate guide deltaq (1), by default off (0). "
+              "It requires --deltaq-mode=3. "
+              "If turned on, it requires an input file specified "
+              "by --rate-distribution-info."),
+  .rate_distribution_info =
+      ARG_DEF(NULL, "rate-distribution-info", 1,
+              "Rate distribution information input."
+              "It requires --enable-rate-guide-deltaq=1."),
   .film_grain_test = ARG_DEF(
       NULL, "film-grain-test", 1,
       "Film grain test vectors (0: none (default), 1: test-1  2: test-2, "

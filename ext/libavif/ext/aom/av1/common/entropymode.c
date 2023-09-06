@@ -1066,7 +1066,7 @@ void av1_setup_frame_contexts(AV1_COMMON *cm) {
       RefCntBuffer *const buf = get_ref_frame_buf(cm, i);
       if (buf != NULL) buf->frame_context = *cm->fc;
     }
-    for (int i = 0; i < FRAME_BUFFERS; ++i)
+    for (int i = 0; i < cm->buffer_pool->num_frame_bufs; ++i)
       cm->buffer_pool->frame_bufs[i].frame_context = *cm->fc;
   }
 }
