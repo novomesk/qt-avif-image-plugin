@@ -762,9 +762,9 @@ bool QAVIFHandler::write(const QImage &image)
                     if (save_depth == 8) {
                         save_depth = 10;
                         if (tmpcolorimage.hasAlphaChannel()) {
-                            tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBA64);
+                            tmpcolorimage.convertTo(QImage::Format_RGBA64);
                         } else {
-                            tmpcolorimage = tmpcolorimage.convertToFormat(QImage::Format_RGBX64);
+                            tmpcolorimage.convertTo(QImage::Format_RGBX64);
                         }
                     }
 
