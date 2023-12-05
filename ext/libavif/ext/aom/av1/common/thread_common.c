@@ -550,7 +550,7 @@ void av1_loop_restoration_alloc(AV1LrSync *lr_sync, AV1_COMMON *cm,
 }
 
 // Deallocate loop restoration synchronization related mutex and data
-void av1_loop_restoration_dealloc(AV1LrSync *lr_sync, int num_workers) {
+void av1_loop_restoration_dealloc(AV1LrSync *lr_sync) {
   if (lr_sync != NULL) {
     int j;
 #if CONFIG_MULTITHREAD
@@ -581,7 +581,8 @@ void av1_loop_restoration_dealloc(AV1LrSync *lr_sync, int num_workers) {
     aom_free(lr_sync->job_queue);
 
     if (lr_sync->lrworkerdata) {
-      for (int worker_idx = 0; worker_idx < num_workers - 1; worker_idx++) {
+      for (int worker_idx = 0; worker_idx < lr_sync->num_workers - 1;
+           worker_idx++) {
         LRWorkerData *const workerdata_data =
             lr_sync->lrworkerdata + worker_idx;
 
@@ -785,7 +786,7 @@ static void foreach_rest_unit_in_planes_mt(AV1LrStruct *lr_ctxt,
 
   if (!lr_sync->sync_range || num_rows_lr > lr_sync->rows ||
       num_workers > lr_sync->num_workers || num_planes > lr_sync->num_planes) {
-    av1_loop_restoration_dealloc(lr_sync, num_workers);
+    av1_loop_restoration_dealloc(lr_sync);
     av1_loop_restoration_alloc(lr_sync, cm, num_workers, num_rows_lr,
                                num_planes, cm->width);
   }

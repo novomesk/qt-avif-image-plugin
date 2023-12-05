@@ -48,11 +48,16 @@
 static int check_trailing_bits(GetBits *const gb,
                                const int strict_std_compliance)
 {
-    if (!dav1d_get_bit(gb) || gb->state || gb->error) // trailing_one_bit + trailing_zero_bit
+    const int trailing_one_bit = dav1d_get_bit(gb);
+
+    if (gb->error)
         return DAV1D_ERR(EINVAL);
 
     if (!strict_std_compliance)
         return 0;
+
+    if (!trailing_one_bit || gb->state)
+        return DAV1D_ERR(EINVAL);
 
     ptrdiff_t size = gb->ptr_end - gb->ptr;
     while (size > 0 && gb->ptr[size - 1] == 0)
@@ -299,7 +304,7 @@ int dav1d_parse_sequence_header(Dav1dSequenceHeader *const out,
 {
     validate_input_or_ret(out != NULL, DAV1D_ERR(EINVAL));
     validate_input_or_ret(ptr != NULL, DAV1D_ERR(EINVAL));
-    validate_input_or_ret(sz > 0, DAV1D_ERR(EINVAL));
+    validate_input_or_ret(sz > 0 && sz <= SIZE_MAX / 2, DAV1D_ERR(EINVAL));
 
     GetBits gb;
     dav1d_init_get_bits(&gb, ptr, sz);
@@ -604,8 +609,8 @@ static int parse_frame_hdr(Dav1dContext *const c, GetBits *const gb) {
             if (!hdr->frame_ref_short_signaling)
                 hdr->refidx[i] = dav1d_get_bits(gb, 3);
             if (seqhdr->frame_id_numbers_present) {
-                const int delta_ref_frame_id_minus_1 = dav1d_get_bits(gb, seqhdr->delta_frame_id_n_bits);
-                const int ref_frame_id = (hdr->frame_id + (1 << seqhdr->frame_id_n_bits) - delta_ref_frame_id_minus_1 - 1) & ((1 << seqhdr->frame_id_n_bits) - 1);
+                const unsigned delta_ref_frame_id = dav1d_get_bits(gb, seqhdr->delta_frame_id_n_bits) + 1;
+                const unsigned ref_frame_id = (hdr->frame_id + (1 << seqhdr->frame_id_n_bits) - delta_ref_frame_id) & ((1 << seqhdr->frame_id_n_bits) - 1);
                 Dav1dFrameHeader *const ref_frame_hdr = c->refs[hdr->refidx[i]].p.p.frame_hdr;
                 if (!ref_frame_hdr || ref_frame_hdr->frame_id != ref_frame_id) goto error;
             }
@@ -700,7 +705,8 @@ static int parse_frame_hdr(Dav1dContext *const c, GetBits *const gb) {
             goto error;
         hdr->tiling.n_bytes = dav1d_get_bits(gb, 2) + 1;
     } else {
-        hdr->tiling.n_bytes = hdr->tiling.update = 0;
+        hdr->tiling.n_bytes = 0;
+        hdr->tiling.update = 0;
     }
 #if DEBUG_FRAME_HDR
     printf("HDR: post-tiling: off=%td\n",
@@ -734,7 +740,7 @@ static int parse_frame_hdr(Dav1dContext *const c, GetBits *const gb) {
         hdr->quant.qm_y = dav1d_get_bits(gb, 4);
         hdr->quant.qm_u = dav1d_get_bits(gb, 4);
         hdr->quant.qm_v =
-            seqhdr->separate_uv_delta_q ? (int)dav1d_get_bits(gb, 4) :
+            seqhdr->separate_uv_delta_q ? dav1d_get_bits(gb, 4) :
                                           hdr->quant.qm_u;
     }
 #if DEBUG_FRAME_HDR
@@ -1211,7 +1217,8 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
     dav1d_init_get_bits(&gb, in->data, in->sz);
 
     // obu header
-    dav1d_get_bit(&gb); // obu_forbidden_bit
+    const int obu_forbidden_bit = dav1d_get_bit(&gb);
+    if (c->strict_std_compliance && obu_forbidden_bit) goto error;
     const enum Dav1dObuType type = dav1d_get_bits(&gb, 4);
     const int has_extension = dav1d_get_bit(&gb);
     const int has_length_field = dav1d_get_bit(&gb);
@@ -1254,10 +1261,6 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
         Dav1dSequenceHeader *seq_hdr = ref->data;
         if ((res = parse_seq_hdr(seq_hdr, &gb, c->strict_std_compliance)) < 0) {
             dav1d_log(c, "Error parsing sequence header\n");
-            dav1d_ref_dec(&ref);
-            goto error;
-        }
-        if (gb.error) {
             dav1d_ref_dec(&ref);
             goto error;
         }
@@ -1364,7 +1367,8 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
         if (!c->frame_hdr) goto error;
         if (c->n_tile_data_alloc < c->n_tile_data + 1) {
             if ((c->n_tile_data + 1) > INT_MAX / (int)sizeof(*c->tile)) goto error;
-            struct Dav1dTileGroup *tile = realloc(c->tile, (c->n_tile_data + 1) * sizeof(*c->tile));
+            struct Dav1dTileGroup *tile = dav1d_realloc(ALLOC_TILE, c->tile,
+                                                        (c->n_tile_data + 1) * sizeof(*c->tile));
             if (!tile) goto error;
             c->tile = tile;
             memset(c->tile + c->n_tile_data, 0, sizeof(*c->tile));
@@ -1404,7 +1408,8 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
 
         switch (meta_type) {
         case OBU_META_HDR_CLL: {
-            Dav1dRef *ref = dav1d_ref_create(sizeof(Dav1dContentLightLevel));
+            Dav1dRef *ref = dav1d_ref_create(ALLOC_OBU_META,
+                                             sizeof(Dav1dContentLightLevel));
             if (!ref) return DAV1D_ERR(ENOMEM);
             Dav1dContentLightLevel *const content_light = ref->data;
 
@@ -1432,7 +1437,8 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
             break;
         }
         case OBU_META_HDR_MDCV: {
-            Dav1dRef *ref = dav1d_ref_create(sizeof(Dav1dMasteringDisplay));
+            Dav1dRef *ref = dav1d_ref_create(ALLOC_OBU_META,
+                                             sizeof(Dav1dMasteringDisplay));
             if (!ref) return DAV1D_ERR(ENOMEM);
             Dav1dMasteringDisplay *const mastering_display = ref->data;
 
@@ -1501,7 +1507,8 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
             }
 
             if ((c->n_itut_t35 + 1) > INT_MAX / (int)sizeof(*c->itut_t35)) goto error;
-            struct Dav1dITUTT35 *itut_t35 = realloc(c->itut_t35, (c->n_itut_t35 + 1) * sizeof(*c->itut_t35));
+            struct Dav1dITUTT35 *itut_t35 = dav1d_realloc(ALLOC_OBU_META, c->itut_t35,
+                                                          (c->n_itut_t35 + 1) * sizeof(*c->itut_t35));
             if (!itut_t35) goto error;
             c->itut_t35 = itut_t35;
             memset(c->itut_t35 + c->n_itut_t35, 0, sizeof(*c->itut_t35));
@@ -1509,7 +1516,7 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
             struct itut_t35_ctx_context *itut_t35_ctx;
             if (!c->n_itut_t35) {
                 assert(!c->itut_t35_ref);
-                itut_t35_ctx = malloc(sizeof(struct itut_t35_ctx_context));
+                itut_t35_ctx = dav1d_malloc(ALLOC_OBU_META, sizeof(struct itut_t35_ctx_context));
                 if (!itut_t35_ctx) goto error;
                 c->itut_t35_ref = dav1d_ref_init(&itut_t35_ctx->ref, c->itut_t35,
                                                  dav1d_picture_free_itut_t35, itut_t35_ctx, 0);
@@ -1522,7 +1529,7 @@ ptrdiff_t dav1d_parse_obus(Dav1dContext *const c, Dav1dData *const in) {
             itut_t35_ctx->n_itut_t35 = c->n_itut_t35 + 1;
 
             Dav1dITUTT35 *const itut_t35_metadata = &c->itut_t35[c->n_itut_t35];
-            itut_t35_metadata->payload = malloc(payload_size);
+            itut_t35_metadata->payload = dav1d_malloc(ALLOC_OBU_META, payload_size);
             if (!itut_t35_metadata->payload) goto error;
 
             itut_t35_metadata->country_code = country_code;

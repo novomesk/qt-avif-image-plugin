@@ -175,7 +175,7 @@ void av1_loop_restoration_filter_frame_mt(YV12_BUFFER_CONFIG *frame,
                                           int optimized_lr, AVxWorker *workers,
                                           int num_workers, AV1LrSync *lr_sync,
                                           void *lr_ctxt, int do_extend_border);
-void av1_loop_restoration_dealloc(AV1LrSync *lr_sync, int num_workers);
+void av1_loop_restoration_dealloc(AV1LrSync *lr_sync);
 void av1_loop_restoration_alloc(AV1LrSync *lr_sync, AV1_COMMON *cm,
                                 int num_workers, int num_rows_lr,
                                 int num_planes, int width);

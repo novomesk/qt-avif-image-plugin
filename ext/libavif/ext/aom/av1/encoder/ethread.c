@@ -734,7 +734,7 @@ void av1_init_mt_sync(AV1_COMP *cpi, int is_first_pass) {
       if (!lr_sync->sync_range || num_rows_lr > lr_sync->rows ||
           num_lr_workers > lr_sync->num_workers ||
           MAX_MB_PLANE > lr_sync->num_planes) {
-        av1_loop_restoration_dealloc(lr_sync, num_lr_workers);
+        av1_loop_restoration_dealloc(lr_sync);
         av1_loop_restoration_alloc(lr_sync, cm, num_lr_workers, num_rows_lr,
                                    MAX_MB_PLANE, cm->width);
       }
@@ -3028,7 +3028,8 @@ static AOM_INLINE int compute_num_ai_workers(AV1_COMP *cpi) {
   return AOMMIN(num_mb_rows, cpi->oxcf.max_threads);
 }
 
-int compute_num_mod_workers(AV1_COMP *cpi, MULTI_THREADED_MODULES mod_name) {
+static int compute_num_mod_workers(AV1_COMP *cpi,
+                                   MULTI_THREADED_MODULES mod_name) {
   int num_mod_workers = 0;
   switch (mod_name) {
     case MOD_FP:
@@ -3068,7 +3069,8 @@ int compute_num_mod_workers(AV1_COMP *cpi, MULTI_THREADED_MODULES mod_name) {
 }
 // Computes the number of workers for each MT modules in the encoder
 void av1_compute_num_workers_for_mt(AV1_COMP *cpi) {
-  for (int i = MOD_FP; i < NUM_MT_MODULES; i++)
+  for (int i = MOD_FP; i < NUM_MT_MODULES; i++) {
     cpi->ppi->p_mt_info.num_mod_workers[i] =
         compute_num_mod_workers(cpi, (MULTI_THREADED_MODULES)i);
+  }
 }

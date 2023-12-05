@@ -1366,8 +1366,9 @@ static void set_rt_speed_feature_framesize_dependent(const AV1_COMP *const cpi,
     if (speed == 7) {
       sf->rt_sf.prefer_large_partition_blocks = 1;
       // Enable this feature for [360p, 720p] resolution range initially.
+      // Only enable for low bitdepth to mitigate issue: b/303023614.
       if (!cpi->rc.rtc_external_ratectrl &&
-          AOMMIN(cm->width, cm->height) <= 720)
+          AOMMIN(cm->width, cm->height) <= 720 && !cpi->oxcf.use_highbitdepth)
         sf->hl_sf.accurate_bit_estimate = cpi->oxcf.q_cfg.aq_mode == NO_AQ;
     }
     if (speed >= 7) {
@@ -1576,6 +1577,10 @@ static void set_rt_speed_feature_framesize_dependent(const AV1_COMP *const cpi,
     // TODO(aomedia:3412): The setting accurate_bit_estimate = 0
     // can be removed once it's fixed for lossless mode.
     sf->hl_sf.accurate_bit_estimate = 0;
+  }
+  if (cpi->oxcf.use_highbitdepth) {
+    // Disable for use_highbitdepth = 1 to mitigate issue: b/303023614.
+    sf->rt_sf.estimate_motion_for_var_based_partition = 0;
   }
 }
 

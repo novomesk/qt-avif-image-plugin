@@ -251,10 +251,10 @@ static void check_cfl_pred(Dav1dIntraPredDSPContext *const c) {
 static void check_pal_pred(Dav1dIntraPredDSPContext *const c) {
     PIXEL_RECT(c_dst, 64, 64);
     PIXEL_RECT(a_dst, 64, 64);
-    ALIGN_STK_64(uint8_t, idx, 64 * 64,);
-    ALIGN_STK_16(uint16_t, pal, 8,);
+    ALIGN_STK_64(uint8_t, idx, 32 * 64,);
+    ALIGN_STK_16(pixel, pal, 8,);
 
-    declare_func(void, pixel *dst, ptrdiff_t stride, const uint16_t *pal,
+    declare_func(void, pixel *dst, ptrdiff_t stride, const pixel *pal,
                  const uint8_t *idx, int w, int h);
 
     for (int w = 4; w <= 64; w <<= 1)
@@ -270,8 +270,8 @@ static void check_pal_pred(Dav1dIntraPredDSPContext *const c) {
                 for (int i = 0; i < 8; i++)
                     pal[i] = rnd() & bitdepth_max;
 
-                for (int i = 0; i < w * h; i++)
-                    idx[i] = rnd() & 7;
+                for (int i = 0; i < w * h / 2; i++)
+                    idx[i] = rnd() & 0x77;
 
                 CLEAR_PIXEL_RECT(c_dst);
                 CLEAR_PIXEL_RECT(a_dst);

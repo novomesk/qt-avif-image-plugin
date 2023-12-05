@@ -1,6 +1,6 @@
 /*
- * Copyright © 2021, VideoLAN and dav1d authors
- * Copyright © 2021, Two Orioles, LLC
+ * Copyright © 2023, VideoLAN and dav1d authors
+ * Copyright © 2023, Two Orioles, LLC
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,17 +25,19 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "src/cpu.h"
-#include "src/refmvs.h"
+#ifndef DAV1D_SRC_PAL_H
+#define DAV1D_SRC_PAL_H
 
-decl_save_tmvs_fn(dav1d_save_tmvs_neon);
-decl_splat_mv_fn(dav1d_splat_mv_neon);
+#include <stdint.h>
 
-static ALWAYS_INLINE void refmvs_dsp_init_arm(Dav1dRefmvsDSPContext *const c) {
-    const unsigned flags = dav1d_get_cpu_flags();
+#define decl_pal_idx_finish_fn(name) \
+void (name)(uint8_t *dst, const uint8_t *src, int bw, int bh, int w, int h)
+typedef decl_pal_idx_finish_fn(*pal_idx_finish_fn);
 
-    if (!(flags & DAV1D_ARM_CPU_FLAG_NEON)) return;
+typedef struct Dav1dPalDSPContext {
+    pal_idx_finish_fn pal_idx_finish;
+} Dav1dPalDSPContext;
 
-    c->save_tmvs = dav1d_save_tmvs_neon;
-    c->splat_mv = dav1d_splat_mv_neon;
-}
+void dav1d_pal_dsp_init(Dav1dPalDSPContext *dsp);
+
+#endif /* DAV1D_SRC_PAL_H */

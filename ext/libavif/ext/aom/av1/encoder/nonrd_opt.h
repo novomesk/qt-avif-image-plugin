@@ -392,12 +392,12 @@ DECLARE_ALIGNED(16, static const int16_t, av1_fast_idtx_iscan_16x16[256]) = {
 // Indicates the blocks for which RD model should be based on special logic
 static INLINE int get_model_rd_flag(const AV1_COMP *cpi, const MACROBLOCKD *xd,
                                     BLOCK_SIZE bsize) {
-  const int large_block = bsize >= BLOCK_32X32;
   const AV1_COMMON *const cm = &cpi->common;
+  const int large_block = bsize >= BLOCK_32X32;
+  // Only enable for low bitdepth to mitigate issue: b/303023614.
   return cpi->oxcf.rc_cfg.mode == AOM_CBR && large_block &&
          !cyclic_refresh_segment_id_boosted(xd->mi[0]->segment_id) &&
-         cm->quant_params.base_qindex &&
-         cm->seq_params->bit_depth == AOM_BITS_8;
+         cm->quant_params.base_qindex && !cpi->oxcf.use_highbitdepth;
 }
 /*!\brief Finds predicted motion vectors for a block.
  *

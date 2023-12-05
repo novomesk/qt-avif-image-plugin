@@ -3365,6 +3365,11 @@ typedef struct AV1_COMP {
   uint8_t *consec_zero_mv;
 
   /*!
+   * Allocated memory size for |consec_zero_mv|.
+   */
+  int consec_zero_mv_alloc_size;
+
+  /*!
    * Block size of first pass encoding
    */
   BLOCK_SIZE fp_block_size;

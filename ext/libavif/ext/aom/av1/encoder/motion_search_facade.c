@@ -226,10 +226,10 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
         // Store start_mv candidate and corresponding ref_mv_idx of full-pel
         // search in the mv stack (except last ref_mv_idx).
         if (mbmi->ref_mv_idx != MAX_REF_MV_SEARCH - 1) {
+          assert(args->start_mv_cnt < (MAX_REF_MV_SEARCH - 1) * 2);
           args->start_mv_stack[args->start_mv_cnt] = fmv_cand->as_fullmv;
           args->ref_mv_idx_stack[args->start_mv_cnt] = mbmi->ref_mv_idx;
           args->start_mv_cnt++;
-          assert(args->start_mv_cnt <= (MAX_REF_MV_SEARCH - 1) * 2);
         }
       }
     }

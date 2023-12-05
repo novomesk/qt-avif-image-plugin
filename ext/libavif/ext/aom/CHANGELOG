@@ -1,3 +1,17 @@
+2023-11-17 v3.7.1
+  This release includes several bug fixes. This release is ABI
+  compatible with the last release. See
+  https://aomedia.googlesource.com/aom/+log/v3.7.0..v3.7.1 for all the
+  commits in this release.
+
+  - Bug Fixes
+    * aomedia:3349: heap overflow when increasing resolution
+    * aomedia:3478: GCC 12.2.0 emits a -Wstringop-overflow warning on
+      aom/av1/encoder/motion_search_facade.c
+    * aomedia:3489: Detect encoder and image high bit depth mismatch
+    * aomedia:3491: heap-buffer-overflow on frame size change
+    * b/303023614:  Segfault at encoding time for high bit depth images
+
 2023-08-10 v3.7.0
   This release includes new codec interfaces, compression efficiency and
   perceptual improvements, speedup and memory optimizations and many bug fixes.

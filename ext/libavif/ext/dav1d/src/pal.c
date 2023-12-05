@@ -1,6 +1,6 @@
 /*
- * Copyright © 2018, VideoLAN and dav1d authors
- * Copyright © 2018, Two Orioles, LLC
+ * Copyright © 2023, VideoLAN and dav1d authors
+ * Copyright © 2023, Two Orioles, LLC
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,37 +25,53 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef DAV1D_COMMON_VALIDATE_H
-#define DAV1D_COMMON_VALIDATE_H
+#include "config.h"
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <string.h>
 
-#if defined(NDEBUG)
-#define debug_print(...) do {} while (0)
-#define debug_abort() do {} while (0)
-#else
-#define debug_print(...) fprintf(stderr, __VA_ARGS__)
-#define debug_abort abort
+#include "common/attributes.h"
+
+#include "src/pal.h"
+
+// fill invisible edges and pack to 4-bit (2 pixels per byte)
+static void pal_idx_finish_c(uint8_t *dst, const uint8_t *src,
+                             const int bw, const int bh,
+                             const int w, const int h)
+{
+    assert(bw >= 4 && bw <= 64 && !(bw & (bw - 1)));
+    assert(bh >= 4 && bh <= 64 && !(bh & (bh - 1)));
+    assert(w  >= 4 && w <= bw && !(w & 3));
+    assert(h  >= 4 && h <= bh && !(h & 3));
+
+    const int dst_w = w / 2;
+    const int dst_bw = bw / 2;
+
+    for (int y = 0; y < h; y++, src += bw, dst += dst_bw) {
+        for (int x = 0; x < dst_w; x++)
+            dst[x] = src[x * 2 + 0] | (src[x * 2 + 1] << 4);
+        if (dst_w < dst_bw)
+            memset(dst + dst_w, src[w - 1] * 0x11, dst_bw - dst_w);
+    }
+
+    if (h < bh) {
+        const uint8_t *const last_row = &dst[-dst_bw];
+        for (int y = h; y < bh; y++, dst += dst_bw)
+            memcpy(dst, last_row, dst_bw);
+    }
+}
+
+#if HAVE_ASM
+#if ARCH_X86
+#include "src/x86/pal.h"
+#endif
 #endif
 
-#define validate_input_or_ret_with_msg(x, r, ...) \
-    if (!(x)) { \
-        debug_print("Input validation check \'%s\' failed in %s!\n", \
-                    #x, __func__); \
-        debug_print(__VA_ARGS__); \
-        debug_abort(); \
-        return r; \
-    }
+COLD void dav1d_pal_dsp_init(Dav1dPalDSPContext *const c) {
+    c->pal_idx_finish = pal_idx_finish_c;
 
-#define validate_input_or_ret(x, r) \
-    if (!(x)) { \
-        debug_print("Input validation check \'%s\' failed in %s!\n", \
-                    #x, __func__); \
-        debug_abort(); \
-        return r; \
-    }
-
-#define validate_input(x) validate_input_or_ret(x, )
-
-#endif /* DAV1D_COMMON_VALIDATE_H */
+#if HAVE_ASM
+#if ARCH_X86
+    pal_dsp_init_x86(c);
+#endif
+#endif
+}

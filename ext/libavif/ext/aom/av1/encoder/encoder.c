@@ -152,8 +152,8 @@ int av1_set_active_map(AV1_COMP *cpi, unsigned char *new_map_16x16, int rows,
     unsigned char *const active_map_4x4 = cpi->active_map.map;
     const int mi_rows = mi_params->mi_rows;
     const int mi_cols = mi_params->mi_cols;
-    const int row_scale = mi_size_high[BLOCK_16X16] == 2 ? 1 : 2;
-    const int col_scale = mi_size_wide[BLOCK_16X16] == 2 ? 1 : 2;
+    const int row_scale = mi_size_high_log2[BLOCK_16X16];
+    const int col_scale = mi_size_wide_log2[BLOCK_16X16];
     cpi->active_map.update = 0;
     assert(mi_rows % 2 == 0);
     assert(mi_cols % 2 == 0);
@@ -185,8 +185,8 @@ int av1_get_active_map(AV1_COMP *cpi, unsigned char *new_map_16x16, int rows,
     unsigned char *const seg_map_8x8 = cpi->enc_seg.map;
     const int mi_rows = mi_params->mi_rows;
     const int mi_cols = mi_params->mi_cols;
-    const int row_scale = mi_size_high[BLOCK_16X16] == 2 ? 1 : 2;
-    const int col_scale = mi_size_wide[BLOCK_16X16] == 2 ? 1 : 2;
+    const int row_scale = mi_size_high_log2[BLOCK_16X16];
+    const int col_scale = mi_size_wide_log2[BLOCK_16X16];
     assert(mi_rows % 2 == 0);
     assert(mi_cols % 2 == 0);
 
@@ -907,18 +907,16 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
   cm->width = frm_dim_cfg->width;
   cm->height = frm_dim_cfg->height;
 
-  if (initial_dimensions->width || is_sb_size_changed) {
-    if (cm->width > initial_dimensions->width ||
-        cm->height > initial_dimensions->height || is_sb_size_changed) {
-      av1_free_context_buffers(cm);
-      av1_free_shared_coeff_buffer(&cpi->td.shared_coeff_buf);
-      av1_free_sms_tree(&cpi->td);
-      av1_free_pmc(cpi->td.firstpass_ctx, av1_num_planes(cm));
-      cpi->td.firstpass_ctx = NULL;
-      alloc_compressor_data(cpi);
-      realloc_segmentation_maps(cpi);
-      initial_dimensions->width = initial_dimensions->height = 0;
-    }
+  if (cm->width > initial_dimensions->width ||
+      cm->height > initial_dimensions->height || is_sb_size_changed) {
+    av1_free_context_buffers(cm);
+    av1_free_shared_coeff_buffer(&cpi->td.shared_coeff_buf);
+    av1_free_sms_tree(&cpi->td);
+    av1_free_pmc(cpi->td.firstpass_ctx, av1_num_planes(cm));
+    cpi->td.firstpass_ctx = NULL;
+    alloc_compressor_data(cpi);
+    realloc_segmentation_maps(cpi);
+    initial_dimensions->width = initial_dimensions->height = 0;
   }
   av1_update_frame_size(cpi);
 
@@ -1486,9 +1484,11 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
     max_mi_rows = size_in_mi(oxcf->frm_dim_cfg.forced_max_frame_height);
   }
 
-  CHECK_MEM_ERROR(cm, cpi->consec_zero_mv,
-                  aom_calloc((max_mi_rows * max_mi_cols) >> 2,
-                             sizeof(*cpi->consec_zero_mv)));
+  const int consec_zero_mv_alloc_size = (max_mi_rows * max_mi_cols) >> 2;
+  CHECK_MEM_ERROR(
+      cm, cpi->consec_zero_mv,
+      aom_calloc(consec_zero_mv_alloc_size, sizeof(*cpi->consec_zero_mv)));
+  cpi->consec_zero_mv_alloc_size = consec_zero_mv_alloc_size;
 
   cpi->mb_weber_stats = NULL;
   cpi->mb_delta_q = NULL;
@@ -1723,9 +1723,7 @@ void av1_remove_compressor(AV1_COMP *cpi) {
     av1_loop_filter_dealloc(&mt_info->lf_row_sync);
     av1_cdef_mt_dealloc(&mt_info->cdef_sync);
 #if !CONFIG_REALTIME_ONLY
-    int num_lr_workers =
-        av1_get_num_mod_workers_for_alloc(&cpi->ppi->p_mt_info, MOD_LR);
-    av1_loop_restoration_dealloc(&mt_info->lr_row_sync, num_lr_workers);
+    av1_loop_restoration_dealloc(&mt_info->lr_row_sync);
     av1_gm_dealloc(&mt_info->gm_sync);
     av1_tf_mt_dealloc(&mt_info->tf_sync);
 #endif
@@ -2576,9 +2574,18 @@ static int encode_without_recode(AV1_COMP *cpi) {
       cm, unscaled, &cpi->scaled_source, filter_scaler, phase_scaler, true,
       false, cpi->oxcf.border_in_pixels, cpi->image_pyramid_levels);
   if (frame_is_intra_only(cm) || resize_pending != 0) {
-    memset(cpi->consec_zero_mv, 0,
-           ((cm->mi_params.mi_rows * cm->mi_params.mi_cols) >> 2) *
-               sizeof(*cpi->consec_zero_mv));
+    const int current_size =
+        (cm->mi_params.mi_rows * cm->mi_params.mi_cols) >> 2;
+    if (cpi->consec_zero_mv &&
+        (cpi->consec_zero_mv_alloc_size < current_size)) {
+      aom_free(cpi->consec_zero_mv);
+      cpi->consec_zero_mv_alloc_size = 0;
+      CHECK_MEM_ERROR(cm, cpi->consec_zero_mv,
+                      aom_malloc(current_size * sizeof(*cpi->consec_zero_mv)));
+      cpi->consec_zero_mv_alloc_size = current_size;
+    }
+    assert(cpi->consec_zero_mv != NULL);
+    memset(cpi->consec_zero_mv, 0, current_size * sizeof(*cpi->consec_zero_mv));
   }
 
   if (cpi->unscaled_last_source != NULL) {
