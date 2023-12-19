@@ -1,4 +1,4 @@
-version: 0.7.0.{build}
+version: 0.7.1.{build}
 configuration: Release
 platform: x64
 install:
@@ -98,20 +98,20 @@ build_script:
 
     nmake.exe
 
-    cd ..\qtbuild_6.2.4
+    cd ..\qtbuild_6.5.3
 
-    C:\Qt\6.2.4\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
+    C:\Qt\6.5.3\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
 
     nmake.exe
 
-    cd ..\qtbuild_6.2.4-ro
+    cd ..\qtbuild_6.5.3-ro
 
-    C:\Qt\6.2.4\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
+    C:\Qt\6.5.3\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
 
     nmake.exe
 
 artifacts:
-- path: plugins\imageformats\qavif.dll
-- path: qtbuild_5.15.2-ro\plugins\imageformats\qavif.dll
-- path: qtbuild_6.2.4\plugins\imageformats\qavif.dll
-- path: qtbuild_6.2.4-ro\plugins\imageformats\qavif.dll
+- path: plugins\imageformats\*.dll
+- path: qtbuild_5.15.2-ro\plugins\imageformats\*.dll
+- path: qtbuild_6.5.3\*.dll
+- path: qtbuild_6.5.3-ro\*.dll
