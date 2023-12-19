@@ -15,6 +15,7 @@
 #include "config/aom_dsp_rtcd.h"
 
 #include "aom/aom_integer.h"
+#include "aom_dsp/arm/sum_neon.h"
 #include "aom_dsp/intrapred_common.h"
 
 // -----------------------------------------------------------------------------
@@ -191,7 +192,7 @@ static INLINE int highbd_dc_predictor_rect(int bw, int bh, int sum, int shift1,
     uint16x8_t sum_above = highbd_dc_load_partial_sum_##w(above);       \
     uint16x8_t sum_left = highbd_dc_load_partial_sum_##h(left);         \
     uint16x8_t sum_vec = vaddq_u16(sum_left, sum_above);                \
-    int sum = horizontal_add_and_broadcast_long_u16x8(sum_vec)[0];      \
+    int sum = horizontal_add_u16x8(sum_vec);                            \
     int dc0 = highbd_dc_predictor_rect((w), (h), sum, (shift), (mult)); \
     highbd_dc_store_##w##xh(dst, stride, (h), vdup##q##_n_u16(dc0));    \
   }

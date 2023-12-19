@@ -67,22 +67,7 @@ SIMD_INLINE void u32_store_aligned(void *p, uint32_t a) {
   *((uint32_t *)p) = a;
 }
 
-SIMD_INLINE void u32_store_unaligned(void *p, uint32_t a) {
-#if defined(__clang__)
-  vst1_lane_u32((uint32_t *)p, vreinterpret_u32_s64((uint64x1_t)(uint64_t)a),
-                0);
-#elif defined(__CC_ARM)
-  *(__packed uint32_t *)p) = a;
-#elif defined(__GNUC__)
-  struct Unaligned32Struct {
-    uint32_t value;
-    uint8_t dummy;  // To make the size non-power-of-two.
-  } __attribute__((__packed__));
-  ((struct Unaligned32Struct *)p)->value = a;
-#else
-  memcpy(p, &a, 4);
-#endif
-}
+SIMD_INLINE void u32_store_unaligned(void *p, uint32_t a) { memcpy(p, &a, 4); }
 
 SIMD_INLINE v64 v64_load_aligned(const void *p) {
   return vreinterpret_s64_u8(vld1_u8((const uint8_t *)p));

@@ -27,8 +27,6 @@ extern "C" {
 
 /*!\cond */
 
-#undef MAX_SB_SIZE
-
 // Max superblock size
 #define MAX_SB_SIZE_LOG2 7
 #define MAX_SB_SIZE (1 << MAX_SB_SIZE_LOG2)
@@ -199,7 +197,7 @@ typedef char PARTITION_CONTEXT;
 #define TX_PAD_END 16
 #define TX_PAD_2D ((32 + TX_PAD_HOR) * (32 + TX_PAD_VER) + TX_PAD_END)
 
-// Number of maxium size transform blocks in the maximum size superblock
+// Number of maximum size transform blocks in the maximum size superblock
 #define MAX_TX_BLOCKS_IN_MAX_SB_LOG2 ((MAX_SB_SIZE_LOG2 - MAX_TX_SIZE_LOG2) * 2)
 #define MAX_TX_BLOCKS_IN_MAX_SB (1 << MAX_TX_BLOCKS_IN_MAX_SB_LOG2)
 

@@ -24,7 +24,7 @@
 // DC 4x4
 
 static INLINE uint16x8_t dc_load_sum_4(const uint8_t *in) {
-  const uint8x8_t a = load_u8_4x1_lane0(in);
+  const uint8x8_t a = load_u8_4x1(in);
   const uint16x4_t p0 = vpaddl_u8(a);
   const uint16x4_t p1 = vpadd_u16(p0, p0);
   return vcombine_u16(p1, vdup_n_u16(0));
@@ -354,7 +354,7 @@ static INLINE int calculate_dc_from_sum(int bw, int bh, uint32_t sum,
 
 void aom_dc_predictor_4x8_neon(uint8_t *dst, ptrdiff_t stride,
                                const uint8_t *above, const uint8_t *left) {
-  uint8x8_t a = load_u8_4x1_lane0(above);
+  uint8x8_t a = load_u8_4x1(above);
   uint8x8_t l = vld1_u8(left);
   uint32_t sum = horizontal_add_u16x8(vaddl_u8(a, l));
   uint32_t dc = calculate_dc_from_sum(4, 8, sum, 2, DC_MULTIPLIER_1X2);
@@ -364,7 +364,7 @@ void aom_dc_predictor_4x8_neon(uint8_t *dst, ptrdiff_t stride,
 void aom_dc_predictor_8x4_neon(uint8_t *dst, ptrdiff_t stride,
                                const uint8_t *above, const uint8_t *left) {
   uint8x8_t a = vld1_u8(above);
-  uint8x8_t l = load_u8_4x1_lane0(left);
+  uint8x8_t l = load_u8_4x1(left);
   uint32_t sum = horizontal_add_u16x8(vaddl_u8(a, l));
   uint32_t dc = calculate_dc_from_sum(8, 4, sum, 2, DC_MULTIPLIER_1X2);
   dc_store_8xh(dst, stride, 4, vdup_n_u8(dc));
@@ -372,7 +372,7 @@ void aom_dc_predictor_8x4_neon(uint8_t *dst, ptrdiff_t stride,
 
 void aom_dc_predictor_4x16_neon(uint8_t *dst, ptrdiff_t stride,
                                 const uint8_t *above, const uint8_t *left) {
-  uint8x8_t a = load_u8_4x1_lane0(above);
+  uint8x8_t a = load_u8_4x1(above);
   uint8x16_t l = vld1q_u8(left);
   uint16x8_t sum_al = vaddw_u8(vpaddlq_u8(l), a);
   uint32_t sum = horizontal_add_u16x8(sum_al);
@@ -383,7 +383,7 @@ void aom_dc_predictor_4x16_neon(uint8_t *dst, ptrdiff_t stride,
 void aom_dc_predictor_16x4_neon(uint8_t *dst, ptrdiff_t stride,
                                 const uint8_t *above, const uint8_t *left) {
   uint8x16_t a = vld1q_u8(above);
-  uint8x8_t l = load_u8_4x1_lane0(left);
+  uint8x8_t l = load_u8_4x1(left);
   uint16x8_t sum_al = vaddw_u8(vpaddlq_u8(a), l);
   uint32_t sum = horizontal_add_u16x8(sum_al);
   uint32_t dc = calculate_dc_from_sum(16, 4, sum, 2, DC_MULTIPLIER_1X4);
@@ -620,7 +620,7 @@ static INLINE void v_store_64xh(uint8_t *dst, ptrdiff_t stride, int h,
 void aom_v_predictor_4x4_neon(uint8_t *dst, ptrdiff_t stride,
                               const uint8_t *above, const uint8_t *left) {
   (void)left;
-  v_store_4xh(dst, stride, 4, load_u8_4x1_lane0(above));
+  v_store_4xh(dst, stride, 4, load_u8_4x1(above));
 }
 
 void aom_v_predictor_8x8_neon(uint8_t *dst, ptrdiff_t stride,
@@ -646,13 +646,13 @@ void aom_v_predictor_32x32_neon(uint8_t *dst, ptrdiff_t stride,
 void aom_v_predictor_4x8_neon(uint8_t *dst, ptrdiff_t stride,
                               const uint8_t *above, const uint8_t *left) {
   (void)left;
-  v_store_4xh(dst, stride, 8, load_u8_4x1_lane0(above));
+  v_store_4xh(dst, stride, 8, load_u8_4x1(above));
 }
 
 void aom_v_predictor_4x16_neon(uint8_t *dst, ptrdiff_t stride,
                                const uint8_t *above, const uint8_t *left) {
   (void)left;
-  v_store_4xh(dst, stride, 16, load_u8_4x1_lane0(above));
+  v_store_4xh(dst, stride, 16, load_u8_4x1(above));
 }
 
 void aom_v_predictor_8x4_neon(uint8_t *dst, ptrdiff_t stride,
@@ -856,7 +856,7 @@ static INLINE void h_store_64x8(uint8_t *dst, ptrdiff_t stride, uint8x8_t d0) {
 
 void aom_h_predictor_4x4_neon(uint8_t *dst, ptrdiff_t stride,
                               const uint8_t *above, const uint8_t *left) {
-  const uint8x8_t d0 = load_u8_4x1_lane0(left);
+  const uint8x8_t d0 = load_u8_4x1(left);
   (void)above;
   store_u8_4x1(dst + 0 * stride, vdup_lane_u8(d0, 0), 0);
   store_u8_4x1(dst + 1 * stride, vdup_lane_u8(d0, 1), 0);
@@ -907,7 +907,7 @@ void aom_h_predictor_4x16_neon(uint8_t *dst, ptrdiff_t stride,
 
 void aom_h_predictor_8x4_neon(uint8_t *dst, ptrdiff_t stride,
                               const uint8_t *above, const uint8_t *left) {
-  const uint8x8_t d0 = load_u8_4x1_lane0(left);
+  const uint8x8_t d0 = load_u8_4x1(left);
   (void)above;
   vst1_u8(dst + 0 * stride, vdup_lane_u8(d0, 0));
   vst1_u8(dst + 1 * stride, vdup_lane_u8(d0, 1));
@@ -936,7 +936,7 @@ void aom_h_predictor_8x32_neon(uint8_t *dst, ptrdiff_t stride,
 
 void aom_h_predictor_16x4_neon(uint8_t *dst, ptrdiff_t stride,
                                const uint8_t *above, const uint8_t *left) {
-  const uint8x8_t d0 = load_u8_4x1_lane0(left);
+  const uint8x8_t d0 = load_u8_4x1(left);
   (void)above;
   vst1q_u8(dst + 0 * stride, vdupq_lane_u8(d0, 0));
   vst1q_u8(dst + 1 * stride, vdupq_lane_u8(d0, 1));
@@ -1594,8 +1594,10 @@ static void dr_prediction_z2_Nx4_neon(int N, uint8_t *dst, ptrdiff_t stride,
       base_y_c64 = vbic_s16(base_y_c64, vreinterpret_s16_u16(mask64));
 
 #if AOM_ARCH_AARCH64
-      uint8x8_t left_idx0 = vreinterpret_u8_s16(base_y_c64 + 2);  // [0, 16]
-      uint8x8_t left_idx1 = vreinterpret_u8_s16(base_y_c64 + 3);  // [1, 17]
+      uint8x8_t left_idx0 =
+          vreinterpret_u8_s16(vadd_s16(base_y_c64, vdup_n_s16(2)));  // [0, 16]
+      uint8x8_t left_idx1 =
+          vreinterpret_u8_s16(vadd_s16(base_y_c64, vdup_n_s16(3)));  // [1, 17]
 
       uint8x8_t a0_y = vtrn1_u8(vqtbl2_u8(left_vals, left_idx0), v_zero_u8);
       uint8x8_t a1_y = vtrn1_u8(vqtbl2_u8(left_vals, left_idx1), v_zero_u8);
@@ -1777,8 +1779,10 @@ static void dr_prediction_z2_Nx8_neon(int N, uint8_t *dst, ptrdiff_t stride,
       base_y_c128 = vbicq_s16(base_y_c128, vreinterpretq_s16_u16(mask128));
 
 #if AOM_ARCH_AARCH64
-      uint8x16_t left_idx0 = vreinterpretq_u8_s16(base_y_c128 + 2);  // [0, 33]
-      uint8x16_t left_idx1 = vreinterpretq_u8_s16(base_y_c128 + 3);  // [1, 34]
+      uint8x16_t left_idx0 = vreinterpretq_u8_s16(
+          vaddq_s16(base_y_c128, vdupq_n_s16(2)));  // [0, 33]
+      uint8x16_t left_idx1 = vreinterpretq_u8_s16(
+          vaddq_s16(base_y_c128, vdupq_n_s16(3)));  // [1, 34]
       uint8x16_t left_idx01 = vuzp1q_u8(left_idx0, left_idx1);
 
       uint8x16_t a01_x = vqtbl3q_u8(left_vals, left_idx01);
@@ -2025,8 +2029,10 @@ static void dr_prediction_z2_HxW_neon(int H, int W, uint8_t *dst,
 
 #if AOM_ARCH_AARCH64
           // Values in left_idx{0,1} range from 0 through 63 inclusive.
-          uint8x16_t left_idx0 = vreinterpretq_u8_s16(base_y_c256.val[0] + 1);
-          uint8x16_t left_idx1 = vreinterpretq_u8_s16(base_y_c256.val[1] + 1);
+          uint8x16_t left_idx0 = vreinterpretq_u8_s16(
+              vaddq_s16(base_y_c256.val[0], vdupq_n_s16(1)));
+          uint8x16_t left_idx1 = vreinterpretq_u8_s16(
+              vaddq_s16(base_y_c256.val[1], vdupq_n_s16(1)));
 
           uint8x16_t left_idx01 = vuzp1q_u8(left_idx0, left_idx1);
 
@@ -3168,12 +3174,10 @@ static void smooth_4xh_neon(uint8_t *dst, ptrdiff_t stride,
   const uint8_t bottom_left = left_column[height - 1];
   const uint8_t *const weights_y = smooth_weights + height - 4;
 
-  uint8x8_t UNINITIALIZED_IS_SAFE(top_v);
-  load_u8_4x1(top_row, &top_v, 0);
+  uint8x8_t top_v = load_u8_4x1(top_row);
   const uint8x8_t top_right_v = vdup_n_u8(top_right);
   const uint8x8_t bottom_left_v = vdup_n_u8(bottom_left);
-  uint8x8_t UNINITIALIZED_IS_SAFE(weights_x_v);
-  load_u8_4x1(smooth_weights, &weights_x_v, 0);
+  uint8x8_t weights_x_v = load_u8_4x1(smooth_weights);
   const uint8x8_t scaled_weights_x = negate_s8(weights_x_v);
   const uint16x8_t weighted_tr = vmull_u8(scaled_weights_x, top_right_v);
 
@@ -3403,9 +3407,9 @@ SMOOTH_NXM_WIDE(64, 64)
     const uint8_t bottom_left = left_column[height - 1];              \
     const uint8_t *const weights_y = smooth_weights + height - 4;     \
                                                                       \
-    uint8x8_t UNINITIALIZED_IS_SAFE(top_v);                           \
+    uint8x8_t top_v;                                                  \
     if ((W) == 4) {                                                   \
-      load_u8_4x1(top_row, &top_v, 0);                                \
+      top_v = load_u8_4x1(top_row);                                   \
     } else { /* width == 8 */                                         \
       top_v = vld1_u8(top_row);                                       \
     }                                                                 \
@@ -3717,9 +3721,9 @@ static INLINE void paeth_4or8_x_h_neon(uint8_t *dest, ptrdiff_t stride,
                                        int width, int height) {
   const uint8x8_t top_left = vdup_n_u8(top_row[-1]);
   const uint16x8_t top_left_x2 = vdupq_n_u16(top_row[-1] + top_row[-1]);
-  uint8x8_t UNINITIALIZED_IS_SAFE(top);
+  uint8x8_t top;
   if (width == 4) {
-    load_u8_4x1(top_row, &top, 0);
+    top = load_u8_4x1(top_row);
   } else {  // width == 8
     top = vld1_u8(top_row);
   }

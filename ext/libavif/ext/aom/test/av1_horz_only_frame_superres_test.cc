@@ -162,14 +162,13 @@ template <typename Pixel>
 class ConvolveHorizRSTestBase : public ::testing::Test {
  public:
   ConvolveHorizRSTestBase() : image_(nullptr) {}
-  virtual ~ConvolveHorizRSTestBase() {}
-  virtual void TearDown() {}
+  ~ConvolveHorizRSTestBase() override = default;
 
   // Implemented by subclasses (SetUp depends on the parameters passed
   // in and RunOne depends on the function to be tested. These can't
   // be templated for low/high bit depths because they have different
   // numbers of parameters)
-  virtual void SetUp() = 0;
+  void SetUp() override = 0;
   virtual void RunOne(bool ref) = 0;
 
  protected:
@@ -261,15 +260,15 @@ class LowBDConvolveHorizRSTest
     : public ConvolveHorizRSTestBase<uint8_t>,
       public ::testing::WithParamInterface<LowBDParams> {
  public:
-  virtual ~LowBDConvolveHorizRSTest() {}
+  ~LowBDConvolveHorizRSTest() override = default;
 
-  void SetUp() {
+  void SetUp() override {
     tst_fun_ = GET_PARAM(0);
     const int bd = 8;
     SetBitDepth(bd);
   }
 
-  void RunOne(bool ref) {
+  void RunOne(bool ref) override {
     const uint8_t *src = image_->GetSrcData(ref, false);
     uint8_t *dst = image_->GetDstData(ref, false);
     const int src_stride = image_->src_stride();
@@ -322,15 +321,15 @@ class HighBDConvolveHorizRSTest
     : public ConvolveHorizRSTestBase<uint16_t>,
       public ::testing::WithParamInterface<HighBDParams> {
  public:
-  virtual ~HighBDConvolveHorizRSTest() {}
+  ~HighBDConvolveHorizRSTest() override = default;
 
-  void SetUp() {
+  void SetUp() override {
     tst_fun_ = GET_PARAM(0);
     const int bd = GET_PARAM(1);
     SetBitDepth(bd);
   }
 
-  void RunOne(bool ref) {
+  void RunOne(bool ref) override {
     const uint16_t *src = image_->GetSrcData(ref, false);
     uint16_t *dst = image_->GetDstData(ref, false);
     const int src_stride = image_->src_stride();

@@ -190,7 +190,7 @@ typedef std::tuple<const compute_stats_Func> WienerTestParam;
 
 class WienerTest : public ::testing::TestWithParam<WienerTestParam> {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     src_buf = (uint8_t *)aom_memalign(
         32, MAX_DATA_BLOCK * MAX_DATA_BLOCK * sizeof(*src_buf));
     ASSERT_NE(src_buf, nullptr);
@@ -204,7 +204,7 @@ class WienerTest : public ::testing::TestWithParam<WienerTestParam> {
     memset(buf, 0, buf_size);
     target_func_ = GET_PARAM(0);
   }
-  virtual void TearDown() {
+  void TearDown() override {
     aom_free(src_buf);
     aom_free(dgd_buf);
     aom_free(buf);
@@ -322,9 +322,11 @@ void WienerTest::RunWienerTest_ExtremeValues(const int32_t wiener_win) {
       buf + (3 * RESTORATION_UNITSIZE_MAX * RESTORATION_UNITSIZE_MAX);
 
   for (int iter = 0; iter < iters && !HasFatalFailure(); ++iter) {
+    // Fill with alternating extreme values to maximize difference with
+    // the average.
     for (int i = 0; i < MAX_DATA_BLOCK * MAX_DATA_BLOCK; ++i) {
-      dgd_buf[i] = 255;
-      src_buf[i] = 255;
+      dgd_buf[i] = i & 1 ? 255 : 0;
+      src_buf[i] = i & 1 ? 255 : 0;
     }
     uint8_t *dgd = dgd_buf + wiener_halfwin * MAX_DATA_BLOCK + wiener_halfwin;
     uint8_t *src = src_buf;
@@ -388,6 +390,12 @@ INSTANTIATE_TEST_SUITE_P(SSE4_1, WienerTest,
 INSTANTIATE_TEST_SUITE_P(AVX2, WienerTest,
                          ::testing::Values(av1_compute_stats_avx2));
 #endif  // HAVE_AVX2
+
+#if HAVE_NEON
+
+INSTANTIATE_TEST_SUITE_P(NEON, WienerTest,
+                         ::testing::Values(av1_compute_stats_neon));
+#endif  // HAVE_NEON
 
 }  // namespace wiener_lowbd
 
@@ -531,7 +539,7 @@ typedef std::tuple<const compute_stats_Func> WienerTestParam;
 
 class WienerTestHighbd : public ::testing::TestWithParam<WienerTestParam> {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     src_buf = (uint16_t *)aom_memalign(
         32, MAX_DATA_BLOCK * MAX_DATA_BLOCK * sizeof(*src_buf));
     ASSERT_NE(src_buf, nullptr);
@@ -540,7 +548,7 @@ class WienerTestHighbd : public ::testing::TestWithParam<WienerTestParam> {
     ASSERT_NE(dgd_buf, nullptr);
     target_func_ = GET_PARAM(0);
   }
-  virtual void TearDown() {
+  void TearDown() override {
     aom_free(src_buf);
     aom_free(dgd_buf);
   }
@@ -650,9 +658,11 @@ void WienerTestHighbd::RunWienerTest_ExtremeValues(const int32_t wiener_win,
   const int src_stride = MAX_DATA_BLOCK;
   const int iters = 1;
   for (int iter = 0; iter < iters && !HasFatalFailure(); ++iter) {
+    // Fill with alternating extreme values to maximize difference with
+    // the average.
     for (int i = 0; i < MAX_DATA_BLOCK * MAX_DATA_BLOCK; ++i) {
-      dgd_buf[i] = ((uint16_t)1 << bit_depth) - 1;
-      src_buf[i] = ((uint16_t)1 << bit_depth) - 1;
+      dgd_buf[i] = i & 1 ? ((uint16_t)1 << bit_depth) - 1 : 0;
+      src_buf[i] = i & 1 ? ((uint16_t)1 << bit_depth) - 1 : 0;
     }
     const uint8_t *dgd8 = CONVERT_TO_BYTEPTR(
         dgd_buf + wiener_halfwin * MAX_DATA_BLOCK + wiener_halfwin);
@@ -727,6 +737,11 @@ INSTANTIATE_TEST_SUITE_P(SSE4_1, WienerTestHighbd,
 INSTANTIATE_TEST_SUITE_P(AVX2, WienerTestHighbd,
                          ::testing::Values(av1_compute_stats_highbd_avx2));
 #endif  // HAVE_AVX2
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, WienerTestHighbd,
+                         ::testing::Values(av1_compute_stats_highbd_neon));
+#endif  // HAVE_NEON
 
 // A test that reproduces b/274668506: signed integer overflow in
 // update_a_sep_sym().

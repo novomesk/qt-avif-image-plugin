@@ -67,9 +67,9 @@ void iwht4x4_12_sse4_1(const tran_low_t *in, uint8_t *out, int stride) {
 class Trans4x4WHT : public libaom_test::TransformTestBase<tran_low_t>,
                     public ::testing::TestWithParam<Dct4x4Param> {
  public:
-  virtual ~Trans4x4WHT() {}
+  ~Trans4x4WHT() override = default;
 
-  virtual void SetUp() {
+  void SetUp() override {
     fwd_txfm_ = GET_PARAM(0);
     inv_txfm_ = GET_PARAM(1);
     pitch_ = 4;
@@ -80,13 +80,12 @@ class Trans4x4WHT : public libaom_test::TransformTestBase<tran_low_t>,
     num_coeffs_ = GET_PARAM(4);
     fwd_txfm_c_ = GET_PARAM(5);
   }
-  virtual void TearDown() {}
 
  protected:
-  void RunFwdTxfm(const int16_t *in, tran_low_t *out, int stride) {
+  void RunFwdTxfm(const int16_t *in, tran_low_t *out, int stride) override {
     fwd_txfm_(in, out, stride);
   }
-  void RunInvTxfm(const tran_low_t *out, uint8_t *dst, int stride) {
+  void RunInvTxfm(const tran_low_t *out, uint8_t *dst, int stride) override {
     inv_txfm_(out, dst, stride);
   }
   void RunSpeedTest() {

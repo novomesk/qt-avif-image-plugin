@@ -94,9 +94,9 @@ class RTEndToEndTest
         aq_mode_(GET_PARAM(3)), threads_(GET_PARAM(4)),
         tile_columns_(GET_PARAM(5)), tile_rows_(GET_PARAM(6)) {}
 
-  virtual ~RTEndToEndTest() {}
+  ~RTEndToEndTest() override = default;
 
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeConfig(::libaom_test::kRealTime);
 
     cfg_.g_threads = threads_;
@@ -107,18 +107,18 @@ class RTEndToEndTest
     cfg_.kf_min_dist = 9999;
   }
 
-  virtual void BeginPassHook(unsigned int) {
+  void BeginPassHook(unsigned int) override {
     psnr_ = 0.0;
     nframes_ = 0;
   }
 
-  virtual void PSNRPktHook(const aom_codec_cx_pkt_t *pkt) {
+  void PSNRPktHook(const aom_codec_cx_pkt_t *pkt) override {
     psnr_ += pkt->data.psnr.psnr[0];
     nframes_++;
   }
 
-  virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
-                                  ::libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(::libaom_test::VideoSource *video,
+                          ::libaom_test::Encoder *encoder) override {
     if (video->frame() == 0) {
       encoder->Control(AV1E_SET_ENABLE_RESTORATION, 0);
       encoder->Control(AV1E_SET_ENABLE_OBMC, 0);

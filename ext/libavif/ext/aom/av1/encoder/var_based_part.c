@@ -29,6 +29,7 @@
 #include "av1/encoder/encodeframe.h"
 #include "av1/encoder/var_based_part.h"
 #include "av1/encoder/reconinter_enc.h"
+#include "av1/encoder/rdopt_utils.h"
 
 // Possible values for the force_split variable while evaluating variance based
 // partitioning.
@@ -1021,8 +1022,7 @@ static AOM_INLINE void chroma_check(AV1_COMP *cpi, MACROBLOCK *x,
   if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN &&
       cpi->rc.high_source_sad) {
     shift_lower_limit = 7;
-  } else if (source_sad_nonrd >= kMedSad &&
-             cpi->oxcf.tune_cfg.content != AOM_CONTENT_SCREEN &&
+  } else if (source_sad_nonrd >= kMedSad && x->source_variance > 500 &&
              cpi->common.width * cpi->common.height >= 640 * 360) {
     shift_upper_limit = 2;
     shift_lower_limit = source_sad_nonrd > kMedSad ? 5 : 4;
@@ -1243,6 +1243,7 @@ static AOM_INLINE void set_ref_frame_for_partition(
     *y_sad = *y_sad_g;
     *ref_frame_partition = GOLDEN_FRAME;
     x->nonrd_prune_ref_frame_search = 0;
+    x->sb_me_partition = 0;
   } else if (is_set_altref_ref_frame) {
     av1_setup_pre_planes(xd, 0, yv12_alt, mi_row, mi_col,
                          get_ref_scale_factors(cm, ALTREF_FRAME), num_planes);
@@ -1251,6 +1252,7 @@ static AOM_INLINE void set_ref_frame_for_partition(
     *y_sad = *y_sad_alt;
     *ref_frame_partition = ALTREF_FRAME;
     x->nonrd_prune_ref_frame_search = 0;
+    x->sb_me_partition = 0;
   } else {
     *ref_frame_partition = LAST_FRAME;
     x->nonrd_prune_ref_frame_search =
@@ -1339,7 +1341,8 @@ static AOM_INLINE void evaluate_neighbour_mvs(AV1_COMP *cpi, MACROBLOCK *x,
 static void setup_planes(AV1_COMP *cpi, MACROBLOCK *x, unsigned int *y_sad,
                          unsigned int *y_sad_g, unsigned int *y_sad_alt,
                          unsigned int *y_sad_last,
-                         MV_REFERENCE_FRAME *ref_frame_partition, int mi_row,
+                         MV_REFERENCE_FRAME *ref_frame_partition,
+                         struct scale_factors *sf_no_scale, int mi_row,
                          int mi_col, bool is_small_sb, bool scaled_ref_last) {
   AV1_COMMON *const cm = &cpi->common;
   MACROBLOCKD *xd = &x->e_mbd;
@@ -1420,9 +1423,37 @@ static void setup_planes(AV1_COMP *cpi, MACROBLOCK *x, unsigned int *y_sad,
 
     if (est_motion == 1 || est_motion == 2) {
       if (xd->mb_to_right_edge >= 0 && xd->mb_to_bottom_edge >= 0) {
-        const MV dummy_mv = { 0, 0 };
-        *y_sad = av1_int_pro_motion_estimation(cpi, x, cm->seq_params->sb_size,
-                                               mi_row, mi_col, &dummy_mv);
+        // For screen only do int_pro_motion for spatial variance above
+        // threshold and motion level above LowSad.
+        if (x->source_variance > 100 && source_sad_nonrd > kLowSad) {
+          int is_screen = cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN;
+          int me_search_size_col =
+              is_screen ? 96 : block_size_wide[cm->seq_params->sb_size] >> 1;
+          // For screen use larger search size row motion to capture
+          // vertical scroll, which can be larger motion.
+          int me_search_size_row =
+              is_screen ? 192 : block_size_high[cm->seq_params->sb_size] >> 1;
+          unsigned int y_sad_zero;
+          *y_sad = av1_int_pro_motion_estimation(
+              cpi, x, cm->seq_params->sb_size, mi_row, mi_col, &kZeroMv,
+              &y_sad_zero, me_search_size_col, me_search_size_row);
+          // The logic below selects whether the motion estimated in the
+          // int_pro_motion() will be used in nonrd_pickmode. Only do this
+          // for screen for now.
+          if (is_screen) {
+            unsigned int thresh_sad =
+                (cm->seq_params->sb_size == BLOCK_128X128) ? 50000 : 20000;
+            if (*y_sad < (y_sad_zero >> 1) && *y_sad < thresh_sad) {
+              x->sb_me_partition = 1;
+              x->sb_me_mv.as_int = mi->mv[0].as_int;
+            } else {
+              x->sb_me_partition = 0;
+              // Fall back to using zero motion.
+              *y_sad = y_sad_zero;
+              mi->mv[0].as_int = 0;
+            }
+          }
+        }
       }
     }
 
@@ -1450,7 +1481,12 @@ static void setup_planes(AV1_COMP *cpi, MACROBLOCK *x, unsigned int *y_sad,
 
   // Only calculate the predictor for non-zero MV.
   if (mi->mv[0].as_int != 0) {
-    set_ref_ptrs(cm, xd, mi->ref_frame[0], mi->ref_frame[1]);
+    if (!scaled_ref_last) {
+      set_ref_ptrs(cm, xd, mi->ref_frame[0], mi->ref_frame[1]);
+    } else {
+      xd->block_ref_scale_factors[0] = sf_no_scale;
+      xd->block_ref_scale_factors[1] = sf_no_scale;
+    }
     av1_enc_build_inter_predictor(cm, xd, mi_row, mi_col, NULL,
                                   cm->seq_params->sb_size, AOM_PLANE_Y,
                                   num_planes - 1);
@@ -1517,8 +1553,8 @@ static AOM_INLINE bool set_force_zeromv_skip_for_sb(
       uv_sad[0] < thresh_exit_part_uv && uv_sad[1] < thresh_exit_part_uv) {
     set_block_size(cpi, mi_row, mi_col, bsize);
     x->force_zeromv_skip_for_sb = 1;
-    if (vt2) aom_free(vt2);
-    if (vt) aom_free(vt);
+    aom_free(vt2);
+    aom_free(vt);
     // Partition shape is set here at SB level.
     // Exit needs to happen from av1_choose_var_based_partitioning().
     return true;
@@ -1558,6 +1594,9 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   NOISE_LEVEL noise_level = kLow;
   bool is_zero_motion = true;
   bool scaled_ref_last = false;
+  struct scale_factors sf_no_scale;
+  av1_setup_scale_factors_for_frame(&sf_no_scale, cm->width, cm->height,
+                                    cm->width, cm->height);
 
   bool is_key_frame =
       (frame_is_intra_only(cm) ||
@@ -1578,7 +1617,7 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   // Ref frame used in partitioning.
   MV_REFERENCE_FRAME ref_frame_partition = LAST_FRAME;
 
-  CHECK_MEM_ERROR(cm, vt, aom_malloc(sizeof(*vt)));
+  AOM_CHECK_MEM_ERROR(xd->error_info, vt, aom_malloc(sizeof(*vt)));
 
   vt->split = td->vt64x64;
 
@@ -1645,10 +1684,19 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
     }
   }
 
+  x->source_variance = UINT_MAX;
+  // For nord_pickmode: compute source_variance, only for superblocks with
+  // some motion for now. This input can then be used to bias the partitioning
+  // or the chroma_check.
+  if (cpi->sf.rt_sf.use_nonrd_pick_mode &&
+      x->content_state_sb.source_sad_nonrd > kLowSad)
+    x->source_variance = av1_get_perpixel_variance_facade(
+        cpi, xd, &x->plane[0].src, cm->seq_params->sb_size, AOM_PLANE_Y);
+
   if (!is_key_frame) {
     setup_planes(cpi, x, &y_sad, &y_sad_g, &y_sad_alt, &y_sad_last,
-                 &ref_frame_partition, mi_row, mi_col, is_small_sb,
-                 scaled_ref_last);
+                 &ref_frame_partition, &sf_no_scale, mi_row, mi_col,
+                 is_small_sb, scaled_ref_last);
 
     MB_MODE_INFO *mi = xd->mi[0];
     // Use reference SB directly for zero mv.
@@ -1690,8 +1738,14 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   if (cpi->noise_estimate.enabled)
     noise_level = av1_noise_estimate_extract_level(&cpi->noise_estimate);
 
-  if (low_res && threshold_4x4avg < INT64_MAX)
-    CHECK_MEM_ERROR(cm, vt2, aom_malloc(sizeof(*vt2)));
+  if (low_res && threshold_4x4avg < INT64_MAX) {
+    vt2 = aom_malloc(sizeof(*vt2));
+    if (!vt2) {
+      aom_free(vt);
+      aom_internal_error(xd->error_info, AOM_CODEC_MEM_ERROR,
+                         "Error allocating partition buffer vt2");
+    }
+  }
   // Fill in the entire tree of 8x8 (or 4x4 under some conditions) variances
   // for splits.
   fill_variance_tree_leaves(cpi, x, vt, force_split, avg_16x16, maxvar_16x16,
@@ -1869,8 +1923,8 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
                           ref_frame_partition, mi_col, mi_row, is_small_sb);
   }
 
-  if (vt2) aom_free(vt2);
-  if (vt) aom_free(vt);
+  aom_free(vt2);
+  aom_free(vt);
 #if CONFIG_COLLECT_COMPONENT_TIMING
   end_timing(cpi, choose_var_based_partitioning_time);
 #endif

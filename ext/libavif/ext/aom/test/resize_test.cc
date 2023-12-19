@@ -186,7 +186,7 @@ class ResizingVideoSource : public ::libaom_test::DummyVideoSource {
   }
   int flag_codec_;
   bool change_start_resln_;
-  virtual ~ResizingVideoSource() {}
+  ~ResizingVideoSource() override = default;
 
  protected:
   void Begin() override {
@@ -215,12 +215,12 @@ class ResizeTest
  protected:
   ResizeTest() : EncoderTest(GET_PARAM(0)) {}
 
-  virtual ~ResizeTest() {}
+  ~ResizeTest() override = default;
 
-  virtual void SetUp() { InitializeConfig(GET_PARAM(1)); }
+  void SetUp() override { InitializeConfig(GET_PARAM(1)); }
 
-  virtual void PreEncodeFrameHook(libaom_test::VideoSource *video,
-                                  libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(libaom_test::VideoSource *video,
+                          libaom_test::Encoder *encoder) override {
     if (video->frame() == 0) {
       if (GET_PARAM(1) == ::libaom_test::kRealTime) {
         encoder->Control(AV1E_SET_AQ_MODE, 3);
@@ -230,8 +230,8 @@ class ResizeTest
     }
   }
 
-  virtual void DecompressedFrameHook(const aom_image_t &img,
-                                     aom_codec_pts_t pts) {
+  void DecompressedFrameHook(const aom_image_t &img,
+                             aom_codec_pts_t pts) override {
     frame_info_list_.push_back(FrameInfo(pts, img.d_w, img.d_h));
   }
 
@@ -279,15 +279,15 @@ class ResizeInternalTestLarge : public ResizeTest {
   ResizeInternalTestLarge() : ResizeTest(), frame0_psnr_(0.0) {}
 #endif
 
-  virtual ~ResizeInternalTestLarge() {}
+  ~ResizeInternalTestLarge() override = default;
 
-  virtual void BeginPassHook(unsigned int /*pass*/) {
+  void BeginPassHook(unsigned int /*pass*/) override {
 #if WRITE_COMPRESSED_STREAM
     outfile_ = fopen("av10-2-05-resize.ivf", "wb");
 #endif
   }
 
-  virtual void EndPassHook() {
+  void EndPassHook() override {
 #if WRITE_COMPRESSED_STREAM
     if (outfile_) {
       if (!fseek(outfile_, 0, SEEK_SET))
@@ -298,8 +298,8 @@ class ResizeInternalTestLarge : public ResizeTest {
 #endif
   }
 
-  virtual void PreEncodeFrameHook(libaom_test::VideoSource *video,
-                                  libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(libaom_test::VideoSource *video,
+                          libaom_test::Encoder *encoder) override {
     if (change_config_) {
       int new_q = 60;
       if (video->frame() == 0) {
@@ -323,13 +323,13 @@ class ResizeInternalTestLarge : public ResizeTest {
     }
   }
 
-  virtual void PSNRPktHook(const aom_codec_cx_pkt_t *pkt) {
+  void PSNRPktHook(const aom_codec_cx_pkt_t *pkt) override {
     if (frame0_psnr_ == 0.) frame0_psnr_ = pkt->data.psnr.psnr[0];
     EXPECT_NEAR(pkt->data.psnr.psnr[0], frame0_psnr_, 4.1);
   }
 
 #if WRITE_COMPRESSED_STREAM
-  virtual void FramePktHook(const aom_codec_cx_pkt_t *pkt) {
+  void FramePktHook(const aom_codec_cx_pkt_t *pkt) override {
     ++out_frames_;
 
     // Write initial file header if first frame.
@@ -402,11 +402,12 @@ class ResizeRealtimeTest
  protected:
   ResizeRealtimeTest()
       : EncoderTest(GET_PARAM(0)), num_threads_(GET_PARAM(3)),
-        set_scale_mode_(false), set_scale_mode2_(false) {}
-  virtual ~ResizeRealtimeTest() {}
+        set_scale_mode_(false), set_scale_mode2_(false),
+        set_scale_mode3_(false) {}
+  ~ResizeRealtimeTest() override = default;
 
-  virtual void PreEncodeFrameHook(libaom_test::VideoSource *video,
-                                  libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(libaom_test::VideoSource *video,
+                          libaom_test::Encoder *encoder) override {
     if (video->frame() == 0) {
       encoder->Control(AV1E_SET_AQ_MODE, 3);
       encoder->Control(AV1E_SET_ALLOW_WARPED_MOTION, 0);
@@ -433,6 +434,13 @@ class ResizeRealtimeTest
       else if (video->frame() > 40)
         mode = { AOME_THREEFOUR, AOME_THREEFOUR };
       encoder->Control(AOME_SET_SCALEMODE, &mode);
+    } else if (set_scale_mode3_) {
+      struct aom_scaling_mode mode;
+      if (video->frame() <= 30)
+        mode = { AOME_ONETWO, AOME_NORMAL };
+      else
+        mode = { AOME_NORMAL, AOME_NORMAL };
+      encoder->Control(AOME_SET_SCALEMODE, &mode);
     }
 
     if (change_bitrate_ && video->frame() == frame_change_bitrate_) {
@@ -442,17 +450,17 @@ class ResizeRealtimeTest
     }
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeConfig(GET_PARAM(1));
     set_cpu_used_ = GET_PARAM(2);
   }
 
-  virtual void DecompressedFrameHook(const aom_image_t &img,
-                                     aom_codec_pts_t pts) {
+  void DecompressedFrameHook(const aom_image_t &img,
+                             aom_codec_pts_t pts) override {
     frame_info_list_.push_back(FrameInfo(pts, img.d_w, img.d_h));
   }
 
-  virtual void MismatchHook(const aom_image_t *img1, const aom_image_t *img2) {
+  void MismatchHook(const aom_image_t *img1, const aom_image_t *img2) override {
     double mismatch_psnr = compute_psnr(img1, img2);
     mismatch_psnr_ += mismatch_psnr;
     ++mismatch_nframes_;
@@ -483,7 +491,7 @@ class ResizeRealtimeTest
     // the width and height of the frame are swapped
     cfg_.g_forced_max_frame_width = cfg_.g_forced_max_frame_height =
         AOMMAX(kInitialWidth, kInitialHeight);
-    if (set_scale_mode_ || set_scale_mode2_) {
+    if (set_scale_mode_ || set_scale_mode2_ || set_scale_mode3_) {
       cfg_.rc_dropframe_thresh = 0;
       cfg_.g_forced_max_frame_width = 1280;
       cfg_.g_forced_max_frame_height = 1280;
@@ -499,6 +507,7 @@ class ResizeRealtimeTest
   int mismatch_nframes_;
   bool set_scale_mode_;
   bool set_scale_mode2_;
+  bool set_scale_mode3_;
 };
 
 // Check the AOME_SET_SCALEMODE control by downsizing to
@@ -509,6 +518,7 @@ TEST_P(ResizeRealtimeTest, TestInternalResizeSetScaleMode1) {
   cfg_.g_h = 720;
   set_scale_mode_ = true;
   set_scale_mode2_ = false;
+  set_scale_mode3_ = false;
   DefaultConfig();
   change_bitrate_ = false;
   mismatch_nframes_ = 0;
@@ -544,6 +554,7 @@ TEST_P(ResizeRealtimeTest, TestInternalResizeSetScaleMode1QVGA) {
   cfg_.g_h = 180;
   set_scale_mode_ = true;
   set_scale_mode2_ = false;
+  set_scale_mode3_ = false;
   DefaultConfig();
   change_bitrate_ = false;
   mismatch_nframes_ = 0;
@@ -578,6 +589,7 @@ TEST_P(ResizeRealtimeTest, TestInternalResizeSetScaleMode2) {
   cfg_.g_h = 720;
   set_scale_mode_ = false;
   set_scale_mode2_ = true;
+  set_scale_mode3_ = false;
   DefaultConfig();
   change_bitrate_ = false;
   mismatch_nframes_ = 0;
@@ -604,12 +616,45 @@ TEST_P(ResizeRealtimeTest, TestInternalResizeSetScaleMode2) {
   }
 }
 
+// Check the AOME_SET_SCALEMODE control by downsizing to
+// 1/2 horizontally only and then back up to original.
+TEST_P(ResizeRealtimeTest, TestInternalResizeSetScaleMode3) {
+  ::libaom_test::Y4mVideoSource video("niklas_1280_720_30.y4m", 0, 60);
+  cfg_.g_w = 1280;
+  cfg_.g_h = 720;
+  set_scale_mode_ = false;
+  set_scale_mode2_ = false;
+  set_scale_mode3_ = true;
+  DefaultConfig();
+  change_bitrate_ = false;
+  mismatch_nframes_ = 0;
+  ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+  // Check we decoded the same number of frames as we attempted to encode
+  ASSERT_EQ(frame_info_list_.size(), video.limit());
+  for (std::vector<FrameInfo>::const_iterator info = frame_info_list_.begin();
+       info != frame_info_list_.end(); ++info) {
+    const auto frame = static_cast<unsigned>(info->pts);
+    unsigned int expected_w = 640;
+    unsigned int expected_h = 720;
+    if (frame > 30) {
+      expected_w = 1280;
+      expected_h = 720;
+    }
+    EXPECT_EQ(expected_w, info->w)
+        << "Frame " << frame << " had unexpected width";
+    EXPECT_EQ(expected_h, info->h)
+        << "Frame " << frame << " had unexpected height";
+    EXPECT_EQ(static_cast<unsigned int>(0), GetMismatchFrames());
+  }
+}
+
 TEST_P(ResizeRealtimeTest, TestExternalResizeWorks) {
   ResizingVideoSource video;
   video.flag_codec_ = 1;
   change_bitrate_ = false;
   set_scale_mode_ = false;
   set_scale_mode2_ = false;
+  set_scale_mode3_ = false;
   mismatch_psnr_ = 0.0;
   mismatch_nframes_ = 0;
   DefaultConfig();
@@ -651,6 +696,7 @@ TEST_P(ResizeRealtimeTest, TestInternalResizeDown) {
   change_bitrate_ = false;
   set_scale_mode_ = false;
   set_scale_mode2_ = false;
+  set_scale_mode3_ = false;
   mismatch_psnr_ = 0.0;
   mismatch_nframes_ = 0;
   DefaultConfig();
@@ -700,6 +746,7 @@ TEST_P(ResizeRealtimeTest, TestInternalResizeDownUpChangeBitRate) {
   frame_change_bitrate_ = 120;
   set_scale_mode_ = false;
   set_scale_mode2_ = false;
+  set_scale_mode3_ = false;
   mismatch_psnr_ = 0.0;
   mismatch_nframes_ = 0;
   DefaultConfig();
@@ -757,15 +804,15 @@ class ResizeCspTest : public ResizeTest {
   ResizeCspTest() : ResizeTest(), frame0_psnr_(0.0) {}
 #endif
 
-  virtual ~ResizeCspTest() {}
+  ~ResizeCspTest() override = default;
 
-  virtual void BeginPassHook(unsigned int /*pass*/) {
+  void BeginPassHook(unsigned int /*pass*/) override {
 #if WRITE_COMPRESSED_STREAM
     outfile_ = fopen("av11-2-05-cspchape.ivf", "wb");
 #endif
   }
 
-  virtual void EndPassHook() {
+  void EndPassHook() override {
 #if WRITE_COMPRESSED_STREAM
     if (outfile_) {
       if (!fseek(outfile_, 0, SEEK_SET))
@@ -776,13 +823,13 @@ class ResizeCspTest : public ResizeTest {
 #endif
   }
 
-  virtual void PSNRPktHook(const aom_codec_cx_pkt_t *pkt) {
+  void PSNRPktHook(const aom_codec_cx_pkt_t *pkt) override {
     if (frame0_psnr_ == 0.) frame0_psnr_ = pkt->data.psnr.psnr[0];
     EXPECT_NEAR(pkt->data.psnr.psnr[0], frame0_psnr_, 2.0);
   }
 
 #if WRITE_COMPRESSED_STREAM
-  virtual void FramePktHook(const aom_codec_cx_pkt_t *pkt) {
+  void FramePktHook(const aom_codec_cx_pkt_t *pkt) override {
     ++out_frames_;
 
     // Write initial file header if first frame.
@@ -809,7 +856,7 @@ class ResizingCspVideoSource : public ::libaom_test::DummyVideoSource {
     limit_ = 30;
   }
 
-  virtual ~ResizingCspVideoSource() {}
+  ~ResizingCspVideoSource() override = default;
 };
 
 #if (defined(DISABLE_TRELLISQ_SEARCH) && DISABLE_TRELLISQ_SEARCH) || \
@@ -845,9 +892,9 @@ class ResizeModeTestLarge
       : EncoderTest(GET_PARAM(0)), encoding_mode_(GET_PARAM(1)),
         resize_mode_(GET_PARAM(2)), resize_denominator_(GET_PARAM(3)),
         resize_kf_denominator_(GET_PARAM(4)), cpu_used_(GET_PARAM(5)) {}
-  virtual ~ResizeModeTestLarge() {}
+  ~ResizeModeTestLarge() override = default;
 
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeConfig(encoding_mode_);
     const aom_rational timebase = { 1, 30 };
     cfg_.g_timebase = timebase;
@@ -861,8 +908,8 @@ class ResizeModeTestLarge
     init_flags_ = AOM_CODEC_USE_PSNR;
   }
 
-  virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
-                                  ::libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(::libaom_test::VideoSource *video,
+                          ::libaom_test::Encoder *encoder) override {
     if (video->frame() == 0) {
       encoder->Control(AOME_SET_CPUUSED, cpu_used_);
       encoder->Control(AOME_SET_ENABLEAUTOALTREF, 1);

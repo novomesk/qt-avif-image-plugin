@@ -590,7 +590,7 @@ static void iadst4x4_neon(int32x4_t *in, int32x4_t *out, int bit, int do_cols,
                           int bd, int out_shift) {
   const int32_t *sinpi = sinpi_arr(bit);
   const int32x4_t zero = vdupq_n_s32(0);
-  int64x2_t rnding = vdupq_n_s64(1 << (bit + 4 - 1));
+  int64x2_t rnding = vdupq_n_s64(1ll << (bit + 4 - 1));
   const int32x2_t mul = vdup_n_s32(1 << 4);
   int32x4_t t;
   int32x4_t s0, s1, s2, s3, s4, s5, s6, s7;

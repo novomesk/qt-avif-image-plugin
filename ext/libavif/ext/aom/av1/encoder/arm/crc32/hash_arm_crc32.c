@@ -9,9 +9,14 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#else
 #include <arm_acle.h>
+#endif
+
+#include <stddef.h>
+#include <stdint.h>
 
 #include "config/aom_config.h"
 

@@ -21,9 +21,9 @@ extern "C" {
 struct AV1_COMP;
 struct AV1EncoderConfig;
 struct ThreadData;
-// TODO(any): These two variables are only used in avx2, sse2, sse4
-// implementations, where the block size is still hard coded. This should be
-// fixed to align with the c implementation.
+// TODO(wtc): These two variables are only used in avx2, sse2, neon
+// implementations, where the block size is still hard coded to TF_BLOCK_SIZE.
+// This should be fixed to align with the c implementation.
 #define BH 32
 #define BW 32
 
@@ -261,6 +261,9 @@ typedef struct {
 #endif  // CONFIG_MULTITHREAD
   // Next temporal filter block row to be filtered.
   int next_tf_row;
+  // Initialized to false, set to true by the worker thread that encounters an
+  // error in order to abort the processing of other worker threads.
+  bool tf_mt_exit;
 } AV1TemporalFilterSync;
 
 // Estimates noise level from a given frame using a single plane (Y, U, or V).
@@ -353,29 +356,26 @@ int av1_get_q(const struct AV1_COMP *cpi);
 //   num_pels: Number of pixels in the block across all planes.
 //   is_high_bitdepth: Whether the frame is high-bitdepth or not.
 // Returns:
-//   Nothing will be returned. But the contents of tf_data will be modified.
+//   True if allocation is successful and false otherwise.
 static AOM_INLINE bool tf_alloc_and_reset_data(TemporalFilterData *tf_data,
                                                int num_pels,
                                                int is_high_bitdepth) {
-  tf_data->tmp_mbmi = (MB_MODE_INFO *)malloc(sizeof(*tf_data->tmp_mbmi));
-  memset(tf_data->tmp_mbmi, 0, sizeof(*tf_data->tmp_mbmi));
+  tf_data->tmp_mbmi = (MB_MODE_INFO *)aom_calloc(1, sizeof(*tf_data->tmp_mbmi));
   tf_data->accum =
       (uint32_t *)aom_memalign(16, num_pels * sizeof(*tf_data->accum));
   tf_data->count =
       (uint16_t *)aom_memalign(16, num_pels * sizeof(*tf_data->count));
-  memset(&tf_data->diff, 0, sizeof(tf_data->diff));
   if (is_high_bitdepth)
     tf_data->pred = CONVERT_TO_BYTEPTR(
         aom_memalign(32, num_pels * 2 * sizeof(*tf_data->pred)));
   else
     tf_data->pred =
         (uint8_t *)aom_memalign(32, num_pels * sizeof(*tf_data->pred));
-  if (!(tf_data->accum && tf_data->count && tf_data->pred)) {
-    aom_free(tf_data->accum);
-    aom_free(tf_data->count);
-    aom_free(tf_data->pred);
+  // In case of an allocation failure, other successfully allocated buffers will
+  // be freed by the tf_dealloc_data() call in encoder_destroy().
+  if (!(tf_data->tmp_mbmi && tf_data->accum && tf_data->count && tf_data->pred))
     return false;
-  }
+  memset(&tf_data->diff, 0, sizeof(tf_data->diff));
   return true;
 }
 
@@ -405,10 +405,14 @@ static AOM_INLINE void tf_dealloc_data(TemporalFilterData *tf_data,
                                        int is_high_bitdepth) {
   if (is_high_bitdepth)
     tf_data->pred = (uint8_t *)CONVERT_TO_SHORTPTR(tf_data->pred);
-  free(tf_data->tmp_mbmi);
+  aom_free(tf_data->tmp_mbmi);
+  tf_data->tmp_mbmi = NULL;
   aom_free(tf_data->accum);
+  tf_data->accum = NULL;
   aom_free(tf_data->count);
+  tf_data->count = NULL;
   aom_free(tf_data->pred);
+  tf_data->pred = NULL;
 }
 
 // Saves the state prior to temporal filter process.

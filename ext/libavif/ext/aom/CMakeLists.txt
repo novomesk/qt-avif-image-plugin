@@ -58,9 +58,9 @@ endif()
 # passed to libtool.
 #
 # We set SO_FILE_VERSION = [c-a].a.r
-set(LT_CURRENT 10)
-set(LT_REVISION 1)
-set(LT_AGE 7)
+set(LT_CURRENT 11)
+set(LT_REVISION 0)
+set(LT_AGE 8)
 math(EXPR SO_VERSION "${LT_CURRENT} - ${LT_AGE}")
 set(SO_FILE_VERSION "${SO_VERSION}.${LT_AGE}.${LT_REVISION}")
 unset(LT_CURRENT)
@@ -288,9 +288,9 @@ if(BUILD_SHARED_LIBS)
   add_library(aom_static STATIC ${target_objs_aom} $<TARGET_OBJECTS:aom_rtcd>)
   set_target_properties(aom_static PROPERTIES OUTPUT_NAME aom)
   if(MSVC OR (WIN32 AND NOT MINGW))
-    # Fix race condition on the export library file between the two versions.
-    # Affects MSVC in all three flavors (stock, Clang/CL, LLVM-- the latter sets
-    # MSVC and MINGW both to FALSE).
+    # Fix race condition between the import library and the static library.
+    # Affects MSVC in all three flavors (stock, clang-cl, LLVM -- the latter
+    # sets MSVC and MINGW both to FALSE).
     set_target_properties(aom PROPERTIES ARCHIVE_OUTPUT_NAME "aom_dll")
   endif()
 
@@ -323,7 +323,7 @@ if(NOT WIN32 AND NOT APPLE)
   endif()
 endif()
 
-if(CONFIG_AV1_ENCODER AND NOT CONFIG_REALTIME_ONLY AND NOT BUILD_SHARED_LIBS)
+if(CONFIG_AV1_ENCODER AND NOT BUILD_SHARED_LIBS)
   list(APPEND AOM_AV1_RC_SOURCES "${AOM_ROOT}/av1/ratectrl_rtc.h"
               "${AOM_ROOT}/av1/ratectrl_rtc.cc")
   add_library(aom_av1_rc ${AOM_AV1_RC_SOURCES})
@@ -336,7 +336,7 @@ endif()
 
 # List of object and static library targets.
 set(AOM_LIB_TARGETS ${AOM_LIB_TARGETS} aom_rtcd aom_mem aom_scale aom)
-if(CONFIG_AV1_ENCODER AND NOT CONFIG_REALTIME_ONLY AND NOT BUILD_SHARED_LIBS)
+if(CONFIG_AV1_ENCODER AND NOT BUILD_SHARED_LIBS)
   set(AOM_LIB_TARGETS ${AOM_LIB_TARGETS} aom_av1_rc)
 endif()
 if(BUILD_SHARED_LIBS)
@@ -385,13 +385,6 @@ if(ENABLE_EXAMPLES OR ENABLE_TESTS OR ENABLE_TOOLS)
     add_library(aom_encoder_app_util OBJECT ${AOM_ENCODER_APP_UTIL_SOURCES})
     set_property(TARGET ${example} PROPERTY FOLDER examples)
   endif()
-endif()
-
-if((CONFIG_AV1_DECODER OR CONFIG_AV1_ENCODER) AND ENABLE_EXAMPLES)
-  add_executable(resize_util "${AOM_ROOT}/examples/resize_util.c"
-                             $<TARGET_OBJECTS:aom_common_app_util>)
-  set_property(TARGET ${example} PROPERTY FOLDER examples)
-  list(APPEND AOM_APP_TARGETS resize_util)
 endif()
 
 if(CONFIG_AV1_DECODER AND ENABLE_EXAMPLES)
@@ -494,14 +487,18 @@ if(CONFIG_AV1_ENCODER)
                                     $<TARGET_OBJECTS:aom_common_app_util>
                                     $<TARGET_OBJECTS:aom_encoder_app_util>)
 
-    add_executable(svc_encoder_rtc "${AOM_ROOT}/examples/svc_encoder_rtc.cc"
-                                   $<TARGET_OBJECTS:aom_common_app_util>
-                                   $<TARGET_OBJECTS:aom_encoder_app_util>)
-
     # Maintain a list of encoder example targets.
     list(APPEND AOM_ENCODER_EXAMPLE_TARGETS aomenc lossless_encoder noise_model
                 photon_noise_table set_maps simple_encoder scalable_encoder
-                twopass_encoder svc_encoder_rtc)
+                twopass_encoder)
+
+    if(NOT BUILD_SHARED_LIBS)
+      add_executable(svc_encoder_rtc "${AOM_ROOT}/examples/svc_encoder_rtc.cc"
+                                     $<TARGET_OBJECTS:aom_common_app_util>
+                                     $<TARGET_OBJECTS:aom_encoder_app_util>)
+      target_link_libraries(svc_encoder_rtc ${AOM_LIB_LINK_TYPE} aom_av1_rc)
+      list(APPEND AOM_ENCODER_EXAMPLE_TARGETS svc_encoder_rtc)
+    endif()
   endif()
 
   if(ENABLE_TOOLS)
@@ -852,7 +849,7 @@ set_user_flags()
 # Aomedia documentation rule.
 set(DOXYGEN_VERSION_VALUE 0)
 if(ENABLE_DOCS)
-  include(FindDoxygen)
+  find_package(Doxygen)
   if(DOXYGEN_FOUND)
     # Check if Doxygen version is >= minimum required version(i.e. 1.8.10).
     set(MINIMUM_DOXYGEN_VERSION 1008010)
@@ -942,7 +939,8 @@ endif()
 get_cmake_property(all_cmake_vars VARIABLES)
 foreach(var ${all_cmake_vars})
   if("${var}" MATCHES "SOURCES$\|_INTRIN_\|_ASM_"
-     AND NOT "${var}" MATCHES "DOXYGEN\|LIBYUV\|_PKG_\|TEST")
+     AND NOT "${var}" MATCHES "DOXYGEN\|LIBYUV\|_PKG_\|TEST"
+     AND NOT "${var}" MATCHES "_ASM_NASM\|_ASM_COMPILER_")
     list(APPEND aom_source_vars ${var})
   endif()
 endforeach()

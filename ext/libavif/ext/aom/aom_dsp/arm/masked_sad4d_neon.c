@@ -516,19 +516,18 @@ static INLINE void masked_sad4xhx4d_neon(const uint8_t *src, int src_stride,
   vst1q_u32(res, horizontal_add_4d_u16x8(sum));
 }
 
-#define MASKED_SAD4D_WXH_NEON(w, h)                                           \
-  void aom_masked_sad##w##x##h##x4d_neon(                                     \
-      const uint8_t *src, int src_stride, const uint8_t *ref[4],              \
-      int ref_stride, const uint8_t *second_pred, const uint8_t *msk,         \
-      int msk_stride, int invert_mask, uint32_t res[4]) {                     \
-    if (invert_mask) {                                                        \
-      return masked_inv_sad##w##xhx4d_neon(src, src_stride, ref, ref_stride,  \
-                                           second_pred, msk, msk_stride, res, \
-                                           h);                                \
-    } else {                                                                  \
-      return masked_sad##w##xhx4d_neon(src, src_stride, ref, ref_stride,      \
-                                       second_pred, msk, msk_stride, res, h); \
-    }                                                                         \
+#define MASKED_SAD4D_WXH_NEON(w, h)                                            \
+  void aom_masked_sad##w##x##h##x4d_neon(                                      \
+      const uint8_t *src, int src_stride, const uint8_t *ref[4],               \
+      int ref_stride, const uint8_t *second_pred, const uint8_t *msk,          \
+      int msk_stride, int invert_mask, uint32_t res[4]) {                      \
+    if (invert_mask) {                                                         \
+      masked_inv_sad##w##xhx4d_neon(src, src_stride, ref, ref_stride,          \
+                                    second_pred, msk, msk_stride, res, h);     \
+    } else {                                                                   \
+      masked_sad##w##xhx4d_neon(src, src_stride, ref, ref_stride, second_pred, \
+                                msk, msk_stride, res, h);                      \
+    }                                                                          \
   }
 
 MASKED_SAD4D_WXH_NEON(4, 8)

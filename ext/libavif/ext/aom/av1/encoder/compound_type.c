@@ -1024,8 +1024,9 @@ static INLINE int prune_mode_by_skip_rd(const AV1_COMP *const cpi,
                                         int64_t ref_skip_rd, int mode_rate) {
   int eval_txfm = 1;
   const int txfm_rd_gate_level =
-      get_txfm_rd_gate_level(cpi->sf.inter_sf.txfm_rd_gate_level, bsize,
-                             TX_SEARCH_DEFAULT, /*eval_motion_mode=*/0);
+      get_txfm_rd_gate_level(cpi->common.seq_params->enable_masked_compound,
+                             cpi->sf.inter_sf.txfm_rd_gate_level, bsize,
+                             TX_SEARCH_COMP_TYPE_MODE, /*eval_motion_mode=*/0);
   // Check if the mode is good enough based on skip rd
   if (txfm_rd_gate_level) {
     int64_t sse_y = compute_sse_plane(x, xd, PLANE_TYPE_Y, bsize);
@@ -1108,8 +1109,9 @@ static int64_t masked_compound_type_rd(
   // TODO(nithya): Handle wedge_newmv_search if extending for lower speed
   // setting
   const int txfm_rd_gate_level =
-      get_txfm_rd_gate_level(cpi->sf.inter_sf.txfm_rd_gate_level, bsize,
-                             TX_SEARCH_DEFAULT, /*eval_motion_mode=*/0);
+      get_txfm_rd_gate_level(cm->seq_params->enable_masked_compound,
+                             cpi->sf.inter_sf.txfm_rd_gate_level, bsize,
+                             TX_SEARCH_COMP_TYPE_MODE, /*eval_motion_mode=*/0);
   if (txfm_rd_gate_level) {
     int eval_txfm = check_txfm_eval(x, bsize, ref_skip_rd, skip_rd_cur,
                                     txfm_rd_gate_level, 1);

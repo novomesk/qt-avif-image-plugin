@@ -208,14 +208,14 @@ enum aome_enc_control_id {
    * encoding process, values greater than 0 will increase encoder speed at
    * the expense of quality.
    *
-   * Valid range: 0..10. 0 runs the slowest, and 10 runs the fastest;
+   * Valid range: 0..11. 0 runs the slowest, and 11 runs the fastest;
    * quality improves as speed decreases (since more compression
    * possibilities are explored).
    *
-   * NOTE: 10 is only allowed in AOM_USAGE_REALTIME. In AOM_USAGE_GOOD_QUALITY
-   * and AOM_USAGE_ALL_INTRA, 9 is the highest allowed value. However,
-   * AOM_USAGE_GOOD_QUALITY treats 7..9 the same as 6. Also, AOM_USAGE_REALTIME
-   * treats 0..4 the same as 5.
+   * NOTE: 10 and 11 are only allowed in AOM_USAGE_REALTIME. In
+   * AOM_USAGE_GOOD_QUALITY and AOM_USAGE_ALL_INTRA, 9 is the highest allowed
+   * value. However, AOM_USAGE_GOOD_QUALITY treats 7..9 the same as 6. Also,
+   * AOM_USAGE_REALTIME treats 0..4 the same as 5.
    */
   AOME_SET_CPUUSED = 13,
 
@@ -1527,6 +1527,12 @@ enum aome_enc_control_id {
    */
   AV1E_SET_BITRATE_ONE_PASS_CBR = 163,
 
+  /*!\brief Codec control to set the maximum number of consecutive frame drops
+   * allowed for the frame dropper in 1 pass CBR mode, int parameter. Value of
+   * zero has no effect.
+   */
+  AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR = 164,
+
   // Any new encoder control IDs should be added above.
   // Maximum allowed encoder control ID is 229.
   // No encoder control ID should be added below.
@@ -1678,10 +1684,10 @@ typedef struct aom_svc_params {
 
 /*!brief Parameters for setting ref frame config */
 typedef struct aom_svc_ref_frame_config {
-  // 7 references: LAST_FRAME (0), LAST2_FRAME(1), LAST3_FRAME(2),
-  // GOLDEN_FRAME(3), BWDREF_FRAME(4), ALTREF2_FRAME(5), ALTREF_FRAME(6).
+  // 7 references: The index 0 - 6 refers to the references:
+  // last(0), last2(1), last3(2), golden(3), bwdref(4), altref2(5), altref(6).
   int reference[7]; /**< Reference flag for each of the 7 references. */
-  /*! Buffer slot index for each of 7 references. */
+  /*! Buffer slot index for each of 7 references indexed above. */
   int ref_idx[7];
   int refresh[8]; /**< Refresh flag for each of the 8 slots. */
 } aom_svc_ref_frame_config_t;
@@ -2171,6 +2177,9 @@ AOM_CTRL_USE_TYPE(AV1E_GET_LUMA_CDEF_STRENGTH, int *)
 
 AOM_CTRL_USE_TYPE(AV1E_SET_BITRATE_ONE_PASS_CBR, unsigned int)
 #define AOM_CTRL_AV1E_SET_BITRATE_ONE_PASS_CBR
+
+AOM_CTRL_USE_TYPE(AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR, int)
+#define AOM_CTRL_AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR
 
 /*!\endcond */
 /*! @} - end defgroup aom_encoder */

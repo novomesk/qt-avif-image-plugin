@@ -92,6 +92,8 @@ enum {
                             (1 << NEAREST_NEWMV) | (1 << NEW_NEARESTMV) |
                             (1 << NEW_NEARMV) | (1 << NEAR_NEWMV) |
                             (1 << NEAR_NEARMV),
+  INTER_SINGLE_ALL =
+      (1 << NEARESTMV) | (1 << NEARMV) | (1 << GLOBALMV) | (1 << NEWMV),
 };
 
 enum {
@@ -240,11 +242,14 @@ enum {
 } UENUM1BYTE(PRUNE_NEARMV_LEVEL);
 
 enum {
-  // Default Transform search case - used in evaluation of compound type mode
-  // and best inter candidates
+  // Default transform search used in evaluation of best inter candidates
+  // (MODE_EVAL stage) and motion mode winner processing (WINNER_MODE_EVAL
+  // stage).
   TX_SEARCH_DEFAULT = 0,
-  // Transform search in motion mode rd
+  // Transform search in motion mode rd during MODE_EVAL stage.
   TX_SEARCH_MOTION_MODE,
+  // Transform search in compound type mode rd during MODE_EVAL stage.
+  TX_SEARCH_COMP_TYPE_MODE,
   // All transform search cases
   TX_SEARCH_CASES
 } UENUM1BYTE(TX_SEARCH_CASE);
@@ -448,7 +453,11 @@ typedef struct HIGH_LEVEL_SPEED_FEATURES {
 
   /*!
    * The number of frames to be used during temporal filtering of an ARF frame
-   * is adjusted based on noise level of the current frame.
+   * is adjusted based on noise level of the current frame. The sf has three
+   * levels to decide number of frames to be considered for filtering:
+   * 0       : Use default number of frames
+   * 1 and 2 : Reduce the number of frames based on noise level with varied
+   * aggressiveness
    */
   int adjust_num_frames_for_arf_filtering;
 
@@ -465,6 +474,14 @@ typedef struct HIGH_LEVEL_SPEED_FEATURES {
    * 1: Calculate weight using a lookup table that approximates exp().
    */
   int weight_calc_level_in_tf;
+
+  /*!
+   * Decide whether to perform motion estimation at split block (i.e. 16x16)
+   * level or not.
+   * 0: Always allow motion estimation.
+   * 1: Conditionally allow motion estimation based on 4x4 sub-blocks variance.
+   */
+  int allow_sub_blk_me_in_tf;
 } HIGH_LEVEL_SPEED_FEATURES;
 
 /*!
@@ -536,6 +553,19 @@ typedef struct TPL_SPEED_FEATURES {
 
   // Calculate rate and distortion based on Y plane only.
   int use_y_only_rate_distortion;
+
+  // Use SAD instead of SATD during intra/inter mode search.
+  // If set to 0, use SATD always.
+  // If set to 1, use SAD during intra/inter mode search for frames in the
+  // higher temporal layers of the hierarchical prediction structure.
+  // If set to 2, use SAD during intra/inter mode search for all frames.
+  // This sf is disabled for the first GF group of the key-frame interval,
+  // i.e., SATD is used during intra/inter mode search of the first GF group.
+  int use_sad_for_mode_decision;
+
+  // Skip tpl processing for frames of type LF_UPDATE.
+  // This sf is disabled for the first GF group of the key-frame interval.
+  int reduce_num_frames;
 } TPL_SPEED_FEATURES;
 
 typedef struct GLOBAL_MOTION_SPEED_FEATURES {
@@ -567,9 +597,10 @@ typedef struct PARTITION_SPEED_FEATURES {
   // Used if partition_search_type = FIXED_PARTITION
   BLOCK_SIZE fixed_partition_size;
 
-  // Prune extended partition types search
-  // Can take values 0 - 2, 0 referring to no pruning, and 1 - 2 increasing
-  // aggressiveness of pruning in order.
+  // Prune extended partition types search based on the current best partition
+  // and the combined rdcost of the subblocks estimated from previous
+  // partitions. Can take values 0 - 2, 0 referring to no pruning, and 1 - 2
+  // increasing aggressiveness of pruning in order.
   int prune_ext_partition_types_search_level;
 
   // Prune part4 based on block size
@@ -654,13 +685,18 @@ typedef struct PARTITION_SPEED_FEATURES {
   // 2: Prune none, split and rectangular partitions
   int intra_cnn_based_part_prune_level;
 
-  // Disable extended partition search for lower block sizes.
-  int ext_partition_eval_thresh;
+  // Disable extended partition search if the current bsize is greater than the
+  // threshold. Must be a square block size BLOCK_8X8 or higher.
+  BLOCK_SIZE ext_partition_eval_thresh;
+
+  // Use best partition decision so far to tune 'ext_partition_eval_thresh'
+  int ext_part_eval_based_on_cur_best;
 
   // Disable rectangular partitions for larger block sizes.
   int rect_partition_eval_thresh;
 
-  // prune extended partition search
+  // Prune extended partition search based on whether the split/rect partitions
+  // provided an improvement in the previous search.
   // 0 : no pruning
   // 1 : prune 1:4 partition search using winner info from split partitions
   // 2 : prune 1:4 and AB partition search using split and HORZ/VERT info
@@ -822,6 +858,9 @@ typedef struct MV_SPEED_FEATURES {
   // Accurate full pixel motion search based on TPL stats.
   int full_pixel_search_level;
 
+  // Allow intrabc motion search
+  int use_intrabc;
+
   // Whether to downsample the rows in sad calculation during motion search.
   // This is only active when there are at least 16 rows. When this sf is
   // active, if there is a large discrepancy in the SAD values for the final
@@ -899,6 +938,12 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // 1 prune inter modes w.r.t ALTREF2 and ALTREF reference frames
   // 2 prune inter modes w.r.t BWDREF, ALTREF2 and ALTREF reference frames
   int alt_ref_search_fp;
+
+  // Prune reference frames for single prediction modes based on temporal
+  // distance and pred MV SAD. Feasible values are 0, 1, 2. The feature is
+  // disabled for 0. An increasing value indicates more aggressive pruning
+  // threshold.
+  int prune_single_ref;
 
   // Prune compound reference frames
   // 0 no pruning
@@ -1123,6 +1168,10 @@ typedef struct INTERP_FILTER_SPEED_FEATURES {
 
   // adaptive interp_filter search to allow skip of certain filter types.
   int adaptive_interp_filter_search;
+
+  // Forces interpolation filter to EIGHTTAP_REGULAR and skips interpolation
+  // filter search.
+  int skip_interp_filter_search;
 } INTERP_FILTER_SPEED_FEATURES;
 
 typedef struct INTRA_MODE_SPEED_FEATURES {
@@ -1441,6 +1490,13 @@ typedef struct LOOP_FILTER_SPEED_FEATURES {
   // Disable loop restoration for luma plane
   int disable_loop_restoration_luma;
 
+  // Range of loop restoration unit sizes to search
+  // The minimum size is clamped against the superblock size in
+  // av1_pick_filter_restoration, so that the code which sets this value does
+  // not need to know the superblock size ahead of time.
+  int min_lr_unit_size;
+  int max_lr_unit_size;
+
   // Prune RESTORE_WIENER evaluation based on source variance
   // 0 : no pruning
   // 1 : conservative pruning
@@ -1540,9 +1596,6 @@ typedef struct REAL_TIME_SPEED_FEATURES {
 
   // Use simplified RD model for interpolation search and Intra
   int use_simple_rd_model;
-
-  // If set forces interpolation filter to EIGHTTAP_REGULAR
-  int skip_interp_filter_search;
 
   // For nonrd mode: use hybrid intra mode search for intra only frames based on
   // block properties.
@@ -1671,6 +1724,9 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // Prune the use of paletter mode in nonrd pickmode.
   int prune_palette_nonrd;
 
+  // Force to only use dct for palette search in nonrd pickmode.
+  int dct_only_palette_nonrd;
+
   // Skip loopfilter, for static content after slide change
   // or key frame, once quality has ramped up.
   // 0: disabled
@@ -1798,6 +1854,11 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // A flag that controls if we check or bypass GLOBALMV in rtc single ref frame
   // case.
   bool check_globalmv_on_single_ref;
+
+  // Allows for increasing the color_threshold for palette prediction.
+  // This generally leads to better coding efficiency but with some speed loss.
+  // Only used for screen content and for nonrd_pickmode.
+  bool increase_color_thresh_palette;
 } REAL_TIME_SPEED_FEATURES;
 
 /*!\endcond */

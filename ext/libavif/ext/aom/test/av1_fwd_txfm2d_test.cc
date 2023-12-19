@@ -38,7 +38,7 @@ typedef std::tuple<TX_TYPE, TX_SIZE, double, double> AV1FwdTxfm2dParam;
 
 class AV1FwdTxfm2d : public ::testing::TestWithParam<AV1FwdTxfm2dParam> {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     tx_type_ = GET_PARAM(0);
     tx_size_ = GET_PARAM(1);
     max_error_ = GET_PARAM(2);
@@ -116,7 +116,7 @@ class AV1FwdTxfm2d : public ::testing::TestWithParam<AV1FwdTxfm2dParam> {
         << "tx_size = " << tx_size_ << ", tx_type = " << tx_type_;
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     aom_free(input_);
     aom_free(output_);
     aom_free(ref_input_);

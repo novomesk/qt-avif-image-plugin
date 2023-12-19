@@ -24,18 +24,18 @@ class AV1FrameSizeTests : public ::testing::Test,
  protected:
   AV1FrameSizeTests()
       : EncoderTest(&::libaom_test::kAV1), expected_res_(AOM_CODEC_OK) {}
-  virtual ~AV1FrameSizeTests() {}
+  ~AV1FrameSizeTests() override = default;
 
-  virtual void SetUp() { InitializeConfig(::libaom_test::kRealTime); }
+  void SetUp() override { InitializeConfig(::libaom_test::kRealTime); }
 
-  virtual bool HandleDecodeResult(const aom_codec_err_t res_dec,
-                                  libaom_test::Decoder *decoder) {
+  bool HandleDecodeResult(const aom_codec_err_t res_dec,
+                          libaom_test::Decoder *decoder) override {
     EXPECT_EQ(expected_res_, res_dec) << decoder->DecodeError();
     return !::testing::Test::HasFailure();
   }
 
-  virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
-                                  ::libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(::libaom_test::VideoSource *video,
+                          ::libaom_test::Encoder *encoder) override {
     if (video->frame() == 0) {
       encoder->Control(AOME_SET_CPUUSED, 7);
       encoder->Control(AOME_SET_ENABLEAUTOALTREF, 1);
@@ -312,15 +312,13 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Range(6, 11)));
 
 #if !CONFIG_REALTIME_ONLY
-// TODO(https://crbug.com/aomedia/3348): Modes that use av1_full_pixel_search()
-// will cause an assert.
 INSTANTIATE_TEST_SUITE_P(
-    DISABLED_GoodQuality, AV1ResolutionChange,
+    GoodQuality, AV1ResolutionChange,
     ::testing::Combine(::testing::Values(AOM_USAGE_GOOD_QUALITY),
                        ::testing::Values(AOM_VBR, AOM_CBR, AOM_CQ, AOM_Q),
                        ::testing::Range(2, 6)));
 INSTANTIATE_TEST_SUITE_P(
-    DISABLED_GoodQualityLarge, AV1ResolutionChange,
+    GoodQualityLarge, AV1ResolutionChange,
     ::testing::Combine(::testing::Values(AOM_USAGE_GOOD_QUALITY),
                        ::testing::Values(AOM_VBR, AOM_CBR, AOM_CQ, AOM_Q),
                        ::testing::Range(0, 2)));
@@ -350,18 +348,18 @@ class AV1LosslessFrameSizeTests
   AV1LosslessFrameSizeTests()
       : EncoderTest(GET_PARAM(0)), frame_size_param_(GET_PARAM(1)),
         encoding_mode_(GET_PARAM(2)) {}
-  virtual ~AV1LosslessFrameSizeTests() {}
+  ~AV1LosslessFrameSizeTests() override = default;
 
-  virtual void SetUp() { InitializeConfig(encoding_mode_); }
+  void SetUp() override { InitializeConfig(encoding_mode_); }
 
-  virtual bool HandleDecodeResult(const aom_codec_err_t res_dec,
-                                  libaom_test::Decoder *decoder) {
+  bool HandleDecodeResult(const aom_codec_err_t res_dec,
+                          libaom_test::Decoder *decoder) override {
     EXPECT_EQ(expected_res_, res_dec) << decoder->DecodeError();
     return !::testing::Test::HasFailure();
   }
 
-  virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
-                                  ::libaom_test::Encoder *encoder) {
+  void PreEncodeFrameHook(::libaom_test::VideoSource *video,
+                          ::libaom_test::Encoder *encoder) override {
     if (video->frame() == 0) {
       encoder->Control(AOME_SET_CPUUSED, 6);
       encoder->Control(AV1E_SET_LOSSLESS, 1);

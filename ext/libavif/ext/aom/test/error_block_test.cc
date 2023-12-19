@@ -65,14 +65,12 @@ int64_t BlockErrorLpWrapper(const tran_low_t *coeff, const tran_low_t *dqcoeff,
 
 class ErrorBlockTest : public ::testing::TestWithParam<ErrorBlockParam> {
  public:
-  virtual ~ErrorBlockTest() {}
-  virtual void SetUp() {
+  ~ErrorBlockTest() override = default;
+  void SetUp() override {
     error_block_op_ = GET_PARAM(0);
     ref_error_block_op_ = GET_PARAM(1);
     bit_depth_ = GET_PARAM(2);
   }
-
-  virtual void TearDown() {}
 
  protected:
   aom_bit_depth_t bit_depth_;
@@ -289,6 +287,14 @@ INSTANTIATE_TEST_SUITE_P(AVX2, ErrorBlockTest,
 
 #if (HAVE_NEON)
 const ErrorBlockParam kErrorBlockTestParamsNeon[] = {
+#if CONFIG_AV1_HIGHBITDEPTH
+  make_tuple(&av1_highbd_block_error_neon, &av1_highbd_block_error_c,
+             AOM_BITS_10),
+  make_tuple(&av1_highbd_block_error_neon, &av1_highbd_block_error_c,
+             AOM_BITS_12),
+  make_tuple(&av1_highbd_block_error_neon, &av1_highbd_block_error_c,
+             AOM_BITS_8),
+#endif
   make_tuple(&BlockError8BitWrapper<av1_block_error_neon>,
              &BlockError8BitWrapper<av1_block_error_c>, AOM_BITS_8),
   make_tuple(&BlockErrorLpWrapper<av1_block_error_lp_neon>,

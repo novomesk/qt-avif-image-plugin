@@ -21,7 +21,6 @@ extern "C" {
 #include "common/webmenc.h"
 #endif
 #include "aom/aomcx.h"
-#include "aom_dsp/flow_estimation/flow_estimation.h"
 
 enum TestDecodeFatality {
   TEST_DECODE_OFF,

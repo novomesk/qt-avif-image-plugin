@@ -301,8 +301,6 @@ class ConvolveTestBase : public ::testing::TestWithParam<ConvolveParam> {
     ASSERT_NE(output16_ref_, nullptr);
   }
 
-  virtual void TearDown() {}
-
   static void TearDownTestSuite() {
     aom_free(input_ - 1);
     input_ = nullptr;
@@ -345,7 +343,7 @@ class ConvolveTestBase : public ::testing::TestWithParam<ConvolveParam> {
             i % kOuterBlockSize >= (BorderLeft() + Width()));
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     UUT_ = GET_PARAM(2);
     if (UUT_->use_highbd_ != 0)
       mask_ = (1 << UUT_->use_highbd_) - 1;
@@ -764,6 +762,17 @@ WRAP(convolve8_vert_avx2, 10)
 WRAP(convolve8_horiz_avx2, 12)
 WRAP(convolve8_vert_avx2, 12)
 #endif  // HAVE_AVX2
+
+#if HAVE_NEON
+WRAP(convolve8_horiz_neon, 8)
+WRAP(convolve8_vert_neon, 8)
+
+WRAP(convolve8_horiz_neon, 10)
+WRAP(convolve8_vert_neon, 10)
+
+WRAP(convolve8_horiz_neon, 12)
+WRAP(convolve8_vert_neon, 12)
+#endif  // HAVE_NEON
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
 #undef WRAP
@@ -866,6 +875,21 @@ INSTANTIATE_TEST_SUITE_P(AVX2, LowbdConvolveTest,
 #endif  // HAVE_AVX2
 
 #if HAVE_NEON
+#if CONFIG_AV1_HIGHBITDEPTH
+const ConvolveFunctions wrap_convolve8_neon(wrap_convolve8_horiz_neon_8,
+                                            wrap_convolve8_vert_neon_8, 8);
+const ConvolveFunctions wrap_convolve10_neon(wrap_convolve8_horiz_neon_10,
+                                             wrap_convolve8_vert_neon_10, 10);
+const ConvolveFunctions wrap_convolve12_neon(wrap_convolve8_horiz_neon_12,
+                                             wrap_convolve8_vert_neon_12, 12);
+const ConvolveParam kArray_HighbdConvolve8_neon[] = {
+  ALL_SIZES_64(wrap_convolve8_neon), ALL_SIZES_64(wrap_convolve10_neon),
+  ALL_SIZES_64(wrap_convolve12_neon)
+};
+
+INSTANTIATE_TEST_SUITE_P(NEON, HighbdConvolveTest,
+                         ::testing::ValuesIn(kArray_HighbdConvolve8_neon));
+#endif
 const ConvolveFunctions convolve8_neon(aom_convolve8_horiz_neon,
                                        aom_convolve8_vert_neon, 0);
 const ConvolveParam kArray_Convolve8_neon[] = { ALL_SIZES(convolve8_neon) };
@@ -873,5 +897,26 @@ const ConvolveParam kArray_Convolve8_neon[] = { ALL_SIZES(convolve8_neon) };
 INSTANTIATE_TEST_SUITE_P(NEON, LowbdConvolveTest,
                          ::testing::ValuesIn(kArray_Convolve8_neon));
 #endif  // HAVE_NEON
+
+#if HAVE_NEON_DOTPROD
+const ConvolveFunctions convolve8_neon_dotprod(aom_convolve8_horiz_neon_dotprod,
+                                               aom_convolve8_vert_neon_dotprod,
+                                               0);
+const ConvolveParam kArray_Convolve8_neon_dotprod[] = { ALL_SIZES(
+    convolve8_neon_dotprod) };
+
+INSTANTIATE_TEST_SUITE_P(NEON_DOTPROD, LowbdConvolveTest,
+                         ::testing::ValuesIn(kArray_Convolve8_neon_dotprod));
+#endif  // HAVE_NEON_DOTPROD
+
+#if HAVE_NEON_I8MM
+const ConvolveFunctions convolve8_neon_i8mm(aom_convolve8_horiz_neon_i8mm,
+                                            aom_convolve8_vert_neon_i8mm, 0);
+const ConvolveParam kArray_Convolve8_neon_i8mm[] = { ALL_SIZES(
+    convolve8_neon_i8mm) };
+
+INSTANTIATE_TEST_SUITE_P(NEON_I8MM, LowbdConvolveTest,
+                         ::testing::ValuesIn(kArray_Convolve8_neon_i8mm));
+#endif  // HAVE_NEON_I8MM
 
 }  // namespace

@@ -34,7 +34,7 @@ typedef void (*hiprec_convolve_func)(const uint8_t *src, ptrdiff_t src_stride,
                                      const int16_t *filter_x, int x_step_q4,
                                      const int16_t *filter_y, int y_step_q4,
                                      int w, int h,
-                                     const ConvolveParams *conv_params);
+                                     const WienerConvolveParams *conv_params);
 
 typedef std::tuple<int, int, int, hiprec_convolve_func> HiprecConvolveParam;
 
@@ -44,10 +44,8 @@ typedef std::tuple<int, int, int, hiprec_convolve_func> HiprecConvolveParam;
 class AV1HiprecConvolveTest
     : public ::testing::TestWithParam<HiprecConvolveParam> {
  public:
-  virtual ~AV1HiprecConvolveTest();
-  virtual void SetUp();
-
-  virtual void TearDown();
+  ~AV1HiprecConvolveTest() override;
+  void SetUp() override;
 
  protected:
   void RunCheckOutput(hiprec_convolve_func test_impl);
@@ -64,7 +62,7 @@ typedef void (*highbd_hiprec_convolve_func)(
     const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst,
     ptrdiff_t dst_stride, const int16_t *filter_x, int x_step_q4,
     const int16_t *filter_y, int y_step_q4, int w, int h,
-    const ConvolveParams *conv_params, int bps);
+    const WienerConvolveParams *conv_params, int bps);
 
 typedef std::tuple<int, int, int, int, highbd_hiprec_convolve_func>
     HighbdHiprecConvolveParam;
@@ -75,10 +73,8 @@ typedef std::tuple<int, int, int, int, highbd_hiprec_convolve_func>
 class AV1HighbdHiprecConvolveTest
     : public ::testing::TestWithParam<HighbdHiprecConvolveParam> {
  public:
-  virtual ~AV1HighbdHiprecConvolveTest();
-  virtual void SetUp();
-
-  virtual void TearDown();
+  ~AV1HighbdHiprecConvolveTest() override;
+  void SetUp() override;
 
  protected:
   void RunCheckOutput(highbd_hiprec_convolve_func test_impl);

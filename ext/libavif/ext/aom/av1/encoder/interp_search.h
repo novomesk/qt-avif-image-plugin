@@ -109,6 +109,11 @@ typedef struct HandleInterModeArgs {
    */
   int skip_motion_mode;
   /*!
+   * Initialized to false. If true, skips interpolation filter search and uses
+   * the default EIGHTTAP_REGULAR.
+   */
+  bool skip_ifs;
+  /*!
    * A pointer to the first element in an array of INTERINTRA_MODE types. This
    * contains the best inter_intra mode for each reference frame.
    */

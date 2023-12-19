@@ -57,10 +57,7 @@ void av1_txb_init_levels_neon(const tran_low_t *const coeff, const int width,
     } while (i < width);
   } else if (height == 8) {
     do {
-      const int32x4_t coeffA = vld1q_s32(cf);
-      const int32x4_t coeffB = vld1q_s32(cf + 4);
-      const int16x8_t coeffAB =
-          vcombine_s16(vqmovn_s32(coeffA), vqmovn_s32(coeffB));
+      const int16x8_t coeffAB = load_tran_low_to_s16q(cf);
       const int16x8_t absAB = vqabsq_s16(coeffAB);
       const uint8x16_t absAB8 = vreinterpretq_u8_s8(vcombine_s8(
           vqmovn_s16(absAB), vreinterpret_s8_s32(vget_low_s32(zeros))));
@@ -73,14 +70,8 @@ void av1_txb_init_levels_neon(const tran_low_t *const coeff, const int width,
     do {
       int j = 0;
       do {
-        const int32x4_t coeffA = vld1q_s32(cf);
-        const int32x4_t coeffB = vld1q_s32(cf + 4);
-        const int32x4_t coeffC = vld1q_s32(cf + 8);
-        const int32x4_t coeffD = vld1q_s32(cf + 12);
-        const int16x8_t coeffAB =
-            vcombine_s16(vqmovn_s32(coeffA), vqmovn_s32(coeffB));
-        const int16x8_t coeffCD =
-            vcombine_s16(vqmovn_s32(coeffC), vqmovn_s32(coeffD));
+        const int16x8_t coeffAB = load_tran_low_to_s16q(cf);
+        const int16x8_t coeffCD = load_tran_low_to_s16q(cf + 8);
         const int16x8_t absAB = vqabsq_s16(coeffAB);
         const int16x8_t absCD = vqabsq_s16(coeffCD);
         const uint8x16_t absABCD = vreinterpretq_u8_s8(
@@ -282,7 +273,7 @@ static INLINE void get_4_nz_map_contexts_2d(const uint8_t *levels,
   const uint8x16_t pos_to_offset_large = vdupq_n_u8(21);
 
   uint8x16_t pos_to_offset =
-      vld1q_u8((width == 4) ? c_4_po_2d[0] : c_4_po_2d[1]);
+      (width == 4) ? vld1q_u8(c_4_po_2d[0]) : vld1q_u8(c_4_po_2d[1]);
 
   uint8x16_t count;
   uint8x16_t level[5];

@@ -27,7 +27,7 @@ void av1_calc_mb_wiener_var_row(AV1_COMP *const cpi, MACROBLOCK *x,
                                 int16_t *src_diff, tran_low_t *coeff,
                                 tran_low_t *qcoeff, tran_low_t *dqcoeff,
                                 double *sum_rec_distortion,
-                                double *sum_est_rate);
+                                double *sum_est_rate, uint8_t *pred_buffer);
 
 void av1_set_mb_wiener_variance(AV1_COMP *cpi);
 

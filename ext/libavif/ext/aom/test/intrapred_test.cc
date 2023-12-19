@@ -155,7 +155,7 @@ class AV1IntraPredTest
   }
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     params_ = this->GetParam();
     stride_ = params_.block_width * 3;
     mask_ = (1 << params_.bit_depth) - 1;
@@ -195,19 +195,19 @@ class AV1IntraPredTest
 #if CONFIG_AV1_HIGHBITDEPTH
 class HighbdIntraPredTest : public AV1IntraPredTest<HighbdIntraPred, uint16_t> {
  protected:
-  void Predict() {
+  void Predict() override {
     const int bit_depth = params_.bit_depth;
     params_.ref_fn(ref_dst_, stride_, above_row_, left_col_, bit_depth);
     API_REGISTER_STATE_CHECK(
         params_.pred_fn(dst_, stride_, above_row_, left_col_, bit_depth));
   }
-  void PredictRefSpeedTest(int num) {
+  void PredictRefSpeedTest(int num) override {
     const int bit_depth = params_.bit_depth;
     for (int i = 0; i < num; i++) {
       params_.ref_fn(ref_dst_, stride_, above_row_, left_col_, bit_depth);
     }
   }
-  void PredictFncSpeedTest(int num) {
+  void PredictFncSpeedTest(int num) override {
     const int bit_depth = params_.bit_depth;
     for (int i = 0; i < num; i++) {
       params_.pred_fn(dst_, stride_, above_row_, left_col_, bit_depth);
@@ -220,17 +220,17 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(HighbdIntraPredTest);
 
 class LowbdIntraPredTest : public AV1IntraPredTest<IntraPred, uint8_t> {
  protected:
-  void Predict() {
+  void Predict() override {
     params_.ref_fn(ref_dst_, stride_, above_row_, left_col_);
     API_REGISTER_STATE_CHECK(
         params_.pred_fn(dst_, stride_, above_row_, left_col_));
   }
-  void PredictRefSpeedTest(int num) {
+  void PredictRefSpeedTest(int num) override {
     for (int i = 0; i < num; i++) {
       params_.ref_fn(ref_dst_, stride_, above_row_, left_col_);
     }
   }
-  void PredictFncSpeedTest(int num) {
+  void PredictFncSpeedTest(int num) override {
     for (int i = 0; i < num; i++) {
       params_.pred_fn(dst_, stride_, above_row_, left_col_);
     }

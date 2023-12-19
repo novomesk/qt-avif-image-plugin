@@ -86,7 +86,7 @@ bool aom_compute_global_motion(TransformationType type, YV12_BUFFER_CONFIG *src,
                                YV12_BUFFER_CONFIG *ref, int bit_depth,
                                GlobalMotionMethod gm_method,
                                MotionModel *motion_models,
-                               int num_motion_models);
+                               int num_motion_models, bool *mem_alloc_failed);
 
 #ifdef __cplusplus
 }

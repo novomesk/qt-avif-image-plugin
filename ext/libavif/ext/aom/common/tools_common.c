@@ -65,8 +65,8 @@ void aom_tools_warn(const char *fmt, ...) { LOG_ERROR("Warning"); }
 void die_codec(aom_codec_ctx_t *ctx, const char *s) {
   const char *detail = aom_codec_error_detail(ctx);
 
-  printf("%s: %s\n", s, aom_codec_error(ctx));
-  if (detail) printf("    %s\n", detail);
+  fprintf(stderr, "%s: %s\n", s, aom_codec_error(ctx));
+  if (detail) fprintf(stderr, "    %s\n", detail);
   exit(EXIT_FAILURE);
 }
 

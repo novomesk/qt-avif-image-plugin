@@ -74,7 +74,10 @@ static AOM_TOOLS_FORMAT_PRINTF(3, 0) void warn_or_exit_on_errorv(
 
     if (detail) fprintf(stderr, "    %s\n", detail);
 
-    if (fatal) exit(EXIT_FAILURE);
+    if (fatal) {
+      aom_codec_destroy(ctx);
+      exit(EXIT_FAILURE);
+    }
   }
 }
 

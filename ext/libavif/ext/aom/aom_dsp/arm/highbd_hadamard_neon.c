@@ -109,7 +109,7 @@ void aom_highbd_hadamard_8x8_neon(const int16_t *src_diff, ptrdiff_t src_stride,
   // For the first pass we can stay in 16-bit elements (4095*8 = 32760).
   hadamard_highbd_col8_first_pass(&s0, &s1, &s2, &s3, &s4, &s5, &s6, &s7);
 
-  transpose_s16_8x8(&s0, &s1, &s2, &s3, &s4, &s5, &s6, &s7);
+  transpose_elems_inplace_s16_8x8(&s0, &s1, &s2, &s3, &s4, &s5, &s6, &s7);
 
   // For the second pass we need to widen to 32-bit elements, so we're
   // processing 4 columns at a time.

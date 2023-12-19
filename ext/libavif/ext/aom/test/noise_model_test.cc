@@ -24,7 +24,7 @@ namespace {
 
 // Return normally distrbuted values with standard deviation of sigma.
 double randn(libaom_test::ACMRandom *random, double sigma) {
-  while (1) {
+  while (true) {
     const double u = 2.0 * ((double)random->Rand31() /
                             testing::internal::Random::kMaxRange) -
                      1.0;
@@ -367,7 +367,7 @@ struct BitDepthParams {
 template <typename T>
 class FlatBlockEstimatorTest : public ::testing::Test, public T {
  public:
-  virtual void SetUp() { random_.Reset(171); }
+  void SetUp() override { random_.Reset(171); }
   typedef std::vector<typename T::data_type_t> VecType;
   VecType data_;
   libaom_test::ACMRandom random_;
@@ -544,7 +544,7 @@ class NoiseModelUpdateTest : public ::testing::Test, public T {
   static const int kNumBlocksX = kWidth / kBlockSize;
   static const int kNumBlocksY = kHeight / kBlockSize;
 
-  virtual void SetUp() {
+  void SetUp() override {
     const aom_noise_model_params_t params = { AOM_NOISE_SHAPE_SQUARE, 3,
                                               T::kBitDepth, T::kUseHighBD };
     ASSERT_TRUE(aom_noise_model_init(&model_, params));
@@ -576,7 +576,7 @@ class NoiseModelUpdateTest : public ::testing::Test, public T {
                                   &flat_blocks_[0], block_size);
   }
 
-  void TearDown() { aom_noise_model_free(&model_); }
+  void TearDown() override { aom_noise_model_free(&model_); }
 
  protected:
   aom_noise_model_t model_;
@@ -1186,7 +1186,7 @@ class WienerDenoiseTest : public ::testing::Test, public T {
   static void SetUpTestSuite() { aom_dsp_rtcd(); }
 
  protected:
-  void SetUp() {
+  void SetUp() override {
     static const float kNoiseLevel = 5.f;
     static const float kStd = 4.0;
     static const double kMaxValue = (1 << T::kBitDepth) - 1;

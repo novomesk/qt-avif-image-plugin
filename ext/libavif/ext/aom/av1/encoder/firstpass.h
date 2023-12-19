@@ -568,6 +568,8 @@ void av1_first_pass_row(struct AV1_COMP *cpi, struct ThreadData *td,
                         const BLOCK_SIZE fp_block_size);
 void av1_end_first_pass(struct AV1_COMP *cpi);
 
+void av1_free_firstpass_data(FirstPassData *firstpass_data);
+
 void av1_twopass_zero_stats(FIRSTPASS_STATS *section);
 void av1_accumulate_stats(FIRSTPASS_STATS *section,
                           const FIRSTPASS_STATS *frame);

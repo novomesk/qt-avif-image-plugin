@@ -1,3 +1,64 @@
+2023-11-30 v3.8.0
+  This release includes new codec interfaces, compression efficiency and
+  perceptual improvements, speedup and memory optimizations and many bug
+  fixes. This release is ABI compatible with the last release.
+
+  - New Features
+    * New codec controls:
+      * AV1E_SET_MAX_CONSEC_FRAME_DROP_CBR: Set the maximum number of
+        consecutive frame drops allowed for the frame dropper in 1 pass
+        CBR mode.
+    * Run-time CPU feature detection for all Arm platforms:
+      CRC, DotProd, I8MM and SVE CPU feature presence is detected at run
+      time and code paths making use of these features are selected
+      dynamically. These code paths provide meaningful performance gains
+      for standard bitdepth RTC and VoD encoding: up to 10% and 20%
+      respectively, over the Armv8.0-A baseline build.
+    * RTC: Frame-dropper support added to the rate control library.
+    * RTC Rate control improvements for low bitrate and for SVC.
+
+  - Compression Efficiency Improvements
+    * Improved accuracy of cost estimation for loop restoration and
+      global motion.
+    * Improved selection of loop restoration unit size - full search up
+      to (non-realtime) speed 2, retuned static selection at higher
+      speeds.
+    * RTC Screen content mode: 3-5% bdrate gains across speeds 7 - 10.
+    * Good-quality mode: 0.2 - 0.5% bdrate gains across speeds 1 - 4.
+
+  - Perceptual Quality Improvements
+    * RTC Screen: Improved visual quality for scrolling.
+    * RTC: Improved color quality for both screen and video mode.
+
+  - Speedup and Memory Optimizations
+    * Good-quality, single-thread encoder speedups:
+      o 15% improvement for speed 5.
+      o 12% improvement for speed 6.
+    * Arm standard bitdepth VoD (--good):
+      o 8% speedup for speeds 0 and 1.
+      o 20% speedup for speed 2.
+      o 27% speedup for speed 3.
+      o 30% speedup for speed 4.
+      o 38% speedup for speeds 5 and 6.
+    * Arm high bitdepth VoD (--good):
+      o 206% speedup for speeds 0 and 1.
+      o 180% speedup for speed 2.
+      o 51% speedup for speeds 3 and 4.
+      o 68% speedup for speed 5.
+      o 72% speedup for speed 6.
+    * RTC Screen content: 2-6% speedup across speeds 7-10.
+    * RTC: 2-3% speedup for temporal layers.
+    * RTC: Speedups to reference scaling in nonrd pickmode.
+    * Good-quality mode: Simplified global motion estimation, saving
+      ~1200 lines of code and 1KB of tables while improving quality.
+
+  - Bug Fixes
+    * Fixes to improve libaom stability in case of memory allocation
+      failures.
+    * Fixes to SIMD functions (x86 AVX2/SSE2 and ARM Neon).
+    * b/310457427, b/310766628: Bug fixes to only use rec_sse in CBR
+      mode.
+
 2023-11-17 v3.7.1
   This release includes several bug fixes. This release is ABI
   compatible with the last release. See

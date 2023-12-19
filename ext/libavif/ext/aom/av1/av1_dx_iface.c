@@ -144,6 +144,7 @@ static aom_codec_err_t decoder_destroy(aom_codec_alg_priv_t *ctx) {
 
   aom_free(ctx->frame_worker);
   aom_free(ctx->buffer_pool);
+  assert(!ctx->img.self_allocd);
   aom_img_free(&ctx->img);
   aom_free(ctx);
   return AOM_CODEC_OK;

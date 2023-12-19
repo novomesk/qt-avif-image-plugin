@@ -1442,6 +1442,8 @@ typedef struct RD_COUNTS {
 
 typedef struct ThreadData {
   MACROBLOCK mb;
+  MvCosts *mv_costs_alloc;
+  IntraBCMVCosts *dv_costs_alloc;
   RD_COUNTS rd_counts;
   FRAME_COUNTS *counts;
   PC_TREE_SHARED_BUFFERS shared_coeff_buf;
@@ -1454,6 +1456,7 @@ typedef struct ThreadData {
   CONV_BUF_TYPE *tmp_conv_dst;
   uint64_t abs_sum_level;
   uint8_t *tmp_pred_bufs[2];
+  uint8_t *wiener_tmp_pred_buf;
   int intrabc_used;
   int deltaq_used;
   int coefficient_size;
@@ -1464,7 +1467,9 @@ typedef struct ThreadData {
   int32_t num_64x64_blocks;
   PICK_MODE_CONTEXT *firstpass_ctx;
   TemporalFilterData tf_data;
+  TplBuffers tpl_tmp_buffers;
   TplTxfmStats tpl_txfm_stats;
+  GlobalMotionData gm_data;
   // Pointer to the array of structures to store gradient information of each
   // pixel in a superblock. The buffer constitutes of MAX_SB_SQUARE pixel level
   // structures for each of the plane types (PLANE_TYPE_Y and PLANE_TYPE_UV).
@@ -1474,8 +1479,8 @@ typedef struct ThreadData {
   // store source variance and log of source variance of each 4x4 sub-block
   // for subsequent retrieval.
   Block4x4VarInfo *src_var_info_of_4x4_sub_blocks;
-  // The pc tree root for RTC non-rd case.
-  PC_TREE *rt_pc_root;
+  // Pointer to pc tree root.
+  PC_TREE *pc_root;
 } ThreadData;
 
 struct EncWorkerData;
@@ -1525,6 +1530,19 @@ typedef struct {
    * allocated.
    */
   int allocated_sb_rows;
+
+  /*!
+   * Initialized to false, set to true by the worker thread that encounters an
+   * error in order to abort the processing of other worker threads.
+   */
+  bool row_mt_exit;
+
+  /*!
+   * Initialized to false, set to true during first pass encoding by the worker
+   * thread that encounters an error in order to abort the processing of other
+   * worker threads.
+   */
+  bool firstpass_mt_exit;
 
 #if CONFIG_MULTITHREAD
   /*!
@@ -1617,6 +1635,45 @@ typedef struct RestoreStateBuffers {
    */
   RestorationLineBuffers *rlbs;
 } RestoreStateBuffers;
+
+/*!
+ * \brief Parameters related to restoration types.
+ */
+typedef struct {
+  /*!
+   * Stores the best coefficients for Wiener restoration.
+   */
+  WienerInfo wiener;
+
+  /*!
+   * Stores the best coefficients for Sgrproj restoration.
+   */
+  SgrprojInfo sgrproj;
+
+  /*!
+   * The rtype to use for this unit given a frame rtype as index. Indices:
+   * WIENER, SGRPROJ, SWITCHABLE.
+   */
+  RestorationType best_rtype[RESTORE_TYPES - 1];
+} RestUnitSearchInfo;
+
+/*!
+ * \brief Structure to hold search parameter per restoration unit and
+ * intermediate buffer of Wiener filter used in pick filter stage of Loop
+ * restoration.
+ */
+typedef struct {
+  /*!
+   * Array of pointers to 'RestUnitSearchInfo' which holds data related to
+   * restoration types.
+   */
+  RestUnitSearchInfo *rusi[MAX_MB_PLANE];
+
+  /*!
+   * Buffer used to hold dgd-avg data during SIMD call of Wiener filter.
+   */
+  int16_t *dgd_avg;
+} AV1LrPickStruct;
 
 /*!
  * \brief Primary Encoder parameters related to multi-threading.
@@ -2938,6 +2995,11 @@ typedef struct AV1_COMP {
   TemporalFilterCtx tf_ctx;
 
   /*!
+   * Pointer to CDEF search context.
+   */
+  CdefSearchCtx *cdef_search_ctx;
+
+  /*!
    * Variables related to forcing integer mv decisions for the current frame.
    */
   ForceIntegerMVInfo force_intpel_info;
@@ -3218,6 +3280,11 @@ typedef struct AV1_COMP {
    * Loop Restoration context.
    */
   AV1LrStruct lr_ctxt;
+
+  /*!
+   * Loop Restoration context used during pick stage.
+   */
+  AV1LrPickStruct pick_lr_ctxt;
 
   /*!
    * Pointer to list of tables with film grain parameters.
@@ -3781,6 +3848,10 @@ int av1_set_internal_size(AV1EncoderConfig *const oxcf,
 int av1_get_quantizer(struct AV1_COMP *cpi);
 
 int av1_convert_sect5obus_to_annexb(uint8_t *buffer, size_t *input_size);
+
+void av1_alloc_mb_wiener_var_pred_buf(AV1_COMMON *cm, ThreadData *td);
+
+void av1_dealloc_mb_wiener_var_pred_buf(ThreadData *td);
 
 // Set screen content options.
 // This function estimates whether to use screen content tools, by counting

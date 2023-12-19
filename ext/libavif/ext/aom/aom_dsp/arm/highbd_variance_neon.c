@@ -15,10 +15,10 @@
 #include "config/aom_config.h"
 #include "config/aom_dsp_rtcd.h"
 
-#include "aom_dsp/variance.h"
 #include "aom_dsp/aom_filter.h"
 #include "aom_dsp/arm/mem_neon.h"
 #include "aom_dsp/arm/sum_neon.h"
+#include "aom_dsp/variance.h"
 
 // Process a block of width 4 two rows at a time.
 static INLINE void highbd_variance_4xh_neon(const uint16_t *src_ptr,
@@ -412,67 +412,6 @@ static INLINE uint32_t highbd_mse_wxh_neon(const uint16_t *src_ptr,
   return *sse;
 }
 
-#if defined(__ARM_FEATURE_DOTPROD)
-
-static INLINE uint32_t highbd_mse8_8xh_neon(const uint16_t *src_ptr,
-                                            int src_stride,
-                                            const uint16_t *ref_ptr,
-                                            int ref_stride, int h,
-                                            unsigned int *sse) {
-  uint32x4_t sse_u32 = vdupq_n_u32(0);
-
-  int i = h / 2;
-  do {
-    uint16x8_t s0 = vld1q_u16(src_ptr);
-    src_ptr += src_stride;
-    uint16x8_t s1 = vld1q_u16(src_ptr);
-    src_ptr += src_stride;
-    uint16x8_t r0 = vld1q_u16(ref_ptr);
-    ref_ptr += ref_stride;
-    uint16x8_t r1 = vld1q_u16(ref_ptr);
-    ref_ptr += ref_stride;
-
-    uint8x16_t s = vcombine_u8(vmovn_u16(s0), vmovn_u16(s1));
-    uint8x16_t r = vcombine_u8(vmovn_u16(r0), vmovn_u16(r1));
-
-    uint8x16_t diff = vabdq_u8(s, r);
-    sse_u32 = vdotq_u32(sse_u32, diff, diff);
-  } while (--i != 0);
-
-  *sse = horizontal_add_u32x4(sse_u32);
-  return *sse;
-}
-
-static INLINE uint32_t highbd_mse8_16xh_neon(const uint16_t *src_ptr,
-                                             int src_stride,
-                                             const uint16_t *ref_ptr,
-                                             int ref_stride, int h,
-                                             unsigned int *sse) {
-  uint32x4_t sse_u32 = vdupq_n_u32(0);
-
-  int i = h;
-  do {
-    uint16x8_t s0 = vld1q_u16(src_ptr);
-    uint16x8_t s1 = vld1q_u16(src_ptr + 8);
-    uint16x8_t r0 = vld1q_u16(ref_ptr);
-    uint16x8_t r1 = vld1q_u16(ref_ptr + 8);
-
-    uint8x16_t s = vcombine_u8(vmovn_u16(s0), vmovn_u16(s1));
-    uint8x16_t r = vcombine_u8(vmovn_u16(r0), vmovn_u16(r1));
-
-    uint8x16_t diff = vabdq_u8(s, r);
-    sse_u32 = vdotq_u32(sse_u32, diff, diff);
-
-    src_ptr += src_stride;
-    ref_ptr += ref_stride;
-  } while (--i != 0);
-
-  *sse = horizontal_add_u32x4(sse_u32);
-  return *sse;
-}
-
-#else  // !defined(__ARM_FEATURE_DOTPROD)
-
 static INLINE uint32_t highbd_mse8_8xh_neon(const uint16_t *src_ptr,
                                             int src_stride,
                                             const uint16_t *ref_ptr,
@@ -490,8 +429,6 @@ static INLINE uint32_t highbd_mse8_16xh_neon(const uint16_t *src_ptr,
   return highbd_mse_wxh_neon(src_ptr, src_stride, ref_ptr, ref_stride, 16, h,
                              sse);
 }
-
-#endif  // defined(__ARM_FEATURE_DOTPROD)
 
 #define HIGHBD_MSE_WXH_NEON(w, h)                                       \
   uint32_t aom_highbd_8_mse##w##x##h##_neon(                            \
@@ -529,3 +466,55 @@ HIGHBD_MSE_WXH_NEON(8, 16)
 HIGHBD_MSE_WXH_NEON(8, 8)
 
 #undef HIGHBD_MSE_WXH_NEON
+
+static INLINE uint64x2_t mse_accumulate_u16_8x2(uint64x2_t sum, uint16x8_t s0,
+                                                uint16x8_t s1, uint16x8_t d0,
+                                                uint16x8_t d1) {
+  uint16x8_t e0 = vabdq_u16(s0, d0);
+  uint16x8_t e1 = vabdq_u16(s1, d1);
+
+  uint32x4_t mse = vmull_u16(vget_low_u16(e0), vget_low_u16(e0));
+  mse = vmlal_u16(mse, vget_high_u16(e0), vget_high_u16(e0));
+  mse = vmlal_u16(mse, vget_low_u16(e1), vget_low_u16(e1));
+  mse = vmlal_u16(mse, vget_high_u16(e1), vget_high_u16(e1));
+
+  return vpadalq_u32(sum, mse);
+}
+
+uint64_t aom_mse_wxh_16bit_highbd_neon(uint16_t *dst, int dstride,
+                                       uint16_t *src, int sstride, int w,
+                                       int h) {
+  assert((w == 8 || w == 4) && (h == 8 || h == 4));
+
+  uint64x2_t sum = vdupq_n_u64(0);
+
+  if (w == 8) {
+    do {
+      uint16x8_t d0 = vld1q_u16(dst + 0 * dstride);
+      uint16x8_t d1 = vld1q_u16(dst + 1 * dstride);
+      uint16x8_t s0 = vld1q_u16(src + 0 * sstride);
+      uint16x8_t s1 = vld1q_u16(src + 1 * sstride);
+
+      sum = mse_accumulate_u16_8x2(sum, s0, s1, d0, d1);
+
+      dst += 2 * dstride;
+      src += 2 * sstride;
+      h -= 2;
+    } while (h != 0);
+  } else {  // w == 4
+    do {
+      uint16x8_t d0 = load_unaligned_u16_4x2(dst + 0 * dstride, dstride);
+      uint16x8_t d1 = load_unaligned_u16_4x2(dst + 2 * dstride, dstride);
+      uint16x8_t s0 = load_unaligned_u16_4x2(src + 0 * sstride, sstride);
+      uint16x8_t s1 = load_unaligned_u16_4x2(src + 2 * sstride, sstride);
+
+      sum = mse_accumulate_u16_8x2(sum, s0, s1, d0, d1);
+
+      dst += 4 * dstride;
+      src += 4 * sstride;
+      h -= 4;
+    } while (h != 0);
+  }
+
+  return horizontal_add_u64x2(sum);
+}

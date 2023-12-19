@@ -504,14 +504,14 @@ void aom_highbd_hadamard_32x32_c(const int16_t *src_diff, ptrdiff_t src_stride,
 }
 #endif  // CONFIG_AV1_HIGHBITDEPTH
 
-// coeff: 16 bits, dynamic range [-32640, 32640].
-// length: value range {16, 64, 256, 1024}.
+// coeff: 20 bits, dynamic range [-524287, 524287].
+// length: value range {16, 32, 64, 128, 256, 512, 1024}.
 int aom_satd_c(const tran_low_t *coeff, int length) {
   int i;
   int satd = 0;
   for (i = 0; i < length; ++i) satd += abs(coeff[i]);
 
-  // satd: 26 bits, dynamic range [-32640 * 1024, 32640 * 1024]
+  // satd: 30 bits, dynamic range [-524287 * 1024, 524287 * 1024]
   return satd;
 }
 

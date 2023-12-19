@@ -88,7 +88,7 @@ std::ostream &operator<<(std::ostream &os, const FFTTestArg &test_arg) {
 
 class FFT2DTest : public ::testing::TestWithParam<FFTTestArg> {
  protected:
-  void SetUp() {
+  void SetUp() override {
     int n = GetParam().n;
     input_ = (float *)aom_memalign(32, sizeof(*input_) * n * n);
     temp_ = (float *)aom_memalign(32, sizeof(*temp_) * n * n);
@@ -100,7 +100,7 @@ class FFT2DTest : public ::testing::TestWithParam<FFTTestArg> {
     memset(temp_, 0, sizeof(*temp_) * n * n);
     memset(output_, 0, sizeof(*output_) * n * n * 2);
   }
-  void TearDown() {
+  void TearDown() override {
     aom_free(input_);
     aom_free(temp_);
     aom_free(output_);
@@ -178,7 +178,7 @@ std::ostream &operator<<(std::ostream &os, const IFFTTestArg &test_arg) {
 
 class IFFT2DTest : public ::testing::TestWithParam<IFFTTestArg> {
  protected:
-  void SetUp() {
+  void SetUp() override {
     int n = GetParam().n;
     input_ = (float *)aom_memalign(32, sizeof(*input_) * n * n * 2);
     temp_ = (float *)aom_memalign(32, sizeof(*temp_) * n * n * 2);
@@ -190,7 +190,7 @@ class IFFT2DTest : public ::testing::TestWithParam<IFFTTestArg> {
     memset(temp_, 0, sizeof(*temp_) * n * n * 2);
     memset(output_, 0, sizeof(*output_) * n * n);
   }
-  void TearDown() {
+  void TearDown() override {
     aom_free(input_);
     aom_free(temp_);
     aom_free(output_);

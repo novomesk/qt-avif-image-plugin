@@ -13,8 +13,6 @@ if(AOM_BUILD_CMAKE_AOM_CONFIGURE_CMAKE_)
 endif() # AOM_BUILD_CMAKE_AOM_CONFIGURE_CMAKE_
 set(AOM_BUILD_CMAKE_AOM_CONFIGURE_CMAKE_ 1)
 
-include(FindGit)
-include(FindPerl)
 include(FindThreads)
 
 include("${AOM_ROOT}/build/cmake/aom_config_defaults.cmake")
@@ -214,7 +212,6 @@ elseif(AOM_TARGET_CPU MATCHES "arm")
 endif()
 
 if(CONFIG_ANALYZER)
-  include(FindwxWidgets)
   find_package(wxWidgets REQUIRED adv base core)
   include(${wxWidgets_USE_FILE})
 endif()
@@ -361,7 +358,7 @@ else()
 
     # This combination has more stack overhead, so we account for it by
     # providing higher stack limit than usual.
-    add_c_flag_if_supported("-Wstack-usage=170000")
+    add_c_flag_if_supported("-Wstack-usage=285000")
     add_cxx_flag_if_supported("-Wstack-usage=270000")
   elseif(CONFIG_RD_DEBUG) # Another case where higher stack usage is expected.
     add_c_flag_if_supported("-Wstack-usage=135000")

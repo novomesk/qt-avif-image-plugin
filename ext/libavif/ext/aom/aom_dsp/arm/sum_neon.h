@@ -8,6 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#ifndef AOM_AOM_DSP_ARM_SUM_NEON_H_
+#define AOM_AOM_DSP_ARM_SUM_NEON_H_
+
 #include "config/aom_dsp_rtcd.h"
 #include "config/aom_config.h"
 
@@ -62,7 +65,16 @@ static INLINE uint64_t horizontal_long_add_u32x4(const uint32x4_t a) {
 #endif
 }
 
-static INLINE unsigned int horizontal_add_u32x4(const uint32x4_t a) {
+static INLINE int64_t horizontal_long_add_s32x4(const int32x4_t a) {
+#if AOM_ARCH_AARCH64
+  return vaddlvq_s32(a);
+#else
+  const int64x2_t b = vpaddlq_s32(a);
+  return vgetq_lane_s64(b, 0) + vgetq_lane_s64(b, 1);
+#endif
+}
+
+static INLINE uint32_t horizontal_add_u32x4(const uint32x4_t a) {
 #if AOM_ARCH_AARCH64
   return vaddvq_u32(a);
 #else
@@ -84,6 +96,21 @@ static INLINE uint32x4_t horizontal_add_4d_u32x4(const uint32x4_t sum[4]) {
   res = vsetq_lane_u32(horizontal_add_u32x4(sum[1]), res, 1);
   res = vsetq_lane_u32(horizontal_add_u32x4(sum[2]), res, 2);
   res = vsetq_lane_u32(horizontal_add_u32x4(sum[3]), res, 3);
+  return res;
+#endif
+}
+
+static INLINE int32x4_t horizontal_add_4d_s32x4(const int32x4_t sum[4]) {
+#if AOM_ARCH_AARCH64
+  int32x4_t res01 = vpaddq_s32(sum[0], sum[1]);
+  int32x4_t res23 = vpaddq_s32(sum[2], sum[3]);
+  return vpaddq_s32(res01, res23);
+#else
+  int32x4_t res = vdupq_n_s32(0);
+  res = vsetq_lane_s32(horizontal_add_s32x4(sum[0]), res, 0);
+  res = vsetq_lane_s32(horizontal_add_s32x4(sum[1]), res, 1);
+  res = vsetq_lane_s32(horizontal_add_s32x4(sum[2]), res, 2);
+  res = vsetq_lane_s32(horizontal_add_s32x4(sum[3]), res, 3);
   return res;
 #endif
 }
@@ -186,3 +213,72 @@ static INLINE uint32_t horizontal_add_u16x4(const uint16x4_t a) {
   return vget_lane_u32(vreinterpret_u32_u64(c), 0);
 #endif
 }
+
+static INLINE int32x4_t horizontal_add_2d_s32(int32x4_t a, int32x4_t b) {
+#if AOM_ARCH_AARCH64
+  return vpaddq_s32(a, b);
+#else
+  const int32x2_t a0 = vpadd_s32(vget_low_s32(a), vget_high_s32(a));
+  const int32x2_t b0 = vpadd_s32(vget_low_s32(b), vget_high_s32(b));
+  return vcombine_s32(a0, b0);
+#endif
+}
+
+static INLINE int32x2_t add_pairwise_s32x4(int32x4_t a) {
+#if AOM_ARCH_AARCH64
+  return vget_low_s32(vpaddq_s32(a, a));
+#else
+  return vpadd_s32(vget_low_s32(a), vget_high_s32(a));
+#endif
+}
+
+static INLINE uint64_t horizontal_long_add_u32x4_x2(const uint32x4_t a[2]) {
+  return horizontal_long_add_u32x4(a[0]) + horizontal_long_add_u32x4(a[1]);
+}
+
+static INLINE uint64_t horizontal_long_add_u32x4_x4(const uint32x4_t a[4]) {
+  uint64x2_t sum = vpaddlq_u32(a[0]);
+  sum = vpadalq_u32(sum, a[1]);
+  sum = vpadalq_u32(sum, a[2]);
+  sum = vpadalq_u32(sum, a[3]);
+
+  return horizontal_add_u64x2(sum);
+}
+
+static INLINE uint64_t horizontal_long_add_u32x4_x8(const uint32x4_t a[8]) {
+  uint64x2_t sum[2];
+  sum[0] = vpaddlq_u32(a[0]);
+  sum[1] = vpaddlq_u32(a[1]);
+  sum[0] = vpadalq_u32(sum[0], a[2]);
+  sum[1] = vpadalq_u32(sum[1], a[3]);
+  sum[0] = vpadalq_u32(sum[0], a[4]);
+  sum[1] = vpadalq_u32(sum[1], a[5]);
+  sum[0] = vpadalq_u32(sum[0], a[6]);
+  sum[1] = vpadalq_u32(sum[1], a[7]);
+
+  return horizontal_add_u64x2(vaddq_u64(sum[0], sum[1]));
+}
+
+static INLINE uint64_t horizontal_long_add_u32x4_x16(const uint32x4_t a[16]) {
+  uint64x2_t sum[2];
+  sum[0] = vpaddlq_u32(a[0]);
+  sum[1] = vpaddlq_u32(a[1]);
+  sum[0] = vpadalq_u32(sum[0], a[2]);
+  sum[1] = vpadalq_u32(sum[1], a[3]);
+  sum[0] = vpadalq_u32(sum[0], a[4]);
+  sum[1] = vpadalq_u32(sum[1], a[5]);
+  sum[0] = vpadalq_u32(sum[0], a[6]);
+  sum[1] = vpadalq_u32(sum[1], a[7]);
+  sum[0] = vpadalq_u32(sum[0], a[8]);
+  sum[1] = vpadalq_u32(sum[1], a[9]);
+  sum[0] = vpadalq_u32(sum[0], a[10]);
+  sum[1] = vpadalq_u32(sum[1], a[11]);
+  sum[0] = vpadalq_u32(sum[0], a[12]);
+  sum[1] = vpadalq_u32(sum[1], a[13]);
+  sum[0] = vpadalq_u32(sum[0], a[14]);
+  sum[1] = vpadalq_u32(sum[1], a[15]);
+
+  return horizontal_add_u64x2(vaddq_u64(sum[0], sum[1]));
+}
+
+#endif  // AOM_AOM_DSP_ARM_SUM_NEON_H_

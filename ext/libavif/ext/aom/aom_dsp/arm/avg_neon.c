@@ -10,6 +10,7 @@
 
 #include <arm_neon.h>
 #include <assert.h>
+#include <stdlib.h>
 
 #include "config/aom_config.h"
 #include "config/aom_dsp_rtcd.h"
@@ -19,75 +20,68 @@
 #include "aom_dsp/arm/transpose_neon.h"
 #include "aom_ports/mem.h"
 
-#if !AOM_ARCH_AARCH64
-static INLINE uint32x2_t horizontal_add_u16x8_v(const uint16x8_t a) {
-  const uint32x4_t b = vpaddlq_u16(a);
-  const uint64x2_t c = vpaddlq_u32(b);
-  return vadd_u32(vreinterpret_u32_u64(vget_low_u64(c)),
-                  vreinterpret_u32_u64(vget_high_u64(c)));
-}
-#endif
+unsigned int aom_avg_4x4_neon(const uint8_t *p, int stride) {
+  const uint8x8_t s0 = load_unaligned_u8(p, stride);
+  const uint8x8_t s1 = load_unaligned_u8(p + 2 * stride, stride);
 
-unsigned int aom_avg_4x4_neon(const uint8_t *a, int a_stride) {
-  const uint8x16_t b = load_unaligned_u8q(a, a_stride);
-  const uint16x8_t c = vaddl_u8(vget_low_u8(b), vget_high_u8(b));
-#if AOM_ARCH_AARCH64
-  const uint32_t d = vaddlvq_u16(c);
-  return (d + 8) >> 4;
-#else
-  const uint32x2_t d = horizontal_add_u16x8_v(c);
-  return vget_lane_u32(vrshr_n_u32(d, 4), 0);
-#endif
+  const uint32_t sum = horizontal_add_u16x8(vaddl_u8(s0, s1));
+  return (sum + (1 << 3)) >> 4;
 }
 
-unsigned int aom_avg_8x8_neon(const uint8_t *a, int a_stride) {
-  uint16x8_t sum;
-  uint8x8_t b = vld1_u8(a);
-  a += a_stride;
-  uint8x8_t c = vld1_u8(a);
-  a += a_stride;
-  sum = vaddl_u8(b, c);
+unsigned int aom_avg_8x8_neon(const uint8_t *p, int stride) {
+  uint8x8_t s0 = vld1_u8(p);
+  p += stride;
+  uint8x8_t s1 = vld1_u8(p);
+  p += stride;
+  uint16x8_t acc = vaddl_u8(s0, s1);
 
-  for (int i = 0; i < 6; ++i) {
-    const uint8x8_t e = vld1_u8(a);
-    a += a_stride;
-    sum = vaddw_u8(sum, e);
-  }
+  int i = 0;
+  do {
+    const uint8x8_t si = vld1_u8(p);
+    p += stride;
+    acc = vaddw_u8(acc, si);
+  } while (++i < 6);
 
-#if AOM_ARCH_AARCH64
-  const uint32_t d = vaddlvq_u16(sum);
-  return (d + 32) >> 6;
-#else
-  const uint32x2_t d = horizontal_add_u16x8_v(sum);
-  return vget_lane_u32(vrshr_n_u32(d, 6), 0);
-#endif
+  const uint32_t sum = horizontal_add_u16x8(acc);
+  return (sum + (1 << 5)) >> 6;
 }
 
 void aom_avg_8x8_quad_neon(const uint8_t *s, int p, int x16_idx, int y16_idx,
                            int *avg) {
-  for (int k = 0; k < 4; k++) {
-    const int x8_idx = x16_idx + ((k & 1) << 3);
-    const int y8_idx = y16_idx + ((k >> 1) << 3);
-    const uint8_t *s_tmp = s + y8_idx * p + x8_idx;
-    avg[k] = aom_avg_8x8_neon(s_tmp, p);
-  }
+  avg[0] = aom_avg_8x8_neon(s + y16_idx * p + x16_idx, p);
+  avg[1] = aom_avg_8x8_neon(s + y16_idx * p + (x16_idx + 8), p);
+  avg[2] = aom_avg_8x8_neon(s + (y16_idx + 8) * p + x16_idx, p);
+  avg[3] = aom_avg_8x8_neon(s + (y16_idx + 8) * p + (x16_idx + 8), p);
 }
 
 int aom_satd_lp_neon(const int16_t *coeff, int length) {
-  const int16x4_t zero = vdup_n_s16(0);
-  int32x4_t accum = vdupq_n_s32(0);
+  int16x8_t s0 = vld1q_s16(coeff);
+  int16x8_t s1 = vld1q_s16(coeff + 8);
 
-  do {
-    const int16x8_t src0 = vld1q_s16(coeff);
-    const int16x8_t src8 = vld1q_s16(coeff + 8);
-    accum = vabal_s16(accum, vget_low_s16(src0), zero);
-    accum = vabal_s16(accum, vget_high_s16(src0), zero);
-    accum = vabal_s16(accum, vget_low_s16(src8), zero);
-    accum = vabal_s16(accum, vget_high_s16(src8), zero);
+  int16x8_t abs0 = vabsq_s16(s0);
+  int16x8_t abs1 = vabsq_s16(s1);
+
+  int32x4_t acc0 = vpaddlq_s16(abs0);
+  int32x4_t acc1 = vpaddlq_s16(abs1);
+
+  length -= 16;
+  coeff += 16;
+
+  while (length != 0) {
+    s0 = vld1q_s16(coeff);
+    s1 = vld1q_s16(coeff + 8);
+
+    abs0 = vabsq_s16(s0);
+    abs1 = vabsq_s16(s1);
+
+    acc0 = vpadalq_s16(acc0, abs0);
+    acc1 = vpadalq_s16(acc1, abs1);
+
     length -= 16;
     coeff += 16;
-  } while (length != 0);
+  }
 
+  int32x4_t accum = vaddq_s32(acc0, acc1);
   return horizontal_add_s32x4(accum);
 }
 
@@ -180,56 +174,84 @@ void aom_int_pro_col_neon(int16_t *vbuf, const uint8_t *ref,
   } while (h < height);
 }
 
-// coeff: 16 bits, dynamic range [-32640, 32640].
-// length: value range {16, 64, 256, 1024}.
+// coeff: 20 bits, dynamic range [-524287, 524287].
+// length: value range {16, 32, 64, 128, 256, 512, 1024}.
 int aom_satd_neon(const tran_low_t *coeff, int length) {
   const int32x4_t zero = vdupq_n_s32(0);
-  int32x4_t accum = zero;
-  do {
-    const int32x4_t src0 = vld1q_s32(&coeff[0]);
-    const int32x4_t src8 = vld1q_s32(&coeff[4]);
-    const int32x4_t src16 = vld1q_s32(&coeff[8]);
-    const int32x4_t src24 = vld1q_s32(&coeff[12]);
-    accum = vabaq_s32(accum, src0, zero);
-    accum = vabaq_s32(accum, src8, zero);
-    accum = vabaq_s32(accum, src16, zero);
-    accum = vabaq_s32(accum, src24, zero);
+
+  int32x4_t s0 = vld1q_s32(&coeff[0]);
+  int32x4_t s1 = vld1q_s32(&coeff[4]);
+  int32x4_t s2 = vld1q_s32(&coeff[8]);
+  int32x4_t s3 = vld1q_s32(&coeff[12]);
+
+  int32x4_t accum0 = vabsq_s32(s0);
+  int32x4_t accum1 = vabsq_s32(s2);
+  accum0 = vabaq_s32(accum0, s1, zero);
+  accum1 = vabaq_s32(accum1, s3, zero);
+
+  length -= 16;
+  coeff += 16;
+
+  while (length != 0) {
+    s0 = vld1q_s32(&coeff[0]);
+    s1 = vld1q_s32(&coeff[4]);
+    s2 = vld1q_s32(&coeff[8]);
+    s3 = vld1q_s32(&coeff[12]);
+
+    accum0 = vabaq_s32(accum0, s0, zero);
+    accum1 = vabaq_s32(accum1, s1, zero);
+    accum0 = vabaq_s32(accum0, s2, zero);
+    accum1 = vabaq_s32(accum1, s3, zero);
+
     length -= 16;
     coeff += 16;
-  } while (length != 0);
+  }
 
-  // satd: 26 bits, dynamic range [-32640 * 1024, 32640 * 1024]
-  return horizontal_add_s32x4(accum);
+  // satd: 30 bits, dynamic range [-524287 * 1024, 524287 * 1024]
+  return horizontal_add_s32x4(vaddq_s32(accum0, accum1));
 }
 
 int aom_vector_var_neon(const int16_t *ref, const int16_t *src, int bwl) {
-  int32x4_t v_mean = vdupq_n_s32(0);
-  int32x4_t v_sse = v_mean;
-  int16x8_t v_ref, v_src;
-  int16x4_t v_low;
+  assert(bwl >= 2 && bwl <= 5);
+  int width = 4 << bwl;
 
-  int i, width = 4 << bwl;
-  for (i = 0; i < width; i += 8) {
-    v_ref = vld1q_s16(&ref[i]);
-    v_src = vld1q_s16(&src[i]);
-    const int16x8_t diff = vsubq_s16(v_ref, v_src);
-    // diff: dynamic range [-510, 510], 10 bits.
-    v_mean = vpadalq_s16(v_mean, diff);
-    v_low = vget_low_s16(diff);
-    v_sse = vmlal_s16(v_sse, v_low, v_low);
-#if AOM_ARCH_AARCH64
-    v_sse = vmlal_high_s16(v_sse, diff, diff);
-#else
-    const int16x4_t v_high = vget_high_s16(diff);
-    v_sse = vmlal_s16(v_sse, v_high, v_high);
-#endif
-  }
-  const int mean = horizontal_add_s32x4(v_mean);
-  const int sse = horizontal_add_s32x4(v_sse);
-  const unsigned int mean_abs = mean >= 0 ? mean : -mean;
-  // (mean * mean): dynamic range 31 bits.
-  const int var = sse - ((mean_abs * mean_abs) >> (bwl + 2));
-  return var;
+  int16x8_t r = vld1q_s16(ref);
+  int16x8_t s = vld1q_s16(src);
+
+  // diff: dynamic range [-510, 510] 10 (signed) bits.
+  int16x8_t diff = vsubq_s16(r, s);
+  // v_mean: dynamic range 16 * diff -> [-8160, 8160], 14 (signed) bits.
+  int16x8_t v_mean = diff;
+  // v_sse: dynamic range 2 * 16 * diff^2 -> [0, 8,323,200], 24 (signed) bits.
+  int32x4_t v_sse[2];
+  v_sse[0] = vmull_s16(vget_low_s16(diff), vget_low_s16(diff));
+  v_sse[1] = vmull_s16(vget_high_s16(diff), vget_high_s16(diff));
+
+  ref += 8;
+  src += 8;
+  width -= 8;
+
+  do {
+    r = vld1q_s16(ref);
+    s = vld1q_s16(src);
+
+    diff = vsubq_s16(r, s);
+    v_mean = vaddq_s16(v_mean, diff);
+
+    v_sse[0] = vmlal_s16(v_sse[0], vget_low_s16(diff), vget_low_s16(diff));
+    v_sse[1] = vmlal_s16(v_sse[1], vget_high_s16(diff), vget_high_s16(diff));
+
+    ref += 8;
+    src += 8;
+    width -= 8;
+  } while (width != 0);
+
+  // Dynamic range [0, 65280], 16 (unsigned) bits.
+  const uint32_t mean_abs = abs(horizontal_add_s16x8(v_mean));
+  const int32_t sse = horizontal_add_s32x4(vaddq_s32(v_sse[0], v_sse[1]));
+
+  // (mean_abs * mean_abs): dynamic range 32 (unsigned) bits.
+  return sse - ((mean_abs * mean_abs) >> (bwl + 2));
 }
 
 void aom_minmax_8x8_neon(const uint8_t *a, int a_stride, const uint8_t *b,

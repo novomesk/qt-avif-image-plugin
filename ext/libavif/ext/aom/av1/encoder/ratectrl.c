@@ -187,7 +187,8 @@ int av1_rc_bits_per_mb(const AV1_COMP *cpi, FRAME_TYPE frame_type, int qindex,
   assert(correction_factor <= MAX_BPB_FACTOR &&
          correction_factor >= MIN_BPB_FACTOR);
 
-  if (frame_type != KEY_FRAME && accurate_estimate) {
+  if (cpi->oxcf.rc_cfg.mode == AOM_CBR && frame_type != KEY_FRAME &&
+      accurate_estimate) {
     assert(cpi->rec_sse != UINT64_MAX);
     const int mbs = cm->mi_params.MBs;
     const double sse_sqrt =
@@ -334,7 +335,7 @@ int av1_rc_get_default_min_gf_interval(int width, int height,
                                        double framerate) {
   // Assume we do not need any constraint lower than 4K 20 fps
   static const double factor_safe = 3840 * 2160 * 20.0;
-  const double factor = width * height * framerate;
+  const double factor = (double)width * height * framerate;
   const int default_interval =
       clamp((int)(framerate * 0.125), MIN_GF_INTERVAL, MAX_GF_INTERVAL);
 
@@ -453,12 +454,19 @@ int av1_rc_drop_frame(AV1_COMP *cpi) {
 #else
   int64_t buffer_level = p_rc->buffer_level;
 #endif
-
-  if (!oxcf->rc_cfg.drop_frames_water_mark) {
+  // Never drop on key frame, or for frame whose base layer is key.
+  // If drop_count_consec hits or exceeds max_consec_drop then don't drop.
+  if (cpi->common.current_frame.frame_type == KEY_FRAME ||
+      (cpi->ppi->use_svc &&
+       cpi->svc.layer_context[cpi->svc.temporal_layer_id].is_key_frame) ||
+      !oxcf->rc_cfg.drop_frames_water_mark ||
+      (rc->max_consec_drop > 0 &&
+       rc->drop_count_consec >= rc->max_consec_drop)) {
     return 0;
   } else {
     if (buffer_level < 0) {
       // Always drop if buffer is below 0.
+      rc->drop_count_consec++;
       return 1;
     } else {
       // If buffer is below drop_mark, for now just drop every other frame
@@ -473,6 +481,7 @@ int av1_rc_drop_frame(AV1_COMP *cpi) {
       if (rc->decimation_factor > 0) {
         if (rc->decimation_count > 0) {
           --rc->decimation_count;
+          rc->drop_count_consec++;
           return 1;
         } else {
           rc->decimation_count = rc->decimation_factor;
@@ -493,8 +502,16 @@ static int adjust_q_cbr(const AV1_COMP *cpi, int q, int active_worst_quality,
   const AV1_COMMON *const cm = &cpi->common;
   const SVC *const svc = &cpi->svc;
   const RefreshFrameInfo *const refresh_frame = &cpi->refresh_frame;
+  // Flag to indicate previous frame has overshoot, and buffer level
+  // for current frame is low (less than ~half of optimal). For such
+  // (inter) frames, if the source_sad is non-zero, relax the max_delta_up
+  // and clamp applied below.
+  const bool overshoot_buffer_low =
+      cpi->rc.rc_1_frame == -1 && rc->frame_source_sad > 1000 &&
+      p_rc->buffer_level < (p_rc->optimal_buffer_level >> 1) &&
+      rc->frames_since_key > 4;
   int max_delta_down;
-  int max_delta_up = 20;
+  int max_delta_up = overshoot_buffer_low ? 60 : 20;
   const int change_avg_frame_bandwidth =
       abs(rc->avg_frame_bandwidth - rc->prev_avg_frame_bandwidth) >
       0.1 * (rc->avg_frame_bandwidth);
@@ -543,7 +560,7 @@ static int adjust_q_cbr(const AV1_COMP *cpi, int q, int active_worst_quality,
     // not been set due to dropped frames.
     if (rc->rc_1_frame * rc->rc_2_frame == -1 &&
         rc->q_1_frame != rc->q_2_frame && rc->q_1_frame > 0 &&
-        rc->q_2_frame > 0) {
+        rc->q_2_frame > 0 && !overshoot_buffer_low) {
       int qclamp = clamp(q, AOMMIN(rc->q_1_frame, rc->q_2_frame),
                          AOMMAX(rc->q_1_frame, rc->q_2_frame));
       // If the previous frame had overshoot and the current q needs to
@@ -2231,7 +2248,8 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
   av1_rc_update_rate_correction_factors(cpi, 0, cm->width, cm->height);
 
   // Update bit estimation ratio.
-  if (cm->current_frame.frame_type != KEY_FRAME &&
+  if (cpi->oxcf.rc_cfg.mode == AOM_CBR &&
+      cm->current_frame.frame_type != KEY_FRAME &&
       cpi->sf.hl_sf.accurate_bit_estimate) {
     const double q = av1_convert_qindex_to_q(cm->quant_params.base_qindex,
                                              cm->seq_params->bit_depth);
@@ -2343,6 +2361,7 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
   rc->prev_coded_height = cm->height;
   rc->frame_number_encoded++;
   rc->prev_frame_is_dropped = 0;
+  rc->drop_count_consec = 0;
   // if (current_frame->frame_number == 1 && cm->show_frame)
   /*
   rc->this_frame_target =
@@ -2957,10 +2976,8 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
   }
   if (width != cm->render_width || height != cm->render_height ||
       unscaled_src == NULL || unscaled_last_src == NULL) {
-    if (cpi->src_sad_blk_64x64) {
-      aom_free(cpi->src_sad_blk_64x64);
-      cpi->src_sad_blk_64x64 = NULL;
-    }
+    aom_free(cpi->src_sad_blk_64x64);
+    cpi->src_sad_blk_64x64 = NULL;
   }
   if (unscaled_src == NULL || unscaled_last_src == NULL) return;
   src_y = unscaled_src->y_buffer;
@@ -2972,10 +2989,8 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
   last_src_width = unscaled_last_src->y_width;
   last_src_height = unscaled_last_src->y_height;
   if (src_width != last_src_width || src_height != last_src_height) {
-    if (cpi->src_sad_blk_64x64) {
-      aom_free(cpi->src_sad_blk_64x64);
-      cpi->src_sad_blk_64x64 = NULL;
-    }
+    aom_free(cpi->src_sad_blk_64x64);
+    cpi->src_sad_blk_64x64 = NULL;
     return;
   }
   rc->high_source_sad = 0;
@@ -2990,13 +3005,18 @@ static void rc_scene_detection_onepass_rt(AV1_COMP *cpi,
   }
   int num_zero_temp_sad = 0;
   uint32_t min_thresh = 10000;
-  if (cpi->oxcf.tune_cfg.content != AOM_CONTENT_SCREEN) min_thresh = 100000;
+  if (cpi->oxcf.tune_cfg.content != AOM_CONTENT_SCREEN) {
+    min_thresh = cm->width * cm->height <= 320 * 240 && cpi->framerate < 10.0
+                     ? 50000
+                     : 100000;
+  }
   const BLOCK_SIZE bsize = BLOCK_64X64;
   // Loop over sub-sample of frame, compute average sad over 64x64 blocks.
   uint64_t avg_sad = 0;
   uint64_t tmp_sad = 0;
   int num_samples = 0;
-  const int thresh = 6;
+  const int thresh =
+      cm->width * cm->height <= 320 * 240 && cpi->framerate < 10.0 ? 5 : 6;
   // SAD is computed on 64x64 blocks
   const int sb_size_by_mb = (cm->seq_params->sb_size == BLOCK_128X128)
                                 ? (cm->seq_params->mib_size >> 1)
@@ -3127,6 +3147,10 @@ static void resize_reset_rc(AV1_COMP *cpi, int resize_width, int resize_height,
   int qindex;
   double tot_scale_change = (double)(resize_width * resize_height) /
                             (double)(prev_width * prev_height);
+  // Disable the skip mv search for svc on resize frame.
+  svc->skip_mvsearch_last = 0;
+  svc->skip_mvsearch_gf = 0;
+  svc->skip_mvsearch_altref = 0;
   // Reset buffer level to optimal, update target size.
   p_rc->buffer_level = p_rc->optimal_buffer_level;
   p_rc->bits_off_target = p_rc->optimal_buffer_level;
@@ -3386,7 +3410,7 @@ void av1_get_one_pass_rt_params(AV1_COMP *cpi, FRAME_TYPE *const frame_type,
     if (rc->prev_coded_width == cm->width &&
         rc->prev_coded_height == cm->height) {
       rc_scene_detection_onepass_rt(cpi, frame_input);
-    } else if (cpi->src_sad_blk_64x64) {
+    } else {
       aom_free(cpi->src_sad_blk_64x64);
       cpi->src_sad_blk_64x64 = NULL;
     }

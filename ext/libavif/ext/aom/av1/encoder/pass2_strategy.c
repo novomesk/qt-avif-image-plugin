@@ -181,7 +181,7 @@ static void twopass_update_bpm_factor(AV1_COMP *cpi, int rate_err_tol) {
   // Based on recent history adjust expectations of bits per macroblock.
   double damp_fac = AOMMAX(5.0, rate_err_tol / 10.0);
   double rate_err_factor = 1.0;
-  const double adj_limit = AOMMAX(0.20, (double)(100 - rate_err_tol) / 200.0);
+  const double adj_limit = AOMMAX(0.2, (double)(100 - rate_err_tol) / 200.0);
   const double min_fac = 1.0 - adj_limit;
   const double max_fac = 1.0 + adj_limit;
 
@@ -255,7 +255,6 @@ static void twopass_update_bpm_factor(AV1_COMP *cpi, int rate_err_tol) {
       rate_err_factor = 1.0 - ((double)(bits_off_target) /
                                AOMMAX(total_actual_bits, bits_left));
     }
-    rate_err_factor = AOMMAX(min_fac, AOMMIN(max_fac, rate_err_factor));
 
     // Adjustment is damped if this is 1 pass with look ahead processing
     // (as there are only ever a few frames of data) and for all but the first
@@ -263,6 +262,7 @@ static void twopass_update_bpm_factor(AV1_COMP *cpi, int rate_err_tol) {
     if ((twopass->bpm_factor != 1.0) || cpi->ppi->lap_enabled) {
       rate_err_factor = 1.0 + ((rate_err_factor - 1.0) / damp_fac);
     }
+    rate_err_factor = AOMMAX(min_fac, AOMMIN(max_fac, rate_err_factor));
   }
 
   // Is the rate control trending in the right direction. Only make
@@ -270,7 +270,12 @@ static void twopass_update_bpm_factor(AV1_COMP *cpi, int rate_err_tol) {
   if ((rate_err_factor < 1.0 && err_estimate >= 0) ||
       (rate_err_factor > 1.0 && err_estimate <= 0)) {
     twopass->bpm_factor *= rate_err_factor;
-    twopass->bpm_factor = AOMMAX(min_fac, AOMMIN(max_fac, twopass->bpm_factor));
+    if (rate_err_tol >= 100) {
+      twopass->bpm_factor =
+          AOMMAX(min_fac, AOMMIN(max_fac, twopass->bpm_factor));
+    } else {
+      twopass->bpm_factor = AOMMAX(0.1, AOMMIN(10.0, twopass->bpm_factor));
+    }
   }
 }
 
@@ -1748,22 +1753,42 @@ static void cleanup_blendings(REGIONS *regions, int *num_regions) {
   cleanup_regions(regions, num_regions);
 }
 
-void av1_identify_regions(const FIRSTPASS_STATS *const stats_start,
-                          int total_frames, int offset, REGIONS *regions,
-                          int *total_regions) {
+static void free_firstpass_stats_buffers(REGIONS *temp_regions,
+                                         double *filt_intra_err,
+                                         double *filt_coded_err,
+                                         double *grad_coded) {
+  aom_free(temp_regions);
+  aom_free(filt_intra_err);
+  aom_free(filt_coded_err);
+  aom_free(grad_coded);
+}
+
+// Identify stable and unstable regions from first pass stats.
+// stats_start points to the first frame to analyze.
+// |offset| is the offset from the current frame to the frame stats_start is
+// pointing to.
+// Returns 0 on success, -1 on memory allocation failure.
+static int identify_regions(const FIRSTPASS_STATS *const stats_start,
+                            int total_frames, int offset, REGIONS *regions,
+                            int *total_regions) {
   int k;
-  if (total_frames <= 1) return;
+  if (total_frames <= 1) return 0;
 
   // store the initial decisions
   REGIONS *temp_regions =
       (REGIONS *)aom_malloc(total_frames * sizeof(temp_regions[0]));
-  av1_zero_array(temp_regions, total_frames);
   // buffers for filtered stats
   double *filt_intra_err =
       (double *)aom_calloc(total_frames, sizeof(*filt_intra_err));
   double *filt_coded_err =
       (double *)aom_calloc(total_frames, sizeof(*filt_coded_err));
   double *grad_coded = (double *)aom_calloc(total_frames, sizeof(*grad_coded));
+  if (!(temp_regions && filt_intra_err && filt_coded_err && grad_coded)) {
+    free_firstpass_stats_buffers(temp_regions, filt_intra_err, filt_coded_err,
+                                 grad_coded);
+    return -1;
+  }
+  av1_zero_array(temp_regions, total_frames);
 
   int cur_region = 0, this_start = 0, this_last;
 
@@ -1853,10 +1878,9 @@ void av1_identify_regions(const FIRSTPASS_STATS *const stats_start,
     regions[k].last += offset;
   }
 
-  aom_free(temp_regions);
-  aom_free(filt_coded_err);
-  aom_free(filt_intra_err);
-  aom_free(grad_coded);
+  free_firstpass_stats_buffers(temp_regions, filt_intra_err, filt_coded_err,
+                               grad_coded);
+  return 0;
 }
 
 static int find_regions_index(const REGIONS *regions, int num_regions,
@@ -3794,6 +3818,7 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
                                     (rc->frames_since_key == 0)));
       p_rc->frames_till_regions_update = rest_frames;
 
+      int ret;
       if (cpi->ppi->lap_enabled) {
         av1_mark_flashes(twopass->stats_buf_ctx->stats_in_start,
                          twopass->stats_buf_ctx->stats_in_end);
@@ -3801,13 +3826,17 @@ void av1_get_second_pass_params(AV1_COMP *cpi,
                            twopass->stats_buf_ctx->stats_in_end);
         av1_estimate_coeff(twopass->stats_buf_ctx->stats_in_start,
                            twopass->stats_buf_ctx->stats_in_end);
-        av1_identify_regions(cpi->twopass_frame.stats_in, rest_frames,
-                             (rc->frames_since_key == 0), p_rc->regions,
-                             &p_rc->num_regions);
+        ret = identify_regions(cpi->twopass_frame.stats_in, rest_frames,
+                               (rc->frames_since_key == 0), p_rc->regions,
+                               &p_rc->num_regions);
       } else {
-        av1_identify_regions(
+        ret = identify_regions(
             cpi->twopass_frame.stats_in - (rc->frames_since_key == 0),
             rest_frames, 0, p_rc->regions, &p_rc->num_regions);
+      }
+      if (ret == -1) {
+        aom_internal_error(cpi->common.error, AOM_CODEC_MEM_ERROR,
+                           "Error allocating buffers in identify_regions");
       }
     }
 
