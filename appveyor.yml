@@ -1,9 +1,10 @@
-version: 0.7.1.{build}
+version: 0.8.0.{build}
+image: Visual Studio 2022
 configuration: Release
 platform: x64
 install:
 - cmd: >-
-    call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
+    call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 
     appveyor DownloadFile "https://github.com/joedrago/nasm_mirror/raw/master/nasm-2.15.05-win64.zip" -FileName "nasm.zip"
 
