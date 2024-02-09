@@ -28,7 +28,14 @@
 
 // Note: Max sum(+ve coefficients) = 1.125 * scale
 static INLINE void get_cubic_kernel_dbl(double x, double *kernel) {
-  assert(0 <= x && x < 1);
+  // Check that the fractional position is in range.
+  //
+  // Note: x is calculated from (eg.) `u_frac = u - floor(u)`.
+  // Mathematically, this implies that 0 <= x < 1. However, in practice it is
+  // possible to have x == 1 due to floating point rounding. This is fine,
+  // and we still interpolate correctly if we allow x = 1.
+  assert(0 <= x && x <= 1);
+
   double x2 = x * x;
   double x3 = x2 * x;
   kernel[0] = -0.5 * x + x2 - 0.5 * x3;

@@ -1067,6 +1067,7 @@ void av1_init_tile_thread_data(AV1_PRIMARY *ppi, int is_first_pass) {
 void av1_create_workers(AV1_PRIMARY *ppi, int num_workers) {
   PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
   const AVxWorkerInterface *const winterface = aom_get_worker_interface();
+  assert(p_mt_info->num_workers == 0);
 
   AOM_CHECK_MEM_ERROR(&ppi->error, p_mt_info->workers,
                       aom_malloc(num_workers * sizeof(*p_mt_info->workers)));
@@ -1095,6 +1096,17 @@ void av1_create_workers(AV1_PRIMARY *ppi, int num_workers) {
     winterface->sync(worker);
 
     ++p_mt_info->num_workers;
+  }
+}
+
+// This function will change the state and free the mutex of corresponding
+// workers and terminate the object. The object can not be re-used unless a call
+// to reset() is made.
+void av1_terminate_workers(AV1_PRIMARY *ppi) {
+  PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
+  for (int t = 0; t < p_mt_info->num_workers; ++t) {
+    AVxWorker *const worker = &p_mt_info->workers[t];
+    aom_get_worker_interface()->end(worker);
   }
 }
 

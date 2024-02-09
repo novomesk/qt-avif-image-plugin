@@ -9,6 +9,7 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <tuple>
@@ -320,37 +321,20 @@ aom_image_t *CreateGrayImage(aom_img_fmt_t fmt, unsigned int w,
   return image;
 }
 
-// Run this test to reproduce the bug in fuzz test: ASSERT: cpi->rec_sse !=
-// UINT64_MAX in av1_rc_bits_per_mb.
-TEST(EncodeAPI, Buganizer310766628) {
+TEST(EncodeAPI, Buganizer310548198) {
   aom_codec_iface_t *const iface = aom_codec_av1_cx();
   aom_codec_enc_cfg_t cfg;
-
-  struct Config {
-    unsigned int thread;
-    unsigned int width;
-    unsigned int height;
-    aom_rc_mode end_usage;
-  };
-
-  struct Config init_config = { 16, 759, 383, AOM_CBR };
   const unsigned int usage = AOM_USAGE_REALTIME;
   ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, usage), AOM_CODEC_OK);
-
-  cfg.g_threads = init_config.thread;
-  cfg.g_w = init_config.width;
-  cfg.g_h = init_config.height;
-  cfg.g_timebase.num = 1;
-  cfg.g_timebase.den = 1000 * 1000;  // microseconds
+  cfg.g_w = 1;
+  cfg.g_h = 444;
   cfg.g_pass = AOM_RC_ONE_PASS;
   cfg.g_lag_in_frames = 0;
-  cfg.rc_end_usage = init_config.end_usage;
-  cfg.rc_min_quantizer = 2;
-  cfg.rc_max_quantizer = 58;
 
   aom_codec_ctx_t enc;
-  const int speed = 7;
   ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, 0), AOM_CODEC_OK);
+
+  const int speed = 6;
   ASSERT_EQ(aom_codec_control(&enc, AOME_SET_CPUUSED, speed), AOM_CODEC_OK);
 
   const aom_enc_frame_flags_t flags = 0;
@@ -368,19 +352,18 @@ TEST(EncodeAPI, Buganizer310766628) {
   }
   aom_img_free(image);
 
-  struct Config encode_config = { 2, 759, 383, AOM_VBR };
-
-  cfg.g_threads = encode_config.thread;
-  cfg.g_w = encode_config.width;
-  cfg.g_h = encode_config.height;
-  cfg.rc_end_usage = encode_config.end_usage;
-
+  cfg.g_w = 1;
+  cfg.g_h = 254;
   ASSERT_EQ(aom_codec_enc_config_set(&enc, &cfg), AOM_CODEC_OK)
       << aom_codec_error_detail(&enc);
 
-  // Encode a frame. This will trigger the assertion failure.
+  cfg.g_w = 1;
+  cfg.g_h = 154;
+  ASSERT_EQ(aom_codec_enc_config_set(&enc, &cfg), AOM_CODEC_OK)
+      << aom_codec_error_detail(&enc);
+
+  // Encode a frame.
   image = CreateGrayImage(AOM_IMG_FMT_I420, cfg.g_w, cfg.g_h);
-  ASSERT_NE(image, nullptr);
   ASSERT_EQ(aom_codec_encode(&enc, image, frame_index, 1, flags), AOM_CODEC_OK);
   frame_index++;
   iter = nullptr;
@@ -404,88 +387,173 @@ TEST(EncodeAPI, Buganizer310766628) {
   ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
 }
 
-// Run this test to reproduce the bug in fuzz test: Float-cast-overflow in
-// av1_rc_bits_per_mb.
-TEST(EncodeAPI, Buganizer310457427) {
-  aom_codec_iface_t *const iface = aom_codec_av1_cx();
-  aom_codec_enc_cfg_t cfg;
+// Emulates the WebCodecs VideoEncoder interface.
+class AV1Encoder {
+ public:
+  explicit AV1Encoder(int speed) : speed_(speed) {}
+  ~AV1Encoder();
 
-  struct Config {
-    unsigned int thread;
-    unsigned int width;
-    unsigned int height;
-    aom_rc_mode end_usage;
-  };
+  void Configure(unsigned int threads, unsigned int width, unsigned int height,
+                 aom_rc_mode end_usage, unsigned int usage);
+  void Encode(bool key_frame);
 
-  struct Config init_config = { 12, 896, 1076, AOM_CBR };
-  const unsigned int usage = AOM_USAGE_REALTIME;
-  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, usage), AOM_CODEC_OK);
+ private:
+  // Flushes the encoder. Should be called after all the Encode() calls.
+  void Flush();
 
-  cfg.g_threads = init_config.thread;
-  cfg.g_w = init_config.width;
-  cfg.g_h = init_config.height;
-  cfg.g_timebase.num = 1;
-  cfg.g_timebase.den = 1000 * 1000;  // microseconds
-  cfg.g_pass = AOM_RC_ONE_PASS;
-  cfg.g_lag_in_frames = 0;
-  cfg.rc_end_usage = init_config.end_usage;
-  cfg.rc_min_quantizer = 2;
-  cfg.rc_max_quantizer = 58;
+  const int speed_;
+  bool initialized_ = false;
+  aom_codec_enc_cfg_t cfg_;
+  aom_codec_ctx_t enc_;
+  int frame_index_ = 0;
+};
 
-  aom_codec_ctx_t enc;
-  const int speed = 7;
-  ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, 0), AOM_CODEC_OK);
-  ASSERT_EQ(aom_codec_control(&enc, AOME_SET_CPUUSED, speed), AOM_CODEC_OK);
+AV1Encoder::~AV1Encoder() {
+  if (initialized_) {
+    Flush();
+    EXPECT_EQ(aom_codec_destroy(&enc_), AOM_CODEC_OK);
+  }
+}
 
-  struct Config encode_config = { 6, 609, 1076, AOM_VBR };
-  cfg.g_threads = encode_config.thread;
-  cfg.g_w = encode_config.width;
-  cfg.g_h = encode_config.height;
-  cfg.rc_end_usage = encode_config.end_usage;
+void AV1Encoder::Configure(unsigned int threads, unsigned int width,
+                           unsigned int height, aom_rc_mode end_usage,
+                           unsigned int usage) {
+  if (!initialized_) {
+    aom_codec_iface_t *const iface = aom_codec_av1_cx();
+    ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg_, usage), AOM_CODEC_OK);
+    cfg_.g_threads = threads;
+    cfg_.g_w = width;
+    cfg_.g_h = height;
+    cfg_.g_forced_max_frame_width = cfg_.g_w;
+    cfg_.g_forced_max_frame_height = cfg_.g_h;
+    cfg_.g_timebase.num = 1;
+    cfg_.g_timebase.den = 1000 * 1000;  // microseconds
+    cfg_.g_pass = AOM_RC_ONE_PASS;
+    cfg_.g_lag_in_frames = 0;
+    cfg_.rc_end_usage = end_usage;
+    cfg_.rc_min_quantizer = 2;
+    cfg_.rc_max_quantizer = 58;
+    ASSERT_EQ(aom_codec_enc_init(&enc_, iface, &cfg_, 0), AOM_CODEC_OK);
+    ASSERT_EQ(aom_codec_control(&enc_, AOME_SET_CPUUSED, speed_), AOM_CODEC_OK);
+    initialized_ = true;
+    return;
+  }
 
-  ASSERT_EQ(aom_codec_enc_config_set(&enc, &cfg), AOM_CODEC_OK)
-      << aom_codec_error_detail(&enc);
+  ASSERT_EQ(usage, cfg_.g_usage);
+  cfg_.g_threads = threads;
+  cfg_.g_w = width;
+  cfg_.g_h = height;
+  cfg_.rc_end_usage = end_usage;
+  ASSERT_EQ(aom_codec_enc_config_set(&enc_, &cfg_), AOM_CODEC_OK)
+      << aom_codec_error_detail(&enc_);
+}
 
-  const aom_enc_frame_flags_t flags = 0;
-  int frame_index = 0;
-
-  // Encode a frame.
-  aom_image_t *image = CreateGrayImage(AOM_IMG_FMT_I420, cfg.g_w, cfg.g_h);
+void AV1Encoder::Encode(bool key_frame) {
+  assert(initialized_);
+  // TODO(wtc): Support high bit depths and other YUV formats.
+  aom_image_t *const image =
+      CreateGrayImage(AOM_IMG_FMT_I420, cfg_.g_w, cfg_.g_h);
   ASSERT_NE(image, nullptr);
-  ASSERT_EQ(aom_codec_encode(&enc, image, frame_index, 1, flags), AOM_CODEC_OK);
-  frame_index++;
+  const aom_enc_frame_flags_t flags = key_frame ? AOM_EFLAG_FORCE_KF : 0;
+  ASSERT_EQ(aom_codec_encode(&enc_, image, frame_index_, 1, flags),
+            AOM_CODEC_OK);
+  frame_index_++;
   const aom_codec_cx_pkt_t *pkt;
   aom_codec_iter_t iter = nullptr;
-  while ((pkt = aom_codec_get_cx_data(&enc, &iter)) != nullptr) {
+  while ((pkt = aom_codec_get_cx_data(&enc_, &iter)) != nullptr) {
     ASSERT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
+    if (key_frame) {
+      ASSERT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, AOM_FRAME_IS_KEY);
+    }
   }
   aom_img_free(image);
+}
 
-  // Encode a frame. This will trigger the float-cast-overflow bug which was
-  // caused by division by zero.
-  image = CreateGrayImage(AOM_IMG_FMT_I420, cfg.g_w, cfg.g_h);
-  ASSERT_NE(image, nullptr);
-  ASSERT_EQ(aom_codec_encode(&enc, image, frame_index, 1, flags), AOM_CODEC_OK);
-  frame_index++;
-  iter = nullptr;
-  while ((pkt = aom_codec_get_cx_data(&enc, &iter)) != nullptr) {
-    ASSERT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
-  }
-  aom_img_free(image);
-
-  // Flush the encoder.
+void AV1Encoder::Flush() {
   bool got_data;
   do {
-    ASSERT_EQ(aom_codec_encode(&enc, nullptr, 0, 0, 0), AOM_CODEC_OK);
+    ASSERT_EQ(aom_codec_encode(&enc_, nullptr, 0, 0, 0), AOM_CODEC_OK);
     got_data = false;
-    iter = nullptr;
-    while ((pkt = aom_codec_get_cx_data(&enc, &iter)) != nullptr) {
+    const aom_codec_cx_pkt_t *pkt;
+    aom_codec_iter_t iter = nullptr;
+    while ((pkt = aom_codec_get_cx_data(&enc_, &iter)) != nullptr) {
       ASSERT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
       got_data = true;
     }
   } while (got_data);
+}
 
-  ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
+TEST(EncodeAPI, Buganizer314858909) {
+  AV1Encoder encoder(7);
+
+  encoder.Configure(6, 1582, 750, AOM_CBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame.
+  encoder.Encode(false);
+
+  encoder.Configure(0, 1582, 23, AOM_CBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame..
+  encoder.Encode(false);
+
+  encoder.Configure(16, 1542, 363, AOM_CBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame..
+  encoder.Encode(false);
+}
+
+// Run this test to reproduce the bug in fuzz test: ASSERT: cpi->rec_sse !=
+// UINT64_MAX in av1_rc_bits_per_mb.
+TEST(EncodeAPI, Buganizer310766628) {
+  AV1Encoder encoder(7);
+
+  encoder.Configure(16, 759, 383, AOM_CBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame.
+  encoder.Encode(false);
+
+  encoder.Configure(2, 759, 383, AOM_VBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame. This will trigger the assertion failure.
+  encoder.Encode(false);
+}
+
+// This test covers a possible use case where the change of frame sizes and
+// thread numbers happens before and after the first frame coding.
+TEST(EncodeAPI, Buganizer310455204) {
+  AV1Encoder encoder(7);
+
+  encoder.Configure(0, 1915, 503, AOM_VBR, AOM_USAGE_REALTIME);
+
+  encoder.Configure(4, 1, 1, AOM_VBR, AOM_USAGE_REALTIME);
+
+  encoder.Configure(6, 559, 503, AOM_CBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame.
+  encoder.Encode(false);
+
+  // Increase the number of threads.
+  encoder.Configure(16, 1915, 503, AOM_CBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame.
+  encoder.Encode(false);
+}
+
+// Run this test to reproduce the bug in fuzz test: Float-cast-overflow in
+// av1_rc_bits_per_mb.
+TEST(EncodeAPI, Buganizer310457427) {
+  AV1Encoder encoder(7);
+
+  encoder.Configure(12, 896, 1076, AOM_CBR, AOM_USAGE_REALTIME);
+
+  encoder.Configure(6, 609, 1076, AOM_VBR, AOM_USAGE_REALTIME);
+
+  // Encode a frame.
+  encoder.Encode(false);
+
+  // Encode a frame. This will trigger the float-cast-overflow bug which was
+  // caused by division by zero.
+  encoder.Encode(false);
 }
 
 class EncodeAPIParameterized
@@ -586,6 +654,26 @@ TEST(EncodeAPI, AllIntraMode) {
   cfg.kf_max_dist = 1;
   EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_enc_init(&enc, iface, &cfg, 0));
 }
-#endif
+
+// A test that reproduces bug aomedia:3534.
+TEST(EncodeAPI, AllIntraAndNoRefLast) {
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_ALL_INTRA),
+            AOM_CODEC_OK);
+
+  aom_codec_ctx_t enc;
+  ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, 0), AOM_CODEC_OK);
+
+  aom_image_t *image = CreateGrayImage(AOM_IMG_FMT_I420, cfg.g_w, cfg.g_h);
+  ASSERT_NE(image, nullptr);
+
+  ASSERT_EQ(aom_codec_encode(&enc, image, 0, 1, AOM_EFLAG_NO_REF_LAST),
+            AOM_CODEC_OK);
+
+  aom_img_free(image);
+  ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
+}
+#endif  // !CONFIG_REALTIME_ONLY
 
 }  // namespace

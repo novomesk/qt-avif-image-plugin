@@ -642,6 +642,12 @@ static void init_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
   cm->height = oxcf->frm_dim_cfg.height;
   cpi->is_dropped_frame = false;
 
+  InitialDimensions *const initial_dimensions = &cpi->initial_dimensions;
+  initial_dimensions->width = cm->width;
+  initial_dimensions->height = cm->height;
+
+  cpi->frame_size_related_setup_done = false;
+
   alloc_compressor_data(cpi);
 
   // Single thread case: use counts in common.
@@ -916,13 +922,13 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
     cpi->td.firstpass_ctx = NULL;
     alloc_compressor_data(cpi);
     realloc_segmentation_maps(cpi);
-    initial_dimensions->width = initial_dimensions->height = 0;
+    initial_dimensions->width = cm->width;
+    initial_dimensions->height = cm->height;
+    cpi->frame_size_related_setup_done = false;
   }
   av1_update_frame_size(cpi);
 
   rc->is_src_frame_alt_ref = 0;
-
-  set_tile_info(cm, &cpi->oxcf.tile_cfg);
 
   if (!cpi->ppi->rtc_ref.set_ref_frame_config)
     cpi->ext_flags.refresh_frame.update_pending = 0;
@@ -1614,17 +1620,6 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
   snprintf((H) + strlen(H), sizeof(H) - strlen(H), (T), (V))
 #endif  // CONFIG_INTERNAL_STATS
 
-// This function will change the state and free the mutex of corresponding
-// workers and terminate the object. The object can not be re-used unless a call
-// to reset() is made.
-static AOM_INLINE void terminate_worker_data(AV1_PRIMARY *ppi) {
-  PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
-  for (int t = p_mt_info->num_workers - 1; t >= 0; --t) {
-    AVxWorker *const worker = &p_mt_info->workers[t];
-    aom_get_worker_interface()->end(worker);
-  }
-}
-
 void av1_remove_primary_compressor(AV1_PRIMARY *ppi) {
   if (!ppi) return;
 #if !CONFIG_REALTIME_ONLY
@@ -1652,11 +1647,14 @@ void av1_remove_primary_compressor(AV1_PRIMARY *ppi) {
   av1_tpl_dealloc(&tpl_data->tpl_mt_sync);
 #endif
 
-  terminate_worker_data(ppi);
+  av1_terminate_workers(ppi);
   free_thread_data(ppi);
 
   aom_free(ppi->p_mt_info.tile_thr_data);
+  ppi->p_mt_info.tile_thr_data = NULL;
   aom_free(ppi->p_mt_info.workers);
+  ppi->p_mt_info.workers = NULL;
+  ppi->p_mt_info.num_workers = 0;
 
   aom_free(ppi);
 }
@@ -2071,13 +2069,15 @@ static void init_ref_frame_bufs(AV1_COMP *cpi) {
 #endif
 }
 
+// TODO(chengchen): consider renaming this function as it is necessary
+// for the encoder to setup critical parameters, and it does not
+// deal with initial width any longer.
 void av1_check_initial_width(AV1_COMP *cpi, int use_highbitdepth,
                              int subsampling_x, int subsampling_y) {
   AV1_COMMON *const cm = &cpi->common;
   SequenceHeader *const seq_params = cm->seq_params;
-  InitialDimensions *const initial_dimensions = &cpi->initial_dimensions;
 
-  if (!initial_dimensions->width ||
+  if (!cpi->frame_size_related_setup_done ||
       seq_params->use_highbitdepth != use_highbitdepth ||
       seq_params->subsampling_x != subsampling_x ||
       seq_params->subsampling_y != subsampling_y) {
@@ -2097,9 +2097,8 @@ void av1_check_initial_width(AV1_COMP *cpi, int use_highbitdepth,
 
     init_motion_estimation(cpi);  // TODO(agrange) This can be removed.
 
-    initial_dimensions->width = cm->width;
-    initial_dimensions->height = cm->height;
     cpi->initial_mbs = cm->mi_params.MBs;
+    cpi->frame_size_related_setup_done = true;
   }
 }
 
@@ -2136,18 +2135,18 @@ int av1_set_size_literal(AV1_COMP *cpi, int width, int height) {
   setup_denoiser_buffer(cpi);
 #endif
 
-  if (initial_dimensions->width && initial_dimensions->height &&
-      (cm->width > initial_dimensions->width ||
-       cm->height > initial_dimensions->height)) {
+  if (cm->width > initial_dimensions->width ||
+      cm->height > initial_dimensions->height) {
     av1_free_context_buffers(cm);
     av1_free_shared_coeff_buffer(&cpi->td.shared_coeff_buf);
     av1_free_sms_tree(&cpi->td);
     av1_free_pmc(cpi->td.firstpass_ctx, av1_num_planes(cm));
     cpi->td.firstpass_ctx = NULL;
-    alloc_mb_mode_info_buffers(cpi);
     alloc_compressor_data(cpi);
     realloc_segmentation_maps(cpi);
-    initial_dimensions->width = initial_dimensions->height = 0;
+    initial_dimensions->width = cm->width;
+    initial_dimensions->height = cm->height;
+    cpi->frame_size_related_setup_done = false;
   }
   alloc_mb_mode_info_buffers(cpi);
   av1_update_frame_size(cpi);
@@ -2229,6 +2228,7 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
 
   init_motion_estimation(cpi);
 
+  int has_valid_ref_frame = 0;
   for (ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
     RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
     if (buf != NULL) {
@@ -2236,8 +2236,14 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
       av1_setup_scale_factors_for_frame(sf, buf->buf.y_crop_width,
                                         buf->buf.y_crop_height, cm->width,
                                         cm->height);
+      has_valid_ref_frame |= av1_is_valid_scale(sf);
       if (av1_is_scaled(sf)) aom_extend_frame_borders(&buf->buf, num_planes);
     }
+  }
+  if (!frame_is_intra_only(cm) && !has_valid_ref_frame) {
+    aom_internal_error(
+        cm->error, AOM_CODEC_CORRUPT_FRAME,
+        "Can't find at least one reference frame with valid size");
   }
 
   av1_setup_scale_factors_for_frame(&cm->sf_identity, cm->width, cm->height,
@@ -2582,14 +2588,18 @@ static int encode_without_recode(AV1_COMP *cpi) {
     if (cpi->ref_frame_flags & av1_ref_frame_flag_list[GOLDEN_FRAME]) {
       const YV12_BUFFER_CONFIG *const ref =
           get_ref_frame_yv12_buf(cm, GOLDEN_FRAME);
-      if (ref->y_crop_width != cm->width || ref->y_crop_height != cm->height)
+      if (ref == NULL || ref->y_crop_width != cm->width ||
+          ref->y_crop_height != cm->height) {
         cpi->ref_frame_flags ^= AOM_GOLD_FLAG;
+      }
     }
     if (cpi->ref_frame_flags & av1_ref_frame_flag_list[ALTREF_FRAME]) {
       const YV12_BUFFER_CONFIG *const ref =
           get_ref_frame_yv12_buf(cm, ALTREF_FRAME);
-      if (ref->y_crop_width != cm->width || ref->y_crop_height != cm->height)
+      if (ref == NULL || ref->y_crop_width != cm->width ||
+          ref->y_crop_height != cm->height) {
         cpi->ref_frame_flags ^= AOM_ALT_FLAG;
+      }
     }
   }
 

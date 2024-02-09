@@ -252,9 +252,9 @@ static unsigned int highbd_get_prediction_error(BLOCK_SIZE bsize,
 
 // Refine the motion search range according to the frame dimension
 // for first pass test.
-static int get_search_range(const InitialDimensions *initial_dimensions) {
+static int get_search_range(int width, int height) {
   int sr = 0;
-  const int dim = AOMMIN(initial_dimensions->width, initial_dimensions->height);
+  const int dim = AOMMIN(width, height);
 
   while ((dim << sr) < MAX_FULL_PEL_VAL) ++sr;
   return sr;
@@ -293,18 +293,19 @@ static AOM_INLINE void first_pass_motion_search(AV1_COMP *cpi, MACROBLOCK *x,
                                                 const MV *ref_mv,
                                                 FULLPEL_MV *best_mv,
                                                 int *best_motion_err) {
+  AV1_COMMON *const cm = &cpi->common;
   MACROBLOCKD *const xd = &x->e_mbd;
   FULLPEL_MV start_mv = get_fullmv_from_mv(ref_mv);
   int tmp_err;
   const BLOCK_SIZE bsize = xd->mi[0]->bsize;
   const int new_mv_mode_penalty = NEW_MV_MODE_PENALTY;
-  const int sr = get_search_range(&cpi->initial_dimensions);
+  const int sr = get_search_range(cm->width, cm->height);
   const int step_param = cpi->sf.fp_sf.reduce_mv_step_param + sr;
 
   const search_site_config *first_pass_search_sites =
       av1_get_first_pass_search_site_config(cpi, x, NSTEP);
   const int fine_search_interval =
-      cpi->is_screen_content_type && cpi->common.features.allow_intrabc;
+      cpi->is_screen_content_type && cm->features.allow_intrabc;
   FULLPEL_MOTION_SEARCH_PARAMS ms_params;
   av1_make_default_fullpel_ms_params(&ms_params, cpi, x, bsize, ref_mv,
                                      start_mv, first_pass_search_sites, NSTEP,

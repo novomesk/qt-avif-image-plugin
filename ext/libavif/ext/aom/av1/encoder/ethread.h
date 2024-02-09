@@ -88,6 +88,8 @@ int av1_get_max_num_workers(const AV1_COMP *cpi);
 
 void av1_create_workers(AV1_PRIMARY *ppi, int num_workers);
 
+void av1_terminate_workers(AV1_PRIMARY *ppi);
+
 void av1_init_frame_mt(AV1_PRIMARY *ppi, AV1_COMP *cpi);
 
 void av1_init_cdef_worker(AV1_COMP *cpi);
