@@ -1464,20 +1464,29 @@ static avifResult avifDecoderDataAllocateGridImagePlanes(avifDecoderData * data,
     }
 
     // Lazily populate dstImage with the new frame's properties.
-    if ((dstImage->width != grid->outputWidth) || (dstImage->height != grid->outputHeight) ||
-        (dstImage->depth != tile->image->depth) || (!alpha && (dstImage->yuvFormat != tile->image->yuvFormat))) {
+    const avifBool dimsOrDepthIsDifferent = (dstImage->width != grid->outputWidth) || (dstImage->height != grid->outputHeight) ||
+                                            (dstImage->depth != tile->image->depth);
+    const avifBool yuvFormatIsDifferent = !alpha && (dstImage->yuvFormat != tile->image->yuvFormat);
+    if (dimsOrDepthIsDifferent || yuvFormatIsDifferent) {
         if (alpha) {
             // Alpha doesn't match size, just bail out
             avifDiagnosticsPrintf(data->diag, "Alpha plane dimensions do not match color plane dimensions");
             return AVIF_RESULT_INVALID_IMAGE_GRID;
         }
 
-        avifImageFreePlanes(dstImage, AVIF_PLANES_ALL);
-        dstImage->width = grid->outputWidth;
-        dstImage->height = grid->outputHeight;
-        dstImage->depth = tile->image->depth;
-        dstImage->yuvFormat = tile->image->yuvFormat;
-        dstImage->yuvRange = tile->image->yuvRange;
+        if (dimsOrDepthIsDifferent) {
+            avifImageFreePlanes(dstImage, AVIF_PLANES_ALL);
+            dstImage->width = grid->outputWidth;
+            dstImage->height = grid->outputHeight;
+            dstImage->depth = tile->image->depth;
+        }
+        if (yuvFormatIsDifferent) {
+            avifImageFreePlanes(dstImage, AVIF_PLANES_YUV);
+            dstImage->yuvFormat = tile->image->yuvFormat;
+        }
+        // Keep dstImage->yuvRange which is already set to its correct value
+        // (extracted from the 'colr' box if parsed or from a Sequence Header OBU otherwise).
+
         if (!data->cicpSet) {
             data->cicpSet = AVIF_TRUE;
             dstImage->colorPrimaries = tile->image->colorPrimaries;
@@ -3656,12 +3665,8 @@ static avifResult avifDecoderDataFindAlphaItem(avifDecoderData * data,
     uint32_t * alphaItemIndices = avifAlloc(colorItemCount * sizeof(uint32_t));
     AVIF_CHECKERR(alphaItemIndices, AVIF_RESULT_OUT_OF_MEMORY);
     uint32_t alphaItemCount = 0;
-    uint32_t maxItemID = 0;
     for (uint32_t i = 0; i < colorItem->meta->items.count; ++i) {
-        avifDecoderItem * item = colorItem->meta->items.item[i];
-        if (item->id > maxItemID) {
-            maxItemID = item->id;
-        }
+        const avifDecoderItem * const item = colorItem->meta->items.item[i];
         if (item->dimgForID == colorItem->id) {
             avifBool seenAlphaForCurrentItem = AVIF_FALSE;
             for (uint32_t j = 0; j < colorItem->meta->items.count; ++j) {
@@ -3690,11 +3695,31 @@ static avifResult avifDecoderDataFindAlphaItem(avifDecoderData * data,
         }
     }
     assert(alphaItemCount == colorItemCount);
-    *alphaItem = avifMetaFindItem(colorItem->meta, maxItemID + 1);
-    if (*alphaItem == NULL) {
+    // Find an unused ID.
+    avifResult result;
+    if (colorItem->meta->items.count >= UINT32_MAX - 1) {
+        // In the improbable case where all IDs are used.
+        result = AVIF_RESULT_DECODE_ALPHA_FAILED;
+    } else {
+        uint32_t newItemID = 0;
+        avifBool isUsed;
+        do {
+            ++newItemID;
+            isUsed = AVIF_FALSE;
+            for (uint32_t i = 0; i < colorItem->meta->items.count; ++i) {
+                if (colorItem->meta->items.item[i]->id == newItemID) {
+                    isUsed = AVIF_TRUE;
+                    break;
+                }
+            }
+        } while (isUsed && newItemID != 0);
+        *alphaItem = avifMetaFindItem(colorItem->meta, newItemID); // Create new empty item.
+        result = (*alphaItem == NULL) ? AVIF_RESULT_OUT_OF_MEMORY : AVIF_RESULT_OK;
+    }
+    if (result != AVIF_RESULT_OK) {
         avifFree(alphaItemIndices);
         *isAlphaItemInInput = AVIF_FALSE;
-        return AVIF_RESULT_OUT_OF_MEMORY;
+        return result;
     }
     memcpy((*alphaItem)->type, "grid", 4);
     (*alphaItem)->width = colorItem->width;
@@ -4258,6 +4283,25 @@ static avifResult avifDecoderDecodeTiles(avifDecoder * decoder, uint32_t nextIma
             avifDiagnosticsPrintf(&decoder->diag, "tile->codec->getNextImage() failed");
             return avifGetErrorForItemCategory(tile->input->itemCategory);
         }
+
+        // Section 2.3.4 of AV1 Codec ISO Media File Format Binding v1.2.0 says:
+        //   the full_range_flag in the colr box shall match the color_range
+        //   flag in the Sequence Header OBU.
+        // See https://aomediacodec.github.io/av1-isobmff/v1.2.0.html#av1codecconfigurationbox-semantics.
+        // If a 'colr' box of colour_type 'nclx' was parsed, a mismatch between
+        // the 'colr' decoder->image->yuvRange and the AV1 OBU
+        // tile->image->yuvRange should be treated as an error.
+        // However codec_svt.c was not encoding the color_range field for
+        // multiple years, so there probably are files in the wild that will
+        // fail decoding if this is enforced. Thus this pattern is allowed.
+        // Section 12.1.5.1 of ISO 14496-12 (ISOBMFF) says:
+        //   If colour information is supplied in both this [colr] box, and also
+        //   in the video bitstream, this box takes precedence, and over-rides
+        //   the information in the bitstream.
+        // So decoder->image->yuvRange is kept because it was either the 'colr'
+        // value set when the 'colr' box was parsed, or it was the AV1 OBU value
+        // extracted from the sequence header OBU of the first tile of the first
+        // frame (if no 'colr' box of colour_type 'nclx' was found).
 
         // Alpha plane with limited range is not allowed by the latest revision
         // of the specification. However, it was allowed in version 1.0.0 of the
