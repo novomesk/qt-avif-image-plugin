@@ -1,4 +1,4 @@
-version: 0.8.0.{build}
+version: 0.8.1.{build}
 image: Visual Studio 2022
 configuration: Release
 platform: x64
@@ -46,7 +46,7 @@ install:
 
     cd build
 
-    meson setup --default-library=static --buildtype release ..
+    meson setup --default-library=static --buildtype release -Denable_tools=false -Denable_tests=false ..
 
     ninja
 

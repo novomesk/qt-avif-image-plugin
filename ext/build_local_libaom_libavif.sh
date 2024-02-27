@@ -69,7 +69,7 @@ if ! [ -f libavif/ext/dav1d/build/src/libdav1d.a ]; then
  mkdir -p build
  cd build
 
- meson setup --default-library=static --buildtype release ..
+ meson setup --default-library=static --buildtype release -Denable_tools=false -Denable_tests=false ..
  ninja
 
  if ! [ -f src/libdav1d.a ]; then
