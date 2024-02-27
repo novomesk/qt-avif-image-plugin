@@ -19,7 +19,7 @@ if ! [ -f libavif/ext/libyuv/build/libyuv.a ]; then
   mkdir -p build
   cd build
 
-  cmake -G Ninja -DBUILD_SHARED_LIBS=0 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-fPIC" -DCMAKE_CXX_FLAGS="-fPIC" ..
+  cmake -G Ninja -DBUILD_SHARED_LIBS=0 -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON ..
   ninja yuv
 
   if ! [ -f libyuv.a ]; then
