@@ -102,6 +102,12 @@ static const struct {
     { "AVX-512 (Ice Lake)", "avx512icl", DAV1D_X86_CPU_FLAG_AVX512ICL },
 #elif ARCH_AARCH64 || ARCH_ARM
     { "NEON",               "neon",      DAV1D_ARM_CPU_FLAG_NEON },
+    { "DOTPROD",            "dotprod",   DAV1D_ARM_CPU_FLAG_DOTPROD },
+    { "I8MM",               "i8mm",      DAV1D_ARM_CPU_FLAG_I8MM },
+#if ARCH_AARCH64
+    { "SVE",                "sve",       DAV1D_ARM_CPU_FLAG_SVE },
+    { "SVE2",               "sve2",      DAV1D_ARM_CPU_FLAG_SVE2 },
+#endif /* ARCH_AARCH64 */
 #elif ARCH_LOONGARCH
     { "LSX",                "lsx",       DAV1D_LOONGARCH_CPU_FLAG_LSX },
     { "LASX",               "lasx",      DAV1D_LOONGARCH_CPU_FLAG_LASX },
@@ -112,6 +118,12 @@ static const struct {
 #endif
     { 0 }
 };
+
+#if ARCH_AARCH64 && HAVE_SVE
+int checkasm_sve_length(void);
+#elif ARCH_RISCV
+int checkasm_get_vlenb(void);
+#endif
 
 typedef struct CheckasmFuncVersion {
     struct CheckasmFuncVersion *next;
@@ -130,6 +142,13 @@ typedef struct CheckasmFunc {
     char name[];
 } CheckasmFunc;
 
+typedef enum {
+    RUN_NORMAL = 0,
+    RUN_BENCHMARK,
+    RUN_CPUFLAG_LISTING,
+    RUN_FUNCTION_LISTING,
+} CheckasmRunMode;
+
 /* Internal state */
 static struct {
     CheckasmFunc *funcs;
@@ -144,9 +163,8 @@ static struct {
     const char *test_pattern;
     const char *function_pattern;
     unsigned seed;
-    int bench;
+    CheckasmRunMode run_mode;
     int verbose;
-    int function_listing;
     volatile sig_atomic_t catch_signals;
     int suffix_length;
     int max_function_name_length;
@@ -252,18 +270,18 @@ int float_near_abs_eps_array_ulp(const float *const a, const float *const b,
 
 /* Print colored text to stderr if the terminal supports it */
 static int use_printf_color;
-static void color_printf(const int color, const char *const fmt, ...) {
+static void color_fprintf(FILE *const f, const int color, const char *const fmt, ...) {
     va_list arg;
 
     if (use_printf_color)
-        fprintf(stderr, "\x1b[0;%dm", color);
+        fprintf(f, "\x1b[0;%dm", color);
 
     va_start(arg, fmt);
-    vfprintf(stderr, fmt, arg);
+    vfprintf(f, fmt, arg);
     va_end(arg);
 
     if (use_printf_color)
-        fprintf(stderr, "\x1b[0m");
+        fprintf(f, "\x1b[0m");
 }
 
 /* Deallocate a tree */
@@ -532,7 +550,7 @@ static void check_cpu_flag(const char *const name, unsigned flag) {
 /* Print the name of the current CPU flag, but only do it once */
 static void print_cpu_name(void) {
     if (state.cpu_flag_name) {
-        color_printf(COLOR_YELLOW, "%s:\n", state.cpu_flag_name);
+        color_fprintf(stderr, COLOR_YELLOW, "%s:\n", state.cpu_flag_name);
         state.cpu_flag_name = NULL;
     }
 }
@@ -571,6 +589,7 @@ int main(int argc, char *argv[]) {
                     "    --test=<pattern> -t        Test only <pattern>\n"
                     "    --function=<pattern> -f    Test only the functions matching <pattern>\n"
                     "    --bench -b                 Benchmark the tested functions\n"
+                    "    --list-cpuflags            List available cpu flags\n"
                     "    --list-functions           List available functions\n"
                     "    --list-tests               List available tests\n"
                     "    --verbose -v               Print verbose output\n");
@@ -581,7 +600,7 @@ int main(int argc, char *argv[]) {
                     "checkasm: --bench is not supported on your system\n");
             return 1;
 #endif
-            state.bench = 1;
+            state.run_mode = RUN_BENCHMARK;
         } else if (!strncmp(argv[1], "--test=", 7)) {
             state.test_pattern = argv[1] + 7;
         } else if (!strcmp(argv[1], "-t")) {
@@ -594,8 +613,11 @@ int main(int argc, char *argv[]) {
             state.function_pattern = argc > 1 ? argv[2] : "";
             argc--;
             argv++;
+        } else if (!strcmp(argv[1], "--list-cpuflags")) {
+            state.run_mode = RUN_CPUFLAG_LISTING;
+            break;
         } else if (!strcmp(argv[1], "--list-functions")) {
-            state.function_listing = 1;
+            state.run_mode = RUN_FUNCTION_LISTING;
         } else if (!strcmp(argv[1], "--list-tests")) {
             for (int i = 0; tests[i].name; i++)
                 printf("%s\n", tests[i].name);
@@ -671,7 +693,8 @@ int main(int argc, char *argv[]) {
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
     AddVectoredExceptionHandler(0, signal_handler);
 
-    HANDLE con = GetStdHandle(STD_ERROR_HANDLE);
+    HANDLE con = GetStdHandle(state.run_mode >= RUN_CPUFLAG_LISTING ?
+                              STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
     DWORD con_mode = 0;
     use_printf_color = con && con != INVALID_HANDLE_VALUE &&
                        GetConsoleMode(con, &con_mode) &&
@@ -683,12 +706,14 @@ int main(int argc, char *argv[]) {
     sigaction(SIGILL,  &signal_handler_act, NULL);
     sigaction(SIGSEGV, &signal_handler_act, NULL);
 
-    const char *const term = getenv("TERM");
-    use_printf_color = term && strcmp(term, "dumb") && isatty(2);
+    if (isatty(state.run_mode >= RUN_CPUFLAG_LISTING ? 1 : 2)) {
+        const char *const term = getenv("TERM");
+        use_printf_color = term && strcmp(term, "dumb");
+    }
 #endif
 
 #ifdef readtime
-    if (state.bench) {
+    if (state.run_mode == RUN_BENCHMARK) {
         if (!checkasm_save_context()) {
             checkasm_set_signal_handler_state(1);
             readtime();
@@ -702,11 +727,22 @@ int main(int argc, char *argv[]) {
 
     int ret = 0;
 
-    if (!state.function_listing) {
+    if (state.run_mode != RUN_FUNCTION_LISTING) {
+        const unsigned cpu_flags = dav1d_get_cpu_flags();
+        if (state.run_mode == RUN_CPUFLAG_LISTING) {
+            const int last_i = (int)(sizeof(cpus) / sizeof(*cpus)) - 2;
+            for (int i = 0; i <= last_i ; i++) {
+                if (cpus[i].flag & cpu_flags)
+                    color_fprintf(stdout, COLOR_GREEN, "%s", cpus[i].suffix);
+                else
+                    color_fprintf(stdout, COLOR_RED, "~%s", cpus[i].suffix);
+                printf(i == last_i ? "\n" : ", ");
+            }
+            return 0;
+        }
 #if ARCH_X86_64
         void checkasm_warmup_avx2(void);
         void checkasm_warmup_avx512(void);
-        const unsigned cpu_flags = dav1d_get_cpu_flags();
         if (cpu_flags & DAV1D_X86_CPU_FLAG_AVX512ICL)
             state.simd_warmup = checkasm_warmup_avx512;
         else if (cpu_flags & DAV1D_X86_CPU_FLAG_AVX2)
@@ -720,6 +756,18 @@ int main(int argc, char *argv[]) {
         for (size_t len = strlen(name); len && name[len-1] == ' '; len--)
             name[len-1] = '\0'; /* trim trailing whitespace */
         fprintf(stderr, "checkasm: %s (%08X) using random seed %u\n", name, cpuid, state.seed);
+#elif ARCH_RISCV
+        char buf[32] = "";
+        if (cpu_flags & DAV1D_RISCV_CPU_FLAG_V) {
+            const int vlen = 8*checkasm_get_vlenb();
+            snprintf(buf, sizeof(buf), "VLEN=%i bits, ", vlen);
+        }
+        fprintf(stderr, "checkasm: %susing random seed %u\n", buf, state.seed);
+#elif ARCH_AARCH64 && HAVE_SVE
+        char buf[48] = "";
+        if (cpu_flags & DAV1D_ARM_CPU_FLAG_SVE)
+            snprintf(buf, sizeof(buf), "SVE %d bits, ", checkasm_sve_length());
+        fprintf(stderr, "checkasm: %susing random seed %u\n", buf, state.seed);
 #else
         fprintf(stderr, "checkasm: using random seed %u\n", state.seed);
 #endif
@@ -729,7 +777,7 @@ int main(int argc, char *argv[]) {
     for (int i = 0; cpus[i].flag; i++)
         check_cpu_flag(cpus[i].name, cpus[i].flag);
 
-    if (state.function_listing) {
+    if (state.run_mode == RUN_FUNCTION_LISTING) {
         print_functions(state.funcs);
     } else if (state.num_failed) {
         fprintf(stderr, "checkasm: %d of %d tests failed\n",
@@ -741,7 +789,7 @@ int main(int argc, char *argv[]) {
         else
             fprintf(stderr, "checkasm: no tests to perform\n");
 #ifdef readtime
-        if (state.bench && state.max_function_name_length) {
+        if (state.run_mode == RUN_BENCHMARK && state.max_function_name_length) {
             state.nop_time = measure_nop_time();
             if (state.verbose)
                 printf("nop:%*.1f\n", state.max_function_name_length + 6, state.nop_time);
@@ -801,7 +849,7 @@ void *checkasm_check_func(void *const func, const char *const name, ...) {
     v->ok = 1;
     v->cpu = state.cpu_flag;
     state.current_func_ver = v;
-    if (state.function_listing) /* Save function names without running tests */
+    if (state.run_mode == RUN_FUNCTION_LISTING) /* Save function names without running tests */
         return NULL;
 
     xor128_srand(state.seed);
@@ -814,7 +862,7 @@ void *checkasm_check_func(void *const func, const char *const name, ...) {
 
 /* Decide whether or not the current function needs to be benchmarked */
 int checkasm_bench_func(void) {
-    return !state.num_failed && state.bench;
+    return !state.num_failed && state.run_mode == RUN_BENCHMARK;
 }
 
 /* Indicate that the current test has failed, return whether verbose printing
@@ -863,9 +911,9 @@ void checkasm_report(const char *const name, ...) {
         fprintf(stderr, "%*c", imax(pad_length, 0) + 2, '[');
 
         if (state.num_failed == prev_failed)
-            color_printf(COLOR_GREEN, "OK");
+            color_fprintf(stderr, COLOR_GREEN, "OK");
         else
-            color_printf(COLOR_RED, "FAILED");
+            color_fprintf(stderr, COLOR_RED, "FAILED");
         fprintf(stderr, "]\n");
 
         prev_checked = state.num_checked;
