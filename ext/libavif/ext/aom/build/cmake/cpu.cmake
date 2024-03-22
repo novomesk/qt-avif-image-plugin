@@ -26,8 +26,19 @@ if("${AOM_TARGET_CPU}" STREQUAL "arm64")
   foreach(flavor ${ARM64_FLAVORS})
     if(ENABLE_${flavor} AND NOT DEFINED AOM_${flavor}_FLAG)
       set(AOM_${flavor}_FLAG "${AOM_${flavor}_DEFAULT_FLAG}")
+      string(TOLOWER "${flavor}" flavor_lower)
+
+      # Do not use check_c_compiler_flag here since the regex used to match
+      # against stderr does not recognise the "invalid feature modifier" error
+      # produced by certain versions of GCC, leading to the feature being
+      # incorrectly marked as available.
+      set(OLD_CMAKE_REQURED_FLAGS ${CMAKE_REQUIRED_FLAGS})
+      set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${AOM_${flavor}_FLAG}")
       unset(FLAG_SUPPORTED)
-      check_c_compiler_flag("${AOM_${flavor}_FLAG}" FLAG_SUPPORTED)
+      aom_check_source_compiles("arm_feature_flag_${flavor_lower}_available"
+                                "static void function(void) {}" FLAG_SUPPORTED)
+      set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQURED_FLAGS})
+
       if(NOT ${FLAG_SUPPORTED})
         set(ENABLE_${flavor} 0)
       endif()

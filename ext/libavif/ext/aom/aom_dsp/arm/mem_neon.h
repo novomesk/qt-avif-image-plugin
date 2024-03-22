@@ -56,15 +56,8 @@ static INLINE uint16x8x4_t vld1q_u16_x4(const uint16_t *ptr) {
 
 #elif defined(__GNUC__) && !defined(__clang__)  // GCC 64-bit.
 #if __GNUC__ < 8
-
 static INLINE uint8x16x2_t vld1q_u8_x2(const uint8_t *ptr) {
   uint8x16x2_t res = { { vld1q_u8(ptr + 0 * 16), vld1q_u8(ptr + 1 * 16) } };
-  return res;
-}
-
-static INLINE uint16x8x4_t vld1q_u16_x4(const uint16_t *ptr) {
-  uint16x8x4_t res = { { vld1q_u16(ptr + 0 * 8), vld1q_u16(ptr + 1 * 8),
-                         vld1q_u16(ptr + 2 * 8), vld1q_u16(ptr + 3 * 8) } };
   return res;
 }
 #endif  // __GNUC__ < 8
@@ -76,6 +69,15 @@ static INLINE uint8x16x3_t vld1q_u8_x3(const uint8_t *ptr) {
   return res;
 }
 #endif  // __GNUC__ < 9
+
+// vld1q_u16_x4 is defined from GCC 8.5.0 and onwards.
+#if ((__GNUC__ << 8) | __GNUC_MINOR__) < 0x805
+static INLINE uint16x8x4_t vld1q_u16_x4(const uint16_t *ptr) {
+  uint16x8x4_t res = { { vld1q_u16(ptr + 0 * 8), vld1q_u16(ptr + 1 * 8),
+                         vld1q_u16(ptr + 2 * 8), vld1q_u16(ptr + 3 * 8) } };
+  return res;
+}
+#endif  // ((__GNUC__ << 8) | __GNUC_MINOR__) < 0x805
 #endif  // defined(__GNUC__) && !defined(__clang__)
 
 static INLINE void store_u8_8x2(uint8_t *s, ptrdiff_t p, const uint8x8_t s0,
