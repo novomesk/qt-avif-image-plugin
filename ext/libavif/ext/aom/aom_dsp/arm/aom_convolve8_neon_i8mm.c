@@ -15,7 +15,6 @@
 #include <string.h>
 
 #include "config/aom_config.h"
-#include "config/aom_dsp_rtcd.h"
 
 #include "aom/aom_integer.h"
 #include "aom_dsp/aom_dsp_common.h"
@@ -44,7 +43,7 @@ DECLARE_ALIGNED(16, static const uint8_t, dot_prod_merge_block_tbl[48]) = {
   3, 16, 17, 18, 7, 20, 21, 22, 11, 24, 25, 26, 15, 28, 29, 30
 };
 
-static INLINE int16x4_t convolve8_4_usdot(uint8x16_t samples,
+static INLINE int16x4_t convolve8_4_usdot(const uint8x16_t samples,
                                           const int8x8_t filter,
                                           const uint8x16x2_t permute_tbl) {
   uint8x16_t permuted_samples[2];
@@ -56,7 +55,6 @@ static INLINE int16x4_t convolve8_4_usdot(uint8x16_t samples,
   /* { 4,  5,  6,  7,  5,  6,  7,  8,  6,  7,  8,  9,  7,  8,  9, 10 } */
   permuted_samples[1] = vqtbl1q_u8(samples, permute_tbl.val[1]);
 
-  /* Accumulate dot product into 'correction' to account for range clamp. */
   sum = vusdotq_lane_s32(vdupq_n_s32(0), permuted_samples[0], filter, 0);
   sum = vusdotq_lane_s32(sum, permuted_samples[1], filter, 1);
 
@@ -64,7 +62,7 @@ static INLINE int16x4_t convolve8_4_usdot(uint8x16_t samples,
   return vqmovn_s32(sum);
 }
 
-static INLINE uint8x8_t convolve8_8_usdot(uint8x16_t samples,
+static INLINE uint8x8_t convolve8_8_usdot(const uint8x16_t samples,
                                           const int8x8_t filter,
                                           const uint8x16x3_t permute_tbl) {
   uint8x16_t permuted_samples[3];
@@ -123,10 +121,8 @@ void aom_convolve8_horiz_neon_i8mm(const uint8_t *src, ptrdiff_t src_stride,
       d01 = vqrshrun_n_s16(vcombine_s16(t0, t1), FILTER_BITS);
       d23 = vqrshrun_n_s16(vcombine_s16(t2, t3), FILTER_BITS);
 
-      store_u8_4x1(dst + 0 * dst_stride, d01, 0);
-      store_u8_4x1(dst + 1 * dst_stride, d01, 1);
-      store_u8_4x1(dst + 2 * dst_stride, d23, 0);
-      store_u8_4x1(dst + 3 * dst_stride, d23, 1);
+      store_u8x4_strided_x2(dst + 0 * dst_stride, dst_stride, d01);
+      store_u8x4_strided_x2(dst + 2 * dst_stride, dst_stride, d23);
 
       src += 4 * src_stride;
       dst += 4 * dst_stride;
@@ -249,7 +245,6 @@ void aom_convolve8_vert_neon_i8mm(const uint8_t *src, ptrdiff_t src_stride,
                                   int h) {
   const int8x8_t filter = vmovn_s16(vld1q_s16(filter_y));
   const uint8x16x3_t merge_block_tbl = vld1q_u8_x3(dot_prod_merge_block_tbl);
-  uint8x8_t s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10;
   uint8x16x2_t samples_LUT;
 
   assert((intptr_t)dst % 4 == 0);
@@ -263,31 +258,25 @@ void aom_convolve8_vert_neon_i8mm(const uint8_t *src, ptrdiff_t src_stride,
 
   if (w == 4) {
     const uint8x16_t tran_concat_tbl = vld1q_u8(dot_prod_tran_concat_tbl);
-    uint8x16_t s0123, s1234, s2345, s3456, s4567, s5678, s6789, s78910;
-    int16x4_t d0, d1, d2, d3;
-    uint8x8_t d01, d23;
 
+    uint8x8_t s0, s1, s2, s3, s4, s5, s6;
     load_u8_8x7(src, src_stride, &s0, &s1, &s2, &s3, &s4, &s5, &s6);
     src += 7 * src_stride;
-
-    s7 = vdup_n_u8(0);
-    s8 = vdup_n_u8(0);
-    s9 = vdup_n_u8(0);
 
     /* This operation combines a conventional transpose and the sample permute
      * (see horizontal case) required before computing the dot product.
      */
+    uint8x16_t s0123, s1234, s2345, s3456;
     transpose_concat_4x4(s0, s1, s2, s3, &s0123, tran_concat_tbl);
     transpose_concat_4x4(s1, s2, s3, s4, &s1234, tran_concat_tbl);
     transpose_concat_4x4(s2, s3, s4, s5, &s2345, tran_concat_tbl);
     transpose_concat_4x4(s3, s4, s5, s6, &s3456, tran_concat_tbl);
-    transpose_concat_4x4(s4, s5, s6, s7, &s4567, tran_concat_tbl);
-    transpose_concat_4x4(s5, s6, s7, s8, &s5678, tran_concat_tbl);
-    transpose_concat_4x4(s6, s7, s8, s9, &s6789, tran_concat_tbl);
 
     do {
+      uint8x8_t s7, s8, s9, s10;
       load_u8_8x4(src, src_stride, &s7, &s8, &s9, &s10);
 
+      uint8x16_t s4567, s5678, s6789, s78910;
       transpose_concat_4x4(s7, s8, s9, s10, &s78910, tran_concat_tbl);
 
       /* Merge new data into block from previous iteration. */
@@ -297,17 +286,15 @@ void aom_convolve8_vert_neon_i8mm(const uint8_t *src, ptrdiff_t src_stride,
       s5678 = vqtbl2q_u8(samples_LUT, merge_block_tbl.val[1]);
       s6789 = vqtbl2q_u8(samples_LUT, merge_block_tbl.val[2]);
 
-      d0 = convolve8_4_usdot_partial(s0123, s4567, filter);
-      d1 = convolve8_4_usdot_partial(s1234, s5678, filter);
-      d2 = convolve8_4_usdot_partial(s2345, s6789, filter);
-      d3 = convolve8_4_usdot_partial(s3456, s78910, filter);
-      d01 = vqrshrun_n_s16(vcombine_s16(d0, d1), FILTER_BITS);
-      d23 = vqrshrun_n_s16(vcombine_s16(d2, d3), FILTER_BITS);
+      int16x4_t d0 = convolve8_4_usdot_partial(s0123, s4567, filter);
+      int16x4_t d1 = convolve8_4_usdot_partial(s1234, s5678, filter);
+      int16x4_t d2 = convolve8_4_usdot_partial(s2345, s6789, filter);
+      int16x4_t d3 = convolve8_4_usdot_partial(s3456, s78910, filter);
+      uint8x8_t d01 = vqrshrun_n_s16(vcombine_s16(d0, d1), FILTER_BITS);
+      uint8x8_t d23 = vqrshrun_n_s16(vcombine_s16(d2, d3), FILTER_BITS);
 
-      store_u8_4x1(dst + 0 * dst_stride, d01, 0);
-      store_u8_4x1(dst + 1 * dst_stride, d01, 1);
-      store_u8_4x1(dst + 2 * dst_stride, d23, 0);
-      store_u8_4x1(dst + 3 * dst_stride, d23, 1);
+      store_u8x4_strided_x2(dst + 0 * dst_stride, dst_stride, d01);
+      store_u8x4_strided_x2(dst + 2 * dst_stride, dst_stride, d23);
 
       /* Prepare block for next iteration - re-using as much as possible. */
       /* Shuffle everything up four rows. */
@@ -322,29 +309,21 @@ void aom_convolve8_vert_neon_i8mm(const uint8_t *src, ptrdiff_t src_stride,
     } while (h != 0);
   } else {
     const uint8x16x2_t tran_concat_tbl = vld1q_u8_x2(dot_prod_tran_concat_tbl);
-    uint8x16_t s0123_lo, s0123_hi, s1234_lo, s1234_hi, s2345_lo, s2345_hi,
-        s3456_lo, s3456_hi, s4567_lo, s4567_hi, s5678_lo, s5678_hi, s6789_lo,
-        s6789_hi, s78910_lo, s78910_hi;
-    uint8x8_t d0, d1, d2, d3;
-    const uint8_t *s;
-    uint8_t *d;
-    int height;
 
     do {
-      height = h;
-      s = src;
-      d = dst;
+      int height = h;
+      const uint8_t *s = src;
+      uint8_t *d = dst;
 
+      uint8x8_t s0, s1, s2, s3, s4, s5, s6;
       load_u8_8x7(s, src_stride, &s0, &s1, &s2, &s3, &s4, &s5, &s6);
       s += 7 * src_stride;
-
-      s7 = vdup_n_u8(0);
-      s8 = vdup_n_u8(0);
-      s9 = vdup_n_u8(0);
 
       /* This operation combines a conventional transpose and the sample permute
        * (see horizontal case) required before computing the dot product.
        */
+      uint8x16_t s0123_lo, s0123_hi, s1234_lo, s1234_hi, s2345_lo, s2345_hi,
+          s3456_lo, s3456_hi;
       transpose_concat_8x4(s0, s1, s2, s3, &s0123_lo, &s0123_hi,
                            tran_concat_tbl);
       transpose_concat_8x4(s1, s2, s3, s4, &s1234_lo, &s1234_hi,
@@ -353,16 +332,13 @@ void aom_convolve8_vert_neon_i8mm(const uint8_t *src, ptrdiff_t src_stride,
                            tran_concat_tbl);
       transpose_concat_8x4(s3, s4, s5, s6, &s3456_lo, &s3456_hi,
                            tran_concat_tbl);
-      transpose_concat_8x4(s4, s5, s6, s7, &s4567_lo, &s4567_hi,
-                           tran_concat_tbl);
-      transpose_concat_8x4(s5, s6, s7, s8, &s5678_lo, &s5678_hi,
-                           tran_concat_tbl);
-      transpose_concat_8x4(s6, s7, s8, s9, &s6789_lo, &s6789_hi,
-                           tran_concat_tbl);
 
       do {
+        uint8x8_t s7, s8, s9, s10;
         load_u8_8x4(s, src_stride, &s7, &s8, &s9, &s10);
 
+        uint8x16_t s4567_lo, s4567_hi, s5678_lo, s5678_hi, s6789_lo, s6789_hi,
+            s78910_lo, s78910_hi;
         transpose_concat_8x4(s7, s8, s9, s10, &s78910_lo, &s78910_hi,
                              tran_concat_tbl);
 
@@ -379,14 +355,14 @@ void aom_convolve8_vert_neon_i8mm(const uint8_t *src, ptrdiff_t src_stride,
         s5678_hi = vqtbl2q_u8(samples_LUT, merge_block_tbl.val[1]);
         s6789_hi = vqtbl2q_u8(samples_LUT, merge_block_tbl.val[2]);
 
-        d0 = convolve8_8_usdot_partial(s0123_lo, s4567_lo, s0123_hi, s4567_hi,
-                                       filter);
-        d1 = convolve8_8_usdot_partial(s1234_lo, s5678_lo, s1234_hi, s5678_hi,
-                                       filter);
-        d2 = convolve8_8_usdot_partial(s2345_lo, s6789_lo, s2345_hi, s6789_hi,
-                                       filter);
-        d3 = convolve8_8_usdot_partial(s3456_lo, s78910_lo, s3456_hi, s78910_hi,
-                                       filter);
+        uint8x8_t d0 = convolve8_8_usdot_partial(s0123_lo, s4567_lo, s0123_hi,
+                                                 s4567_hi, filter);
+        uint8x8_t d1 = convolve8_8_usdot_partial(s1234_lo, s5678_lo, s1234_hi,
+                                                 s5678_hi, filter);
+        uint8x8_t d2 = convolve8_8_usdot_partial(s2345_lo, s6789_lo, s2345_hi,
+                                                 s6789_hi, filter);
+        uint8x8_t d3 = convolve8_8_usdot_partial(s3456_lo, s78910_lo, s3456_hi,
+                                                 s78910_hi, filter);
 
         store_u8_8x4(d, dst_stride, d0, d1, d2, d3);
 

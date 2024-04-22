@@ -157,12 +157,6 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/simd_cmp_impl.h"
               "${AOM_ROOT}/test/simd_impl.h")
 
-  if(HAVE_NEON)
-    list(APPEND AOM_UNIT_TEST_COMMON_INTRIN_NEON
-                "${AOM_ROOT}/test/simd_cmp_neon.cc")
-    add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_INTRIN_NEON)
-  endif()
-
   if(HAVE_SSE2)
     list(APPEND AOM_UNIT_TEST_COMMON_INTRIN_SSE2
                 "${AOM_ROOT}/test/simd_cmp_sse2.cc")
@@ -283,29 +277,24 @@ if(NOT BUILD_SHARED_LIBS)
       list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
                   "${AOM_ROOT}/test/coding_path_sync.cc")
     endif()
-    if(CONFIG_REALTIME_ONLY)
-      list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
-                       "${AOM_ROOT}/test/altref_test.cc"
-                       "${AOM_ROOT}/test/av1_encoder_parms_get_to_decoder.cc"
-                       "${AOM_ROOT}/test/av1_ext_tile_test.cc"
-                       "${AOM_ROOT}/test/cnn_test.cc"
-                       "${AOM_ROOT}/test/decode_multithreaded_test.cc"
-                       "${AOM_ROOT}/test/error_resilience_test.cc"
-                       "${AOM_ROOT}/test/kf_test.cc"
-                       "${AOM_ROOT}/test/lossless_test.cc"
-                       "${AOM_ROOT}/test/sb_multipass_test.cc"
-                       "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
-                       "${AOM_ROOT}/test/selfguided_filter_test.cc"
-                       "${AOM_ROOT}/test/screen_content_test.cc"
-                       "${AOM_ROOT}/test/still_picture_test.cc"
-                       "${AOM_ROOT}/test/tile_independence_test.cc"
-                       "${AOM_ROOT}/test/tpl_model_test.cc")
-    endif()
   endif()
-
-  if(HAVE_NEON)
-    list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
-                "${AOM_ROOT}/test/simd_neon_test.cc")
+  if(CONFIG_REALTIME_ONLY)
+    list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES
+                     "${AOM_ROOT}/test/altref_test.cc"
+                     "${AOM_ROOT}/test/av1_encoder_parms_get_to_decoder.cc"
+                     "${AOM_ROOT}/test/av1_ext_tile_test.cc"
+                     "${AOM_ROOT}/test/cnn_test.cc"
+                     "${AOM_ROOT}/test/decode_multithreaded_test.cc"
+                     "${AOM_ROOT}/test/error_resilience_test.cc"
+                     "${AOM_ROOT}/test/kf_test.cc"
+                     "${AOM_ROOT}/test/lossless_test.cc"
+                     "${AOM_ROOT}/test/sb_multipass_test.cc"
+                     "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
+                     "${AOM_ROOT}/test/selfguided_filter_test.cc"
+                     "${AOM_ROOT}/test/screen_content_test.cc"
+                     "${AOM_ROOT}/test/still_picture_test.cc"
+                     "${AOM_ROOT}/test/tile_independence_test.cc"
+                     "${AOM_ROOT}/test/tpl_model_test.cc")
   endif()
 
   if(CONFIG_FPMT_TEST AND (NOT CONFIG_REALTIME_ONLY))

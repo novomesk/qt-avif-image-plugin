@@ -23,7 +23,7 @@
 #include "aom_dsp/binary_codes_writer.h"
 #include "aom_ports/mem.h"
 #include "aom_ports/aom_timer.h"
-
+#include "aom_util/aom_pthread.h"
 #if CONFIG_MISMATCH_DEBUG
 #include "aom_util/debug_util.h"
 #endif  // CONFIG_MISMATCH_DEBUG
@@ -535,11 +535,19 @@ static AOM_INLINE void encode_nonrd_sb(AV1_COMP *cpi, ThreadData *td,
   }
 #endif
   // Set the partition
-  if (sf->part_sf.partition_search_type == FIXED_PARTITION || seg_skip) {
+  if (sf->part_sf.partition_search_type == FIXED_PARTITION || seg_skip ||
+      (sf->rt_sf.use_fast_fixed_part && x->sb_force_fixed_part == 1 &&
+       (!frame_is_intra_only(cm) &&
+        (!cpi->ppi->use_svc ||
+         !cpi->svc.layer_context[cpi->svc.temporal_layer_id].is_key_frame)))) {
     // set a fixed-size partition
     av1_set_offsets(cpi, tile_info, x, mi_row, mi_col, sb_size);
-    const BLOCK_SIZE bsize =
-        seg_skip ? sb_size : sf->part_sf.fixed_partition_size;
+    BLOCK_SIZE bsize_select = sf->part_sf.fixed_partition_size;
+    if (sf->rt_sf.use_fast_fixed_part &&
+        x->content_state_sb.source_sad_nonrd < kLowSad) {
+      bsize_select = BLOCK_64X64;
+    }
+    const BLOCK_SIZE bsize = seg_skip ? sb_size : bsize_select;
     av1_set_fixed_partitioning(cpi, tile_info, mi, mi_row, mi_col, bsize);
   } else if (sf->part_sf.partition_search_type == VAR_BASED_PARTITION) {
     // set a variance-based partition
@@ -1048,8 +1056,13 @@ static AOM_INLINE bool is_calc_src_content_needed(AV1_COMP *cpi,
 
     // The threshold is determined based on kLowSad and kHighSad threshold and
     // test results.
-    const uint64_t thresh_low = 15000;
-    const uint64_t thresh_high = 40000;
+    uint64_t thresh_low = 15000;
+    uint64_t thresh_high = 40000;
+
+    if (cpi->sf.rt_sf.increase_source_sad_thresh) {
+      thresh_low = thresh_low << 1;
+      thresh_high = thresh_high << 1;
+    }
 
     if (avg_64x64_blk_sad > thresh_low && avg_64x64_blk_sad < thresh_high) {
       do_calc_src_content = false;
@@ -1197,6 +1210,7 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
     x->sb_me_block = 0;
     x->sb_me_partition = 0;
     x->sb_me_mv.as_int = 0;
+    x->sb_force_fixed_part = 1;
 
     if (cpi->oxcf.mode == ALLINTRA) {
       x->intra_sb_rdmult_modifier = 128;
@@ -1225,7 +1239,7 @@ static AOM_INLINE void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
 
     // Grade the temporal variation of the sb, the grade will be used to decide
     // fast mode search strategy for coding blocks
-    grade_source_content_sb(cpi, x, tile_data, mi_row, mi_col);
+    if (!seg_skip) grade_source_content_sb(cpi, x, tile_data, mi_row, mi_col);
 
     // encode the superblock
     if (use_nonrd_mode) {
@@ -1267,17 +1281,32 @@ static AOM_INLINE void init_encode_frame_mb_context(AV1_COMP *cpi) {
 
 void av1_alloc_tile_data(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
+  AV1EncRowMultiThreadInfo *const enc_row_mt = &cpi->mt_info.enc_row_mt;
   const int tile_cols = cm->tiles.cols;
   const int tile_rows = cm->tiles.rows;
 
   av1_row_mt_mem_dealloc(cpi);
 
   aom_free(cpi->tile_data);
+  cpi->allocated_tiles = 0;
+  enc_row_mt->allocated_tile_cols = 0;
+  enc_row_mt->allocated_tile_rows = 0;
+
   CHECK_MEM_ERROR(
       cm, cpi->tile_data,
       aom_memalign(32, tile_cols * tile_rows * sizeof(*cpi->tile_data)));
 
   cpi->allocated_tiles = tile_cols * tile_rows;
+  enc_row_mt->allocated_tile_cols = tile_cols;
+  enc_row_mt->allocated_tile_rows = tile_rows;
+  for (int tile_row = 0; tile_row < tile_rows; ++tile_row) {
+    for (int tile_col = 0; tile_col < tile_cols; ++tile_col) {
+      const int tile_index = tile_row * tile_cols + tile_col;
+      TileDataEnc *const this_tile = &cpi->tile_data[tile_index];
+      av1_zero(this_tile->row_mt_sync);
+      this_tile->row_ctx = NULL;
+    }
+  }
 }
 
 void av1_init_tile_data(AV1_COMP *cpi) {
@@ -1568,20 +1597,12 @@ static int check_skip_mode_enabled(AV1_COMP *const cpi) {
   // High Latency: Turn off skip mode if all refs are fwd.
   if (cpi->all_one_sided_refs && cpi->oxcf.gf_cfg.lag_in_frames > 0) return 0;
 
-  static const int flag_list[REF_FRAMES] = { 0,
-                                             AOM_LAST_FLAG,
-                                             AOM_LAST2_FLAG,
-                                             AOM_LAST3_FLAG,
-                                             AOM_GOLD_FLAG,
-                                             AOM_BWD_FLAG,
-                                             AOM_ALT2_FLAG,
-                                             AOM_ALT_FLAG };
   const int ref_frame[2] = {
     cm->current_frame.skip_mode_info.ref_frame_idx_0 + LAST_FRAME,
     cm->current_frame.skip_mode_info.ref_frame_idx_1 + LAST_FRAME
   };
-  if (!(cpi->ref_frame_flags & flag_list[ref_frame[0]]) ||
-      !(cpi->ref_frame_flags & flag_list[ref_frame[1]]))
+  if (!(cpi->ref_frame_flags & av1_ref_frame_flag_list[ref_frame[0]]) ||
+      !(cpi->ref_frame_flags & av1_ref_frame_flag_list[ref_frame[1]]))
     return 0;
 
   return 1;
@@ -2324,7 +2345,7 @@ void av1_encode_frame(AV1_COMP *cpi) {
   // a source or a ref frame should have an image pyramid allocated.
   // Check here so that issues can be caught early in debug mode
 #if !defined(NDEBUG) && !CONFIG_REALTIME_ONLY
-  if (cpi->image_pyramid_levels > 0) {
+  if (cpi->alloc_pyramid) {
     assert(cpi->source->y_pyramid);
     for (int ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
       const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);

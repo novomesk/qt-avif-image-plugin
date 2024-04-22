@@ -58,9 +58,9 @@ endif()
 # passed to libtool.
 #
 # We set SO_FILE_VERSION = [c-a].a.r
-set(LT_CURRENT 11)
-set(LT_REVISION 2)
-set(LT_AGE 8)
+set(LT_CURRENT 12)
+set(LT_REVISION 0)
+set(LT_AGE 9)
 math(EXPR SO_VERSION "${LT_CURRENT} - ${LT_AGE}")
 set(SO_FILE_VERSION "${SO_VERSION}.${LT_AGE}.${LT_REVISION}")
 unset(LT_CURRENT)
@@ -825,7 +825,8 @@ if(BUILD_SHARED_LIBS)
   # Clang's AddressSanitizer documentation says "When linking shared libraries,
   # the AddressSanitizer run-time is not linked, so -Wl,-z,defs may cause link
   # errors (don't use it with AddressSanitizer)." See
-  # https://clang.llvm.org/docs/AddressSanitizer.html#usage.
+  # https://clang.llvm.org/docs/AddressSanitizer.html#usage. Similarly, see
+  # https://clang.llvm.org/docs/MemorySanitizer.html#usage.
   if(NOT WIN32
      AND NOT APPLE
      AND NOT (CMAKE_C_COMPILER_ID MATCHES "Clang" AND SANITIZE))
@@ -940,7 +941,7 @@ get_cmake_property(all_cmake_vars VARIABLES)
 foreach(var ${all_cmake_vars})
   if("${var}" MATCHES "SOURCES$\|_INTRIN_\|_ASM_"
      AND NOT "${var}" MATCHES "DOXYGEN\|LIBYUV\|_PKG_\|TEST"
-     AND NOT "${var}" MATCHES "_ASM_NASM\|_ASM_COMPILER_")
+     AND NOT "${var}" MATCHES "_ASM_NASM\|_ASM_COMPILER")
     list(APPEND aom_source_vars ${var})
   endif()
 endforeach()

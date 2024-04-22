@@ -587,6 +587,9 @@ typedef struct GLOBAL_MOTION_SPEED_FEATURES {
   // GF group
   int disable_gm_search_based_on_stats;
 
+  // Downsampling pyramid level to use for global motion estimation
+  int downsample_level;
+
   // Number of refinement steps to apply after initial model generation
   int num_refinement_steps;
 } GLOBAL_MOTION_SPEED_FEATURES;
@@ -719,6 +722,28 @@ typedef struct PARTITION_SPEED_FEATURES {
   // typical image dataset with coding performance change less than 0.16%. This
   // speed feature is not applicable to speed >= 7.
   bool prune_rect_part_using_4x4_var_deviation;
+
+  // Prune rectangular partitions based on prediction mode chosen by NONE
+  // partition.
+  // false : no pruning
+  // true : prunes rectangular partition as described below
+  // If prediction mode chosen by NONE partition is
+  // DC_PRED or SMOOTH_PRED: Prunes both horizontal and vertical partitions if
+  // at least one of the left and top neighbor blocks is larger than the
+  // current block.
+  // Directional Mode: Prunes either of the horizontal and vertical partition
+  // based on center angle of the prediction mode chosen by NONE partition. For
+  // example, vertical partition is pruned if center angle of the prediction
+  // mode chosen by NONE partition is close to 180 degrees (i.e. horizontal
+  // direction) and vice versa.
+  // For allintra encode, this speed feature reduces instruction count by 5.1%
+  // for speed=6 with coding performance change less than 0.22%. For AVIF image
+  // encode, this speed feature reduces encode time by 4.44% for speed 6 on a
+  // typical image dataset with coding performance change less than 0.15%.
+  // For speed >= 7, variance-based logic is used to determine the partition
+  // structure instead of recursive partition search. Therefore, this speed
+  // feature is not applicable in such cases.
+  bool prune_rect_part_using_none_pred_mode;
 
   // Terminate partition search for child partition,
   // when NONE and SPLIT partition rd_costs are INT64_MAX.
@@ -1654,9 +1679,23 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // rc->high_source_sad = 0 (non slide-changes), and color sensitivity off.
   int skip_cdef_sb;
 
+  // Force selective cdf update.
+  int selective_cdf_update;
+
+  // Force only single reference (LAST) for prediction.
+  int force_only_last_ref;
+
   // Forces larger partition blocks in variance based partitioning for intra
   // frames
   int force_large_partition_blocks_intra;
+
+  // Use fixed partition for superblocks based on source_sad.
+  // 0: disabled
+  // 1: enabled
+  int use_fast_fixed_part;
+
+  // Increase source_sad thresholds in nonrd pickmode.
+  int increase_source_sad_thresh;
 
   // Skip evaluation of no split in tx size selection for merge partition
   int skip_tx_no_split_var_based_partition;
@@ -1734,6 +1773,10 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   // 2: aggrssive mode, where skip is done for all frames that
   // where rc->high_source_sad = 0 (no slide-changes).
   int skip_lf_screen;
+
+  // Threshold on the active/inactive region percent to disable
+  // the loopfilter and cdef. Setting to 100 disables this feature.
+  int thresh_active_maps_skip_lf_cdef;
 
   // For nonrd: early exit out of variance partition that sets the
   // block size to superblock size, and sets mode to zeromv-last skip.

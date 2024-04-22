@@ -410,7 +410,7 @@ void av1_loop_restoration_filter_frame(YV12_BUFFER_CONFIG *frame,
                                        void *lr_ctxt);
 /*!\cond */
 
-void av1_loop_restoration_precal();
+void av1_loop_restoration_precal(void);
 
 struct AV1LrSyncData;
 

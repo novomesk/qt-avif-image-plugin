@@ -22,6 +22,7 @@
 #include "aom_ports/mem.h"
 #include "aom_scale/aom_scale.h"
 #include "aom_scale/yv12config.h"
+#include "aom_util/aom_pthread.h"
 
 #include "av1/common/entropymv.h"
 #include "av1/common/quant_common.h"
@@ -1106,6 +1107,7 @@ static void first_pass_tiles(AV1_COMP *cpi, const BLOCK_SIZE fp_block_size) {
   const int tile_cols = cm->tiles.cols;
   const int tile_rows = cm->tiles.rows;
 
+  av1_alloc_src_diff_buf(cm, &cpi->td.mb);
   for (int tile_row = 0; tile_row < tile_rows; ++tile_row) {
     for (int tile_col = 0; tile_col < tile_cols; ++tile_col) {
       TileDataEnc *const tile_data =
@@ -1391,7 +1393,6 @@ void av1_first_pass(AV1_COMP *cpi, const int64_t ts_duration) {
   av1_init_mode_probs(cm->fc);
   av1_init_mv_probs(cm);
   av1_initialize_rd_consts(cpi);
-  av1_alloc_src_diff_buf(cm, &cpi->td.mb);
 
   enc_row_mt->sync_read_ptr = av1_row_mt_sync_read_dummy;
   enc_row_mt->sync_write_ptr = av1_row_mt_sync_write_dummy;

@@ -21,6 +21,7 @@
 #include "config/aom_config.h"
 
 #include "aom/aomcx.h"
+#include "aom_util/aom_pthread.h"
 
 #include "av1/common/alloccommon.h"
 #include "av1/common/av1_common_int.h"
@@ -1544,6 +1545,13 @@ typedef struct {
    */
   bool firstpass_mt_exit;
 
+  /*!
+   * Initialized to false, set to true in cal_mb_wiener_var_hook() by the worker
+   * thread that encounters an error in order to abort the processing of other
+   * worker threads.
+   */
+  bool mb_wiener_mt_exit;
+
 #if CONFIG_MULTITHREAD
   /*!
    * Mutex lock used while dispatching jobs.
@@ -2079,20 +2087,6 @@ typedef struct {
   int segment_map_h; /*!< segment map height */
   /**@}*/
 } GlobalMotionInfo;
-
-/*!
- * \brief Initial frame dimensions
- *
- * Tracks the frame dimensions using which:
- *  - Frame buffers (like altref and util frame buffers) were allocated
- *  - Motion estimation related initializations were done
- * This structure is helpful to reallocate / reinitialize the above when there
- * is a change in frame dimensions.
- */
-typedef struct {
-  int width;  /*!< initial width */
-  int height; /*!< initial height */
-} InitialDimensions;
 
 /*!
  * \brief Flags related to interpolation filter search
@@ -3163,11 +3157,18 @@ typedef struct AV1_COMP {
   FRAME_INDEX_SET frame_index_set;
 
   /*!
-   * Structure to store the cm->width and cm->height in the last call
-   * of alloc_compressor_data().
-   * TODO(chengchen): rename this variable or delete it.
+   * Stores the cm->width in the last call of alloc_compressor_data(). Helps
+   * determine whether compressor data should be reallocated when cm->width
+   * changes.
    */
-  InitialDimensions initial_dimensions;
+  int data_alloc_width;
+
+  /*!
+   * Stores the cm->height in the last call of alloc_compressor_data(). Helps
+   * determine whether compressor data should be reallocated when cm->height
+   * changes.
+   */
+  int data_alloc_height;
 
   /*!
    * Number of MBs in the full-size frame; to be used to
@@ -3631,10 +3632,10 @@ typedef struct AV1_COMP {
   unsigned int zeromv_skip_thresh_exit_part[BLOCK_SIZES_ALL];
 
   /*!
-   *  Number of downsampling pyramid levels to allocate for each frame
+   *  Should we allocate a downsampling pyramid for each frame buffer?
    *  This is currently only used for global motion
    */
-  int image_pyramid_levels;
+  bool alloc_pyramid;
 
 #if CONFIG_SALIENCY_MAP
   /*!
@@ -3653,6 +3654,12 @@ typedef struct AV1_COMP {
    * fast encoding pass in av1_determine_sc_tools_with_encoding().
    */
   int palette_pixel_num;
+
+  /*!
+   * Flag to indicate scaled_last_source is available,
+   * so scaling is not needed for last_source.
+   */
+  int scaled_last_source_available;
 } AV1_COMP;
 
 /*!
@@ -3756,8 +3763,8 @@ void av1_change_config_seq(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
 void av1_change_config(AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
                        bool sb_size_changed);
 
-void av1_check_initial_width(AV1_COMP *cpi, int use_highbitdepth,
-                             int subsampling_x, int subsampling_y);
+aom_codec_err_t av1_check_initial_width(AV1_COMP *cpi, int use_highbitdepth,
+                                        int subsampling_x, int subsampling_y);
 
 void av1_init_seq_coding_tools(AV1_PRIMARY *const ppi,
                                const AV1EncoderConfig *oxcf, int use_svc);
@@ -3802,7 +3809,7 @@ int av1_init_parallel_frame_context(const AV1_COMP_DATA *const first_cpi_data,
  * copy of the pointer.
  */
 int av1_receive_raw_frame(AV1_COMP *cpi, aom_enc_frame_flags_t frame_flags,
-                          YV12_BUFFER_CONFIG *sd, int64_t time_stamp,
+                          const YV12_BUFFER_CONFIG *sd, int64_t time_stamp,
                           int64_t end_time_stamp);
 
 /*!\brief Encode a frame
@@ -3822,7 +3829,9 @@ int av1_receive_raw_frame(AV1_COMP *cpi, aom_enc_frame_flags_t frame_flags,
  * \retval #AOM_CODEC_OK
  * \retval -1
  *     No frame encoded; more input is required.
- * \retval #AOM_CODEC_ERROR
+ * \retval "A nonzero (positive) aom_codec_err_t code"
+ *     The encoding failed with the error. Sets the error code and error message
+ * in \c cpi->common.error.
  */
 int av1_get_compressed_data(AV1_COMP *cpi, AV1_COMP_DATA *const cpi_data);
 
@@ -3851,8 +3860,6 @@ int av1_use_as_reference(int *ext_ref_frame_flags, int ref_frame_flags);
 int av1_copy_reference_enc(AV1_COMP *cpi, int idx, YV12_BUFFER_CONFIG *sd);
 
 int av1_set_reference_enc(AV1_COMP *cpi, int idx, YV12_BUFFER_CONFIG *sd);
-
-int av1_set_size_literal(AV1_COMP *cpi, int width, int height);
 
 void av1_set_frame_size(AV1_COMP *cpi, int width, int height);
 
@@ -4304,7 +4311,7 @@ static AOM_INLINE int is_psnr_calc_enabled(const AV1_COMP *cpi) {
   const AV1_COMMON *const cm = &cpi->common;
 
   return cpi->ppi->b_calculate_psnr && !is_stat_generation_stage(cpi) &&
-         cm->show_frame;
+         cm->show_frame && !cpi->is_dropped_frame;
 }
 
 static INLINE int is_frame_resize_pending(const AV1_COMP *const cpi) {

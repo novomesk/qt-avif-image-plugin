@@ -19,10 +19,10 @@
 #include "config/aom_config.h"
 #include "config/aom_dsp_rtcd.h"
 
-static INLINE void get_cubic_kernel_dbl(double x, double *kernel) {
+static INLINE void get_cubic_kernel_dbl(double x, double kernel[4]) {
   // Check that the fractional position is in range.
   //
-  // Note: x is calculated from (eg.) `u_frac = u - floor(u)`.
+  // Note: x is calculated from, e.g., `u_frac = u - floor(u)`.
   // Mathematically, this implies that 0 <= x < 1. However, in practice it is
   // possible to have x == 1 due to floating point rounding. This is fine,
   // and we still interpolate correctly if we allow x = 1.
@@ -36,7 +36,7 @@ static INLINE void get_cubic_kernel_dbl(double x, double *kernel) {
   kernel[3] = -0.5 * x2 + 0.5 * x3;
 }
 
-static INLINE void get_cubic_kernel_int(double x, int *kernel) {
+static INLINE void get_cubic_kernel_int(double x, int kernel[4]) {
   double kernel_dbl[4];
   get_cubic_kernel_dbl(x, kernel_dbl);
 

@@ -124,8 +124,8 @@ int av1_compute_num_fp_contexts(AV1_PRIMARY *ppi, AV1EncoderConfig *oxcf);
 
 int av1_check_fpmt_config(AV1_PRIMARY *const ppi, AV1EncoderConfig *const oxcf);
 
-int av1_compress_parallel_frames(AV1_PRIMARY *const ppi,
-                                 AV1_COMP_DATA *const first_cpi_data);
+void av1_compress_parallel_frames(AV1_PRIMARY *const ppi,
+                                  AV1_COMP_DATA *const first_cpi_data);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -128,6 +128,7 @@ bool AV1RateControlRTC::InitRateControl(const AV1RateControlRtcConfig &rc_cfg) {
   oxcf->tune_cfg.content = AOM_CONTENT_DEFAULT;
   oxcf->rc_cfg.drop_frames_water_mark = rc_cfg.frame_drop_thresh;
   rc->max_consec_drop = rc_cfg.max_consec_drop;
+  cpi_->svc.framedrop_mode = AOM_FULL_SUPERFRAME_DROP;
   oxcf->tool_cfg.bit_depth = AOM_BITS_8;
   oxcf->tool_cfg.superblock_size = AOM_SUPERBLOCK_SIZE_DYNAMIC;
   oxcf->algo_cfg.loopfilter_control = LOOPFILTER_ALL;

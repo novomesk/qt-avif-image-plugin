@@ -10,6 +10,8 @@
  */
 
 #include <cassert>
+#include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <tuple>
@@ -556,6 +558,83 @@ TEST(EncodeAPI, Buganizer310457427) {
   encoder.Encode(false);
 }
 
+TEST(EncodeAPI, PtsSmallerThanInitialPts) {
+  // Initialize libaom encoder.
+  aom_codec_iface_t *const iface = aom_codec_av1_cx();
+  aom_codec_ctx_t enc;
+  aom_codec_enc_cfg_t cfg;
+
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME),
+            AOM_CODEC_OK);
+
+  cfg.g_w = 1280;
+  cfg.g_h = 720;
+  cfg.rc_target_bitrate = 1000;
+
+  ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, 0), AOM_CODEC_OK);
+
+  // Create input image.
+  aom_image_t *const image =
+      CreateGrayImage(AOM_IMG_FMT_I420, cfg.g_w, cfg.g_h);
+  ASSERT_NE(image, nullptr);
+
+  // Encode frame.
+  ASSERT_EQ(aom_codec_encode(&enc, image, 12, 1, 0), AOM_CODEC_OK);
+  ASSERT_EQ(aom_codec_encode(&enc, image, 13, 1, 0), AOM_CODEC_OK);
+  // pts (10) is smaller than the initial pts (12).
+  ASSERT_EQ(aom_codec_encode(&enc, image, 10, 1, 0), AOM_CODEC_INVALID_PARAM);
+
+  // Free resources.
+  aom_img_free(image);
+  aom_codec_destroy(&enc);
+}
+
+TEST(EncodeAPI, PtsOrDurationTooBig) {
+  // Initialize libaom encoder.
+  aom_codec_iface_t *const iface = aom_codec_av1_cx();
+  aom_codec_ctx_t enc;
+  aom_codec_enc_cfg_t cfg;
+
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME),
+            AOM_CODEC_OK);
+
+  cfg.g_w = 1280;
+  cfg.g_h = 720;
+  cfg.rc_target_bitrate = 1000;
+
+  ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, 0), AOM_CODEC_OK);
+
+  // Create input image.
+  aom_image_t *const image =
+      CreateGrayImage(AOM_IMG_FMT_I420, cfg.g_w, cfg.g_h);
+  ASSERT_NE(image, nullptr);
+
+  // Encode frame.
+  ASSERT_EQ(aom_codec_encode(&enc, image, 0, 1, 0), AOM_CODEC_OK);
+  // pts, when converted to ticks, is too big.
+  ASSERT_EQ(aom_codec_encode(&enc, image, INT64_MAX / 1000000 + 1, 1, 0),
+            AOM_CODEC_INVALID_PARAM);
+#if ULONG_MAX > INT64_MAX
+  // duration is too big.
+  ASSERT_EQ(aom_codec_encode(&enc, image, 0, (1ul << 63), 0),
+            AOM_CODEC_INVALID_PARAM);
+  // pts + duration is too big.
+  ASSERT_EQ(aom_codec_encode(&enc, image, 1, INT64_MAX, 0),
+            AOM_CODEC_INVALID_PARAM);
+#endif
+  // pts + duration, when converted to ticks, is too big.
+#if ULONG_MAX > INT64_MAX
+  ASSERT_EQ(aom_codec_encode(&enc, image, 0, 0x1c0a0a1a3232, 0),
+            AOM_CODEC_INVALID_PARAM);
+#endif
+  ASSERT_EQ(aom_codec_encode(&enc, image, INT64_MAX / 1000000, 1, 0),
+            AOM_CODEC_INVALID_PARAM);
+
+  // Free resources.
+  aom_img_free(image);
+  aom_codec_destroy(&enc);
+}
+
 class EncodeAPIParameterized
     : public testing::TestWithParam<std::tuple<
           /*usage=*/unsigned int, /*speed=*/int, /*aq_mode=*/unsigned int>> {};
@@ -653,6 +732,32 @@ TEST(EncodeAPI, AllIntraMode) {
             aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_ALL_INTRA));
   cfg.kf_max_dist = 1;
   EXPECT_EQ(AOM_CODEC_INVALID_PARAM, aom_codec_enc_init(&enc, iface, &cfg, 0));
+}
+
+TEST(EncodeAPI, AllIntraAndUsePsnr) {
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_ALL_INTRA),
+            AOM_CODEC_OK);
+
+  aom_codec_ctx_t enc;
+  ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, AOM_CODEC_USE_PSNR),
+            AOM_CODEC_OK);
+
+  aom_image_t *image = CreateGrayImage(AOM_IMG_FMT_I420, cfg.g_w, cfg.g_h);
+  ASSERT_NE(image, nullptr);
+
+  ASSERT_EQ(aom_codec_encode(&enc, image, 0, 1, 0), AOM_CODEC_OK);
+  const aom_codec_cx_pkt_t *pkt;
+  aom_codec_iter_t iter = nullptr;
+  while ((pkt = aom_codec_get_cx_data(&enc, &iter)) != nullptr) {
+    if (pkt->kind != AOM_CODEC_CX_FRAME_PKT) {
+      ASSERT_EQ(pkt->kind, AOM_CODEC_PSNR_PKT);
+    }
+  }
+
+  aom_img_free(image);
+  ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
 }
 
 // A test that reproduces bug aomedia:3534.

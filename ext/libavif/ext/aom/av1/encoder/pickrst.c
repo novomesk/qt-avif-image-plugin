@@ -1124,6 +1124,15 @@ static INLINE int64_t multiply_and_scale(int64_t x, int32_t w1, int32_t w2) {
   // Let y = x * w / WIENER_TAP_SCALE_FACTOR
   //       = x * (w1 * WIENER_TAP_SCALE_FACTOR + w2) / WIENER_TAP_SCALE_FACTOR
   const int64_t y = x * w1 + x * w2 / WIENER_TAP_SCALE_FACTOR;
+  // Double-check the calculation using __int128.
+  // TODO(wtc): Remove after 2024-04-30.
+#if !defined(NDEBUG) && defined(__GNUC__) && defined(__LP64__)
+  const int32_t w = w1 * WIENER_TAP_SCALE_FACTOR + w2;
+  const __int128 z = (__int128)x * w / WIENER_TAP_SCALE_FACTOR;
+  assert(z >= INT64_MIN);
+  assert(z <= INT64_MAX);
+  assert(y == (int64_t)z);
+#endif
   return y;
 }
 
@@ -1199,7 +1208,8 @@ static int linsolve_wiener(int n, int64_t *A, int stride, int64_t *b,
 
 // Fix vector b, update vector a
 static AOM_INLINE void update_a_sep_sym(int wiener_win, int64_t **Mc,
-                                        int64_t **Hc, int32_t *a, int32_t *b) {
+                                        int64_t **Hc, int32_t *a,
+                                        const int32_t *b) {
   int i, j;
   int64_t S[WIENER_WIN];
   int64_t A[WIENER_HALFWIN1], B[WIENER_HALFWIN1 * WIENER_HALFWIN1];
@@ -1269,7 +1279,8 @@ static AOM_INLINE void update_a_sep_sym(int wiener_win, int64_t **Mc,
 
 // Fix vector a, update vector b
 static AOM_INLINE void update_b_sep_sym(int wiener_win, int64_t **Mc,
-                                        int64_t **Hc, int32_t *a, int32_t *b) {
+                                        int64_t **Hc, const int32_t *a,
+                                        int32_t *b) {
   int i, j;
   int64_t S[WIENER_WIN];
   int64_t A[WIENER_HALFWIN1], B[WIENER_HALFWIN1 * WIENER_HALFWIN1];
@@ -2056,7 +2067,7 @@ void av1_pick_filter_restoration(const YV12_BUFFER_CONFIG *src, AV1_COMP *cpi) {
           &cpi->trial_frame_rst, cm->superres_upscaled_width,
           cm->superres_upscaled_height, seq_params->subsampling_x,
           seq_params->subsampling_y, highbd, AOM_RESTORATION_FRAME_BORDER,
-          cm->features.byte_alignment, NULL, NULL, NULL, 0, 0))
+          cm->features.byte_alignment, NULL, NULL, NULL, false, 0))
     aom_internal_error(cm->error, AOM_CODEC_MEM_ERROR,
                        "Failed to allocate trial restored frame buffer");
 

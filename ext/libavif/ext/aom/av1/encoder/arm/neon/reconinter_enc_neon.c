@@ -222,8 +222,7 @@ void aom_highbd_upsampled_pred_neon(MACROBLOCKD *xd,
       int i = height / 2;
       do {
         uint16x4_t r = load_u16_2x2(ref, ref_stride);
-        store_u16_2x1(comp_pred + 0 * width, r, 0);
-        store_u16_2x1(comp_pred + 1 * width, r, 1);
+        store_u16x2_strided_x2(comp_pred, width, r);
         ref += 2 * ref_stride;
         comp_pred += 2 * width;
       } while (--i != 0);
