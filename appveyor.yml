@@ -1,4 +1,4 @@
-version: 0.8.3.{build}
+version: 0.8.4.{build}
 image: Visual Studio 2022
 configuration: Release
 platform: x64
@@ -117,15 +117,15 @@ build_script:
 
     nmake.exe
 
-    cd ..\qtbuild_6.7.0
+    cd ..\qtbuild_6.7.1
 
-    C:\Qt\6.7.0\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
+    C:\Qt\6.7.1\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
 
     nmake.exe
 
-    cd ..\qtbuild_6.7.0-ro
+    cd ..\qtbuild_6.7.1-ro
 
-    C:\Qt\6.7.0\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
+    C:\Qt\6.7.1\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
 
     nmake.exe
 
@@ -135,5 +135,5 @@ artifacts:
 - path: qtbuild_6.2.4\*.dll
 - path: qtbuild_6.5.3\*.dll
 - path: qtbuild_6.5.3-ro\*.dll
-- path: qtbuild_6.7.0\*.dll
-- path: qtbuild_6.7.0-ro\*.dll
+- path: qtbuild_6.7.1\*.dll
+- path: qtbuild_6.7.1-ro\*.dll
