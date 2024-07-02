@@ -155,8 +155,8 @@ int av1_set_active_map(AV1_COMP *cpi, unsigned char *new_map_16x16, int rows,
     const int mi_cols = mi_params->mi_cols;
     cpi->active_map.update = 0;
     cpi->rc.percent_blocks_inactive = 0;
-    assert(mi_rows % 2 == 0);
-    assert(mi_cols % 2 == 0);
+    assert(mi_rows % 2 == 0 && mi_rows > 0);
+    assert(mi_cols % 2 == 0 && mi_cols > 0);
     if (new_map_16x16) {
       int num_samples = 0;
       int num_blocks_inactive = 0;
@@ -178,6 +178,7 @@ int av1_set_active_map(AV1_COMP *cpi, unsigned char *new_map_16x16, int rows,
       }
       cpi->active_map.enabled = 1;
       cpi->active_map.update = 1;
+      assert(num_samples);
       cpi->rc.percent_blocks_inactive =
           (num_blocks_inactive * 100) / num_samples;
     }

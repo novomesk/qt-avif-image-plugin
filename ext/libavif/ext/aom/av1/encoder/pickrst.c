@@ -1176,7 +1176,7 @@ static int linsolve_wiener(int n, int64_t *A, int stride, int64_t *b,
       if (abs_akj > max_abs_akj) max_abs_akj = abs_akj;
     }
     const int scale_threshold = 1 << 22;
-    const int scaler_A = max_abs_akj < scale_threshold ? 1 : (1 << 5);
+    const int scaler_A = max_abs_akj < scale_threshold ? 1 : (1 << 6);
     const int scaler_c = max_abs_akj < scale_threshold ? 1 : (1 << 7);
     const int scaler = scaler_c * scaler_A;
 

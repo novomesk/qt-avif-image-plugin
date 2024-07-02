@@ -294,7 +294,7 @@ void aom_highbd_convolve8_vert_sve(const uint8_t *src8, ptrdiff_t src_stride,
                                    const int16_t *filter_y, int y_step_q4,
                                    int width, int height, int bd) {
   assert(y_step_q4 == 16);
-  assert(w >= 4 && h >= 4);
+  assert(width >= 4 && height >= 4);
   (void)filter_x;
   (void)y_step_q4;
   (void)x_step_q4;

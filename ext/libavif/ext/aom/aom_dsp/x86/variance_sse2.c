@@ -415,7 +415,9 @@ unsigned int aom_mse16x16_sse2(const uint8_t *src, int src_stride,
   DECL(8, opt);    \
   DECL(16, opt)
 
+#if HAVE_SSSE3
 DECLS(ssse3);
+#endif
 #undef DECLS
 #undef DECL
 
@@ -491,7 +493,9 @@ DECLS(ssse3);
   FN(4, 4, 4, 2, 2, opt, (int32_t), (int32_t))
 #endif
 
+#if HAVE_SSSE3
 FNS(ssse3)
+#endif
 
 #undef FNS
 #undef FN
@@ -508,7 +512,9 @@ FNS(ssse3)
   DECL(8, opt);    \
   DECL(16, opt)
 
+#if HAVE_SSSE3
 DECLS(ssse3);
+#endif
 #undef DECL
 #undef DECLS
 
@@ -588,7 +594,9 @@ DECLS(ssse3);
   FN(4, 4, 4, 2, 2, opt, (uint32_t), (int32_t))
 #endif
 
+#if HAVE_SSSE3
 FNS(ssse3)
+#endif
 
 #undef FNS
 #undef FN
