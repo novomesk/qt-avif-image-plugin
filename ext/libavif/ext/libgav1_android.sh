@@ -16,7 +16,7 @@ if [ $# -ne 1 ]; then
   exit 1
 fi
 # When updating the libgav1 version, make the same change to libgav1.cmd.
-git clone -b v0.18.0 --depth 1 https://chromium.googlesource.com/codecs/libgav1
+git clone -b v0.19.0 --depth 1 https://chromium.googlesource.com/codecs/libgav1
 
 cd libgav1
 mkdir build
@@ -29,6 +29,7 @@ for abi in ${ABI_LIST}; do
   cmake ../.. \
     -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE=../../cmake/toolchains/android.cmake \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DCMAKE_BUILD_TYPE=Release \
     -DLIBGAV1_ANDROID_NDK_PATH=${1} \
     -DLIBGAV1_THREADPOOL_USE_STD_MUTEX=1 \

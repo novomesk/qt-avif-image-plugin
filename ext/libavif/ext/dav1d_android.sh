@@ -15,13 +15,18 @@ if [ $# -ne 1 ]; then
   echo "Usage: ${0} <path_to_android_ndk>"
   exit 1
 fi
-git clone -b 1.2.1 --depth 1 https://code.videolan.org/videolan/dav1d.git
+git clone -b 1.4.3 --depth 1 https://code.videolan.org/videolan/dav1d.git
 cd dav1d
 mkdir build
 cd build
 
-# This only works on linux.
-android_bin="${1}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+# This only works on linux and mac.
+if [ "$(uname)" == "Darwin" ]; then
+  HOST_TAG="darwin"
+else
+  HOST_TAG="linux"
+fi
+android_bin="${1}/toolchains/llvm/prebuilt/${HOST_TAG}-x86_64/bin"
 
 ABI_LIST=("armeabi-v7a" "arm64-v8a" "x86" "x86_64")
 ARCH_LIST=("arm" "aarch64" "x86" "x86_64")

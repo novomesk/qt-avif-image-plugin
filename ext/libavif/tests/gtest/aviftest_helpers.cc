@@ -9,15 +9,64 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
 #include "avif/avif.h"
+#include "avif/avif_cxx.h"
 #include "avifpng.h"
 #include "avifutil.h"
 
-namespace libavif {
+namespace avif {
 namespace testutil {
+
+//------------------------------------------------------------------------------
+// CopyImageSamples is a copy of avifImageCopySamples
+
+namespace {
+void CopyImageSamples(avifImage* dstImage, const avifImage* srcImage,
+                      avifPlanesFlags planes) {
+  assert(srcImage->depth == dstImage->depth);
+  if (planes & AVIF_PLANES_YUV) {
+    assert(srcImage->yuvFormat == dstImage->yuvFormat);
+    // Note that there may be a mismatch between srcImage->yuvRange and
+    // dstImage->yuvRange because libavif allows for 'colr' and AV1 OBU video
+    // range values to differ.
+  }
+  const size_t bytesPerPixel = avifImageUsesU16(srcImage) ? 2 : 1;
+
+  const avifBool skipColor = !(planes & AVIF_PLANES_YUV);
+  const avifBool skipAlpha = !(planes & AVIF_PLANES_A);
+  for (int c = AVIF_CHAN_Y; c <= AVIF_CHAN_A; ++c) {
+    const avifBool alpha = c == AVIF_CHAN_A;
+    if ((skipColor && !alpha) || (skipAlpha && alpha)) {
+      continue;
+    }
+
+    const uint32_t planeWidth = avifImagePlaneWidth(srcImage, c);
+    const uint32_t planeHeight = avifImagePlaneHeight(srcImage, c);
+    const uint8_t* srcRow = avifImagePlane(srcImage, c);
+    uint8_t* dstRow = avifImagePlane(dstImage, c);
+    const uint32_t srcRowBytes = avifImagePlaneRowBytes(srcImage, c);
+    const uint32_t dstRowBytes = avifImagePlaneRowBytes(dstImage, c);
+    assert(!srcRow == !dstRow);
+    if (!srcRow) {
+      continue;
+    }
+    assert(planeWidth == avifImagePlaneWidth(dstImage, c));
+    assert(planeHeight == avifImagePlaneHeight(dstImage, c));
+
+    const size_t planeWidthBytes = planeWidth * bytesPerPixel;
+    for (uint32_t y = 0; y < planeHeight; ++y) {
+      memcpy(dstRow, srcRow, planeWidthBytes);
+      srcRow += srcRowBytes;
+      dstRow += dstRowBytes;
+    }
+  }
+}
+}  // namespace
 
 //------------------------------------------------------------------------------
 
@@ -61,17 +110,16 @@ RgbChannelOffsets GetRgbChannelOffsets(avifRGBFormat format) {
 
 //------------------------------------------------------------------------------
 
-AvifImagePtr CreateImage(int width, int height, int depth,
-                         avifPixelFormat yuv_format, avifPlanesFlags planes,
-                         avifRange yuv_range) {
-  AvifImagePtr image(avifImageCreate(width, height, depth, yuv_format),
-                     avifImageDestroy);
+ImagePtr CreateImage(int width, int height, int depth,
+                     avifPixelFormat yuv_format, avifPlanesFlags planes,
+                     avifRange yuv_range) {
+  ImagePtr image(avifImageCreate(width, height, depth, yuv_format));
   if (!image) {
-    return {nullptr, nullptr};
+    return nullptr;
   }
   image->yuvRange = yuv_range;
   if (avifImageAllocatePlanes(image.get(), planes) != AVIF_RESULT_OK) {
-    return {nullptr, nullptr};
+    return nullptr;
   }
   return image;
 }
@@ -258,6 +306,21 @@ double GetPsnr(const avifImage& image1, const avifImage& image2,
   }
   assert(image1.width * image1.height > 0);
 
+  if (image1.colorPrimaries != image2.colorPrimaries ||
+      image1.transferCharacteristics != image2.transferCharacteristics ||
+      image1.matrixCoefficients != image2.matrixCoefficients ||
+      image1.yuvRange != image2.yuvRange) {
+    fprintf(stderr,
+            "WARNING: computing PSNR of images with different CICP: %d/%d/%d%s "
+            "vs %d/%d/%d%s\n",
+            image1.colorPrimaries, image1.transferCharacteristics,
+            image1.matrixCoefficients,
+            (image1.yuvRange == AVIF_RANGE_FULL) ? "f" : "l",
+            image2.colorPrimaries, image2.transferCharacteristics,
+            image2.matrixCoefficients,
+            (image2.yuvRange == AVIF_RANGE_FULL) ? "f" : "l");
+  }
+
   uint64_t squared_diff_sum = 0;
   uint32_t num_samples = 0;
   const uint32_t max_sample_value = (1 << image1.depth) - 1;
@@ -348,22 +411,82 @@ bool AreImagesEqual(const avifRGBImage& image1, const avifRGBImage& image2) {
   return true;
 }
 
+avifResult MergeGrid(int grid_cols, int grid_rows,
+                     const std::vector<ImagePtr>& cells, avifImage* merged) {
+  std::vector<const avifImage*> ptrs(cells.size());
+  for (size_t i = 0; i < cells.size(); ++i) {
+    ptrs[i] = cells[i].get();
+  }
+  return MergeGrid(grid_cols, grid_rows, ptrs, merged);
+}
+
+avifResult MergeGrid(int grid_cols, int grid_rows,
+                     const std::vector<const avifImage*>& cells,
+                     avifImage* merged) {
+  const uint32_t tile_width = cells[0]->width;
+  const uint32_t tile_height = cells[0]->height;
+  const uint32_t grid_width =
+      (grid_cols - 1) * tile_width + cells.back()->width;
+  const uint32_t grid_height =
+      (grid_rows - 1) * tile_height + cells.back()->height;
+
+  ImagePtr view(avifImageCreateEmpty());
+  AVIF_CHECKERR(view, AVIF_RESULT_OUT_OF_MEMORY);
+
+  avifCropRect rect = {};
+  for (int j = 0; j < grid_rows; ++j) {
+    rect.x = 0;
+    for (int i = 0; i < grid_cols; ++i) {
+      const avifImage* image = cells[j * grid_cols + i];
+      rect.width = image->width;
+      rect.height = image->height;
+      AVIF_CHECKRES(avifImageSetViewRect(view.get(), merged, &rect));
+      CopyImageSamples(/*dstImage=*/view.get(), image, AVIF_PLANES_ALL);
+      assert(!view->imageOwnsYUVPlanes);
+      rect.x += rect.width;
+    }
+    rect.y += rect.height;
+  }
+
+  if ((rect.x != grid_width) || (rect.y != grid_height)) {
+    return AVIF_RESULT_UNKNOWN_ERROR;
+  }
+
+  return AVIF_RESULT_OK;
+}
+
 //------------------------------------------------------------------------------
 
-AvifImagePtr ReadImage(const char* folder_path, const char* file_name,
-                       avifPixelFormat requested_format, int requested_depth,
-                       avifChromaDownsampling chroma_downsampling,
-                       avifBool ignore_icc, avifBool ignore_exif,
-                       avifBool ignore_xmp, avifBool allow_changing_cicp) {
-  testutil::AvifImagePtr image(avifImageCreateEmpty(), avifImageDestroy);
+testutil::AvifRwData ReadFile(const std::string& file_path) {
+  std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+  testutil::AvifRwData bytes;
+  if (avifRWDataRealloc(&bytes, file.good() ? static_cast<size_t>(file.tellg())
+                                            : 0) != AVIF_RESULT_OK) {
+    return {};
+  }
+  file.seekg(0, std::ios::beg);
+  file.read(reinterpret_cast<char*>(bytes.data),
+            static_cast<std::streamsize>(bytes.size));
+  return bytes;
+}
+
+//------------------------------------------------------------------------------
+
+ImagePtr ReadImage(const char* folder_path, const char* file_name,
+                   avifPixelFormat requested_format, int requested_depth,
+                   avifChromaDownsampling chroma_downsampling,
+                   avifBool ignore_icc, avifBool ignore_exif,
+                   avifBool ignore_xmp, avifBool allow_changing_cicp,
+                   avifBool ignore_gain_map) {
+  ImagePtr image(avifImageCreateEmpty());
   if (!image ||
       avifReadImage((std::string(folder_path) + file_name).c_str(),
                     requested_format, requested_depth, chroma_downsampling,
                     ignore_icc, ignore_exif, ignore_xmp, allow_changing_cicp,
-                    image.get(),
+                    ignore_gain_map, AVIF_DEFAULT_IMAGE_SIZE_LIMIT, image.get(),
                     /*outDepth=*/nullptr, /*sourceTiming=*/nullptr,
                     /*frameIter=*/nullptr) == AVIF_APP_FILE_FORMAT_UNKNOWN) {
-    return {nullptr, nullptr};
+    return nullptr;
   }
   return image;
 }
@@ -380,10 +503,15 @@ bool WriteImage(const avifImage* image, const char* file_path) {
   return false;
 }
 
-AvifRwData Encode(const avifImage* image, int speed) {
-  testutil::AvifEncoderPtr encoder(avifEncoderCreate(), avifEncoderDestroy);
+AvifRwData Encode(const avifImage* image, int speed, int quality) {
+  EncoderPtr encoder(avifEncoderCreate());
   if (!encoder) return {};
   encoder->speed = speed;
+  encoder->quality = quality;
+  encoder->qualityAlpha = quality;
+#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
+  encoder->qualityGainMap = quality;
+#endif
   testutil::AvifRwData bytes;
   if (avifEncoderWrite(encoder.get(), image, &bytes) != AVIF_RESULT_OK) {
     return {};
@@ -391,13 +519,24 @@ AvifRwData Encode(const avifImage* image, int speed) {
   return bytes;
 }
 
-AvifImagePtr Decode(const uint8_t* bytes, size_t num_bytes) {
-  testutil::AvifImagePtr decoded(avifImageCreateEmpty(), avifImageDestroy);
-  testutil::AvifDecoderPtr decoder(avifDecoderCreate(), avifDecoderDestroy);
+ImagePtr Decode(const uint8_t* bytes, size_t num_bytes) {
+  ImagePtr decoded(avifImageCreateEmpty());
+  DecoderPtr decoder(avifDecoderCreate());
   if (!decoded || !decoder ||
       (avifDecoderReadMemory(decoder.get(), decoded.get(), bytes, num_bytes) !=
        AVIF_RESULT_OK)) {
-    return {nullptr, nullptr};
+    return nullptr;
+  }
+  return decoded;
+}
+
+ImagePtr DecodeFile(const std::string& path) {
+  ImagePtr decoded(avifImageCreateEmpty());
+  DecoderPtr decoder(avifDecoderCreate());
+  if (!decoded || !decoder ||
+      (avifDecoderReadFile(decoder.get(), decoded.get(), path.c_str()) !=
+       AVIF_RESULT_OK)) {
+    return nullptr;
   }
   return decoded;
 }
@@ -454,5 +593,60 @@ avifIO* AvifIOCreateLimitedReader(avifIO* underlyingIO, uint64_t clamp) {
 
 //------------------------------------------------------------------------------
 
+std::vector<ImagePtr> ImageToGrid(const avifImage* image, uint32_t grid_cols,
+                                  uint32_t grid_rows) {
+  if (image->width < grid_cols || image->height < grid_rows) return {};
+
+  // Round up, to make sure all samples are used by exactly one cell.
+  uint32_t cell_width = (image->width + grid_cols - 1) / grid_cols;
+  uint32_t cell_height = (image->height + grid_rows - 1) / grid_rows;
+
+  if ((grid_cols - 1) * cell_width >= image->width) {
+    // Some cells are completely outside the image. Fallback to a grid entirely
+    // contained within the image boundaries. Some samples will be discarded but
+    // at least the test can go on.
+    cell_width = image->width / grid_cols;
+  }
+  if ((grid_rows - 1) * cell_height >= image->height) {
+    cell_height = image->height / grid_rows;
+  }
+
+  std::vector<ImagePtr> cells;
+  for (uint32_t row = 0; row < grid_rows; ++row) {
+    for (uint32_t col = 0; col < grid_cols; ++col) {
+      avifCropRect rect{col * cell_width, row * cell_height, cell_width,
+                        cell_height};
+      assert(rect.x < image->width);
+      assert(rect.y < image->height);
+      // The right-most and bottom-most cells may be smaller than others.
+      // The encoder will pad them.
+      if (rect.x + rect.width > image->width) {
+        rect.width = image->width - rect.x;
+      }
+      if (rect.y + rect.height > image->height) {
+        rect.height = image->height - rect.y;
+      }
+      cells.emplace_back(avifImageCreateEmpty());
+      if (avifImageSetViewRect(cells.back().get(), image, &rect) !=
+          AVIF_RESULT_OK) {
+        return {};
+      }
+    }
+  }
+  return cells;
+}
+
+std::vector<const avifImage*> UniquePtrToRawPtr(
+    const std::vector<ImagePtr>& unique_ptrs) {
+  std::vector<const avifImage*> rawPtrs;
+  rawPtrs.reserve(unique_ptrs.size());
+  for (const ImagePtr& unique_ptr : unique_ptrs) {
+    rawPtrs.emplace_back(unique_ptr.get());
+  }
+  return rawPtrs;
+}
+
+//------------------------------------------------------------------------------
+
 }  // namespace testutil
-}  // namespace libavif
+}  // namespace avif

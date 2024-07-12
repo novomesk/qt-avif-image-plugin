@@ -4,7 +4,7 @@
 #include "avif/internal.h"
 
 #include <assert.h>
-#include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 #if defined(_WIN32)
@@ -21,47 +21,100 @@ struct YUVBlock
     float v;
 };
 
-static avifBool avifPrepareReformatState(const avifImage * image, const avifRGBImage * rgb, avifReformatState * state)
+avifBool avifGetRGBColorSpaceInfo(const avifRGBImage * rgb, avifRGBColorSpaceInfo * info)
+{
+    AVIF_CHECK(rgb->depth == 8 || rgb->depth == 10 || rgb->depth == 12 || rgb->depth == 16);
+    if (rgb->isFloat) {
+        AVIF_CHECK(rgb->depth == 16);
+    }
+    if (rgb->format == AVIF_RGB_FORMAT_RGB_565) {
+        AVIF_CHECK(rgb->depth == 8);
+    }
+    // Cast to silence "comparison of unsigned expression is always true" warning.
+    AVIF_CHECK((int)rgb->format >= AVIF_RGB_FORMAT_RGB && rgb->format < AVIF_RGB_FORMAT_COUNT);
+
+    info->channelBytes = (rgb->depth > 8) ? 2 : 1;
+    info->pixelBytes = avifRGBImagePixelSize(rgb);
+
+    switch (rgb->format) {
+        case AVIF_RGB_FORMAT_RGB:
+            info->offsetBytesR = info->channelBytes * 0;
+            info->offsetBytesG = info->channelBytes * 1;
+            info->offsetBytesB = info->channelBytes * 2;
+            info->offsetBytesA = 0;
+            break;
+        case AVIF_RGB_FORMAT_RGBA:
+            info->offsetBytesR = info->channelBytes * 0;
+            info->offsetBytesG = info->channelBytes * 1;
+            info->offsetBytesB = info->channelBytes * 2;
+            info->offsetBytesA = info->channelBytes * 3;
+            break;
+        case AVIF_RGB_FORMAT_ARGB:
+            info->offsetBytesA = info->channelBytes * 0;
+            info->offsetBytesR = info->channelBytes * 1;
+            info->offsetBytesG = info->channelBytes * 2;
+            info->offsetBytesB = info->channelBytes * 3;
+            break;
+        case AVIF_RGB_FORMAT_BGR:
+            info->offsetBytesB = info->channelBytes * 0;
+            info->offsetBytesG = info->channelBytes * 1;
+            info->offsetBytesR = info->channelBytes * 2;
+            info->offsetBytesA = 0;
+            break;
+        case AVIF_RGB_FORMAT_BGRA:
+            info->offsetBytesB = info->channelBytes * 0;
+            info->offsetBytesG = info->channelBytes * 1;
+            info->offsetBytesR = info->channelBytes * 2;
+            info->offsetBytesA = info->channelBytes * 3;
+            break;
+        case AVIF_RGB_FORMAT_ABGR:
+            info->offsetBytesA = info->channelBytes * 0;
+            info->offsetBytesB = info->channelBytes * 1;
+            info->offsetBytesG = info->channelBytes * 2;
+            info->offsetBytesR = info->channelBytes * 3;
+            break;
+        case AVIF_RGB_FORMAT_RGB_565:
+            // Since RGB_565 consists of two bytes per RGB pixel, we simply use
+            // the pointer to the red channel to populate the entire pixel value
+            // as a uint16_t. As a result only offsetBytesR is used and the
+            // other offsets are unused.
+            info->offsetBytesR = 0;
+            info->offsetBytesG = 0;
+            info->offsetBytesB = 0;
+            info->offsetBytesA = 0;
+            break;
+
+        case AVIF_RGB_FORMAT_COUNT:
+            return AVIF_FALSE;
+    }
+
+    info->maxChannel = (1 << rgb->depth) - 1;
+    info->maxChannelF = (float)info->maxChannel;
+
+    return AVIF_TRUE;
+}
+
+avifBool avifGetYUVColorSpaceInfo(const avifImage * image, avifYUVColorSpaceInfo * info)
 {
 #if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
-    const avifBool useYCgCoRe = (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RE);
-    const avifBool useYCgCoRo = (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RO);
-#else
-    const avifBool useYCgCoRe = AVIF_FALSE;
-    const avifBool useYCgCoRo = AVIF_FALSE;
+    const avifBool useYCgCo = (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RE) ||
+                              (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RO);
 #endif
-    if ((image->depth != 8) && (image->depth != 10) && (image->depth != 12) && (image->depth != 16)) {
-        return AVIF_FALSE;
-    }
-    if ((rgb->depth != 8) && (rgb->depth != 10) && (rgb->depth != 12) && (rgb->depth != 16)) {
-        return AVIF_FALSE;
-    }
-    if (useYCgCoRe || useYCgCoRo) {
-        const int bitOffset = (useYCgCoRe) ? 2 : 1;
-        if (image->depth - bitOffset != rgb->depth) {
-            return AVIF_FALSE;
-        }
-    }
-    if (rgb->isFloat && rgb->depth != 16) {
-        return AVIF_FALSE;
-    }
-    if (rgb->format == AVIF_RGB_FORMAT_RGB_565 && rgb->depth != 8) {
-        return AVIF_FALSE;
-    }
-    if (image->yuvFormat <= AVIF_PIXEL_FORMAT_NONE || image->yuvFormat >= AVIF_PIXEL_FORMAT_COUNT ||
-        rgb->format < AVIF_RGB_FORMAT_RGB || rgb->format >= AVIF_RGB_FORMAT_COUNT) {
-        return AVIF_FALSE;
-    }
-    if (image->yuvRange != AVIF_RANGE_LIMITED && image->yuvRange != AVIF_RANGE_FULL) {
-        return AVIF_FALSE;
-    }
+
+    AVIF_CHECK(image->depth == 8 || image->depth == 10 || image->depth == 12 || image->depth == 16);
+    AVIF_CHECK(image->yuvFormat >= AVIF_PIXEL_FORMAT_YUV444 && image->yuvFormat < AVIF_PIXEL_FORMAT_COUNT);
+    AVIF_CHECK(image->yuvRange == AVIF_RANGE_LIMITED || image->yuvRange == AVIF_RANGE_FULL);
 
     // These matrix coefficients values are currently unsupported. Revise this list as more support is added.
     //
     // YCgCo performs limited-full range adjustment on R,G,B but the current implementation performs range adjustment
     // on Y,U,V. So YCgCo with limited range is unsupported.
     if ((image->matrixCoefficients == 3 /* CICP reserved */) ||
-        ((image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO || useYCgCoRe || useYCgCoRo) &&
+        ((image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO
+#if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
+          || useYCgCo
+#endif
+          ) &&
          (image->yuvRange == AVIF_RANGE_LIMITED)) ||
         (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_BT2020_CL) ||
         (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_SMPTE2085) ||
@@ -75,125 +128,88 @@ static avifBool avifPrepareReformatState(const avifImage * image, const avifRGBI
         return AVIF_FALSE;
     }
 
-    avifGetPixelFormatInfo(image->yuvFormat, &state->formatInfo);
-    avifCalcYUVCoefficients(image, &state->kr, &state->kg, &state->kb);
-    state->mode = AVIF_REFORMAT_MODE_YUV_COEFFICIENTS;
+    avifGetPixelFormatInfo(image->yuvFormat, &info->formatInfo);
+    avifCalcYUVCoefficients(image, &info->kr, &info->kg, &info->kb);
+
+    info->channelBytes = (image->depth > 8) ? 2 : 1;
+
+    info->depth = image->depth;
+    info->range = image->yuvRange;
+    info->maxChannel = (1 << image->depth) - 1;
+    info->biasY = (info->range == AVIF_RANGE_LIMITED) ? (float)(16 << (info->depth - 8)) : 0.0f;
+    info->biasUV = (float)(1 << (info->depth - 1));
+    info->rangeY = (float)((info->range == AVIF_RANGE_LIMITED) ? (219 << (info->depth - 8)) : info->maxChannel);
+    info->rangeUV = (float)((info->range == AVIF_RANGE_LIMITED) ? (224 << (info->depth - 8)) : info->maxChannel);
+
+    return AVIF_TRUE;
+}
+
+static avifBool avifPrepareReformatState(const avifImage * image, const avifRGBImage * rgb, avifReformatState * state)
+{
+#if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
+    const avifBool useYCgCoRe = (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RE);
+    const avifBool useYCgCoRo = (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RO);
+    if (useYCgCoRe || useYCgCoRo) {
+        const int bitOffset = (useYCgCoRe) ? 2 : 1;
+        if (image->depth - bitOffset != rgb->depth) {
+            return AVIF_FALSE;
+        }
+    }
+#endif
+
+    AVIF_CHECK(avifGetRGBColorSpaceInfo(rgb, &state->rgb));
+    AVIF_CHECK(avifGetYUVColorSpaceInfo(image, &state->yuv));
+
+    state->yuv.mode = AVIF_REFORMAT_MODE_YUV_COEFFICIENTS;
 
     if (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_IDENTITY) {
-        state->mode = AVIF_REFORMAT_MODE_IDENTITY;
+        state->yuv.mode = AVIF_REFORMAT_MODE_IDENTITY;
     } else if (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO) {
-        state->mode = AVIF_REFORMAT_MODE_YCGCO;
+        state->yuv.mode = AVIF_REFORMAT_MODE_YCGCO;
 #if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
     } else if (useYCgCoRe) {
-        state->mode = AVIF_REFORMAT_MODE_YCGCO_RE;
+        state->yuv.mode = AVIF_REFORMAT_MODE_YCGCO_RE;
     } else if (useYCgCoRo) {
-        state->mode = AVIF_REFORMAT_MODE_YCGCO_RO;
+        state->yuv.mode = AVIF_REFORMAT_MODE_YCGCO_RO;
 #endif
     }
 
-    if (state->mode != AVIF_REFORMAT_MODE_YUV_COEFFICIENTS) {
-        state->kr = 0.0f;
-        state->kg = 0.0f;
-        state->kb = 0.0f;
+    if (state->yuv.mode != AVIF_REFORMAT_MODE_YUV_COEFFICIENTS) {
+        state->yuv.kr = 0.0f;
+        state->yuv.kg = 0.0f;
+        state->yuv.kb = 0.0f;
     }
-
-    state->yuvChannelBytes = (image->depth > 8) ? 2 : 1;
-    state->rgbChannelBytes = (rgb->depth > 8) ? 2 : 1;
-    state->rgbPixelBytes = avifRGBImagePixelSize(rgb);
-
-    switch (rgb->format) {
-        case AVIF_RGB_FORMAT_RGB:
-            state->rgbOffsetBytesR = state->rgbChannelBytes * 0;
-            state->rgbOffsetBytesG = state->rgbChannelBytes * 1;
-            state->rgbOffsetBytesB = state->rgbChannelBytes * 2;
-            state->rgbOffsetBytesA = 0;
-            break;
-        case AVIF_RGB_FORMAT_RGBA:
-            state->rgbOffsetBytesR = state->rgbChannelBytes * 0;
-            state->rgbOffsetBytesG = state->rgbChannelBytes * 1;
-            state->rgbOffsetBytesB = state->rgbChannelBytes * 2;
-            state->rgbOffsetBytesA = state->rgbChannelBytes * 3;
-            break;
-        case AVIF_RGB_FORMAT_ARGB:
-            state->rgbOffsetBytesA = state->rgbChannelBytes * 0;
-            state->rgbOffsetBytesR = state->rgbChannelBytes * 1;
-            state->rgbOffsetBytesG = state->rgbChannelBytes * 2;
-            state->rgbOffsetBytesB = state->rgbChannelBytes * 3;
-            break;
-        case AVIF_RGB_FORMAT_BGR:
-            state->rgbOffsetBytesB = state->rgbChannelBytes * 0;
-            state->rgbOffsetBytesG = state->rgbChannelBytes * 1;
-            state->rgbOffsetBytesR = state->rgbChannelBytes * 2;
-            state->rgbOffsetBytesA = 0;
-            break;
-        case AVIF_RGB_FORMAT_BGRA:
-            state->rgbOffsetBytesB = state->rgbChannelBytes * 0;
-            state->rgbOffsetBytesG = state->rgbChannelBytes * 1;
-            state->rgbOffsetBytesR = state->rgbChannelBytes * 2;
-            state->rgbOffsetBytesA = state->rgbChannelBytes * 3;
-            break;
-        case AVIF_RGB_FORMAT_ABGR:
-            state->rgbOffsetBytesA = state->rgbChannelBytes * 0;
-            state->rgbOffsetBytesB = state->rgbChannelBytes * 1;
-            state->rgbOffsetBytesG = state->rgbChannelBytes * 2;
-            state->rgbOffsetBytesR = state->rgbChannelBytes * 3;
-            break;
-        case AVIF_RGB_FORMAT_RGB_565:
-            // Since RGB_565 consists of two bytes per RGB pixel, we simply use
-            // the pointer to the red channel to populate the entire pixel value
-            // as a uint16_t. As a result only rgbOffsetBytesR is used and the
-            // other offsets are unused.
-            state->rgbOffsetBytesR = 0;
-            state->rgbOffsetBytesG = 0;
-            state->rgbOffsetBytesB = 0;
-            state->rgbOffsetBytesA = 0;
-            break;
-
-        case AVIF_RGB_FORMAT_COUNT:
-            return AVIF_FALSE;
-    }
-
-    state->yuvDepth = image->depth;
-    state->yuvRange = image->yuvRange;
-    state->yuvMaxChannel = (1 << image->depth) - 1;
-    state->rgbMaxChannel = (1 << rgb->depth) - 1;
-    state->rgbMaxChannelF = (float)state->rgbMaxChannel;
-    state->biasY = (state->yuvRange == AVIF_RANGE_LIMITED) ? (float)(16 << (state->yuvDepth - 8)) : 0.0f;
-    state->biasUV = (float)(1 << (state->yuvDepth - 1));
-    state->rangeY = (float)((state->yuvRange == AVIF_RANGE_LIMITED) ? (219 << (state->yuvDepth - 8)) : state->yuvMaxChannel);
-    state->rangeUV = (float)((state->yuvRange == AVIF_RANGE_LIMITED) ? (224 << (state->yuvDepth - 8)) : state->yuvMaxChannel);
 
     return AVIF_TRUE;
 }
 
 // Formulas 20-31 from https://www.itu.int/rec/T-REC-H.273-201612-I/en
-static int avifReformatStateYToUNorm(avifReformatState * state, float v)
+static int avifYUVColorSpaceInfoYToUNorm(avifYUVColorSpaceInfo * info, float v)
 {
-    int unorm = (int)avifRoundf(v * state->rangeY + state->biasY);
-    return AVIF_CLAMP(unorm, 0, state->yuvMaxChannel);
+    int unorm = (int)avifRoundf(v * info->rangeY + info->biasY);
+    return AVIF_CLAMP(unorm, 0, info->maxChannel);
 }
 
-static int avifReformatStateUVToUNorm(avifReformatState * state, float v)
+static int avifYUVColorSpaceInfoUVToUNorm(avifYUVColorSpaceInfo * info, float v)
 {
     int unorm;
 
     // YCgCo performs limited-full range adjustment on R,G,B but the current implementation performs range adjustment
     // on Y,U,V. So YCgCo with limited range is unsupported.
 #if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
-    assert((state->mode != AVIF_REFORMAT_MODE_YCGCO && state->mode != AVIF_REFORMAT_MODE_YCGCO_RE &&
-            state->mode != AVIF_REFORMAT_MODE_YCGCO_RO) ||
-           (state->yuvRange == AVIF_RANGE_FULL));
+    assert((info->mode != AVIF_REFORMAT_MODE_YCGCO && info->mode != AVIF_REFORMAT_MODE_YCGCO_RE && info->mode != AVIF_REFORMAT_MODE_YCGCO_RO) ||
+           (info->range == AVIF_RANGE_FULL));
 #else
-    assert((state->mode != AVIF_REFORMAT_MODE_YCGCO) || (state->yuvRange == AVIF_RANGE_FULL));
+    assert((info->mode != AVIF_REFORMAT_MODE_YCGCO) || (info->range == AVIF_RANGE_FULL));
 #endif
 
-    if (state->mode == AVIF_REFORMAT_MODE_IDENTITY) {
-        unorm = (int)avifRoundf(v * state->rangeY + state->biasY);
+    if (info->mode == AVIF_REFORMAT_MODE_IDENTITY) {
+        unorm = (int)avifRoundf(v * info->rangeY + info->biasY);
     } else {
-        unorm = (int)avifRoundf(v * state->rangeUV + state->biasUV);
+        unorm = (int)avifRoundf(v * info->rangeUV + info->biasUV);
     }
 
-    return AVIF_CLAMP(unorm, 0, state->yuvMaxChannel);
+    return AVIF_CLAMP(unorm, 0, info->maxChannel);
 }
 
 avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
@@ -248,13 +264,13 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
     }
 
     if (!converted) {
-        const float kr = state.kr;
-        const float kg = state.kg;
-        const float kb = state.kb;
+        const float kr = state.yuv.kr;
+        const float kg = state.yuv.kg;
+        const float kb = state.yuv.kb;
 
         struct YUVBlock yuvBlock[2][2];
         float rgbPixel[3];
-        const float rgbMaxChannelF = state.rgbMaxChannelF;
+        const float rgbMaxChannelF = state.rgb.maxChannelF;
         uint8_t ** yuvPlanes = image->yuvPlanes;
         uint32_t * yuvRowBytes = image->yuvRowBytes;
         for (uint32_t outerJ = 0; outerJ < image->height; outerJ += 2) {
@@ -274,32 +290,32 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                         int j = outerJ + bJ;
 
                         // Unpack RGB into normalized float
-                        if (state.rgbChannelBytes > 1) {
+                        if (state.rgb.channelBytes > 1) {
                             rgbPixel[0] =
-                                *((uint16_t *)(&rgb->pixels[state.rgbOffsetBytesR + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)])) /
+                                *((uint16_t *)(&rgb->pixels[state.rgb.offsetBytesR + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)])) /
                                 rgbMaxChannelF;
                             rgbPixel[1] =
-                                *((uint16_t *)(&rgb->pixels[state.rgbOffsetBytesG + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)])) /
+                                *((uint16_t *)(&rgb->pixels[state.rgb.offsetBytesG + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)])) /
                                 rgbMaxChannelF;
                             rgbPixel[2] =
-                                *((uint16_t *)(&rgb->pixels[state.rgbOffsetBytesB + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)])) /
+                                *((uint16_t *)(&rgb->pixels[state.rgb.offsetBytesB + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)])) /
                                 rgbMaxChannelF;
                         } else {
-                            rgbPixel[0] = rgb->pixels[state.rgbOffsetBytesR + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)] /
+                            rgbPixel[0] = rgb->pixels[state.rgb.offsetBytesR + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)] /
                                           rgbMaxChannelF;
-                            rgbPixel[1] = rgb->pixels[state.rgbOffsetBytesG + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)] /
+                            rgbPixel[1] = rgb->pixels[state.rgb.offsetBytesG + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)] /
                                           rgbMaxChannelF;
-                            rgbPixel[2] = rgb->pixels[state.rgbOffsetBytesB + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)] /
+                            rgbPixel[2] = rgb->pixels[state.rgb.offsetBytesB + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)] /
                                           rgbMaxChannelF;
                         }
 
                         if (alphaMode != AVIF_ALPHA_MULTIPLY_MODE_NO_OP) {
                             float a;
-                            if (state.rgbChannelBytes > 1) {
-                                a = *((uint16_t *)(&rgb->pixels[state.rgbOffsetBytesA + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)])) /
+                            if (state.rgb.channelBytes > 1) {
+                                a = *((uint16_t *)(&rgb->pixels[state.rgb.offsetBytesA + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)])) /
                                     rgbMaxChannelF;
                             } else {
-                                a = rgb->pixels[state.rgbOffsetBytesA + (i * state.rgbPixelBytes) + (j * rgb->rowBytes)] / rgbMaxChannelF;
+                                a = rgb->pixels[state.rgb.offsetBytesA + (i * state.rgb.pixelBytes) + (j * rgb->rowBytes)] / rgbMaxChannelF;
                             }
 
                             if (alphaMode == AVIF_ALPHA_MULTIPLY_MODE_MULTIPLY) {
@@ -330,18 +346,18 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                         }
 
                         // RGB -> YUV conversion
-                        if (state.mode == AVIF_REFORMAT_MODE_IDENTITY) {
+                        if (state.yuv.mode == AVIF_REFORMAT_MODE_IDENTITY) {
                             // Formulas 41,42,43 from https://www.itu.int/rec/T-REC-H.273-201612-I/en
                             yuvBlock[bI][bJ].y = rgbPixel[1]; // G
                             yuvBlock[bI][bJ].u = rgbPixel[2]; // B
                             yuvBlock[bI][bJ].v = rgbPixel[0]; // R
-                        } else if (state.mode == AVIF_REFORMAT_MODE_YCGCO) {
+                        } else if (state.yuv.mode == AVIF_REFORMAT_MODE_YCGCO) {
                             // Formulas 44,45,46 from https://www.itu.int/rec/T-REC-H.273-201612-I/en
                             yuvBlock[bI][bJ].y = 0.5f * rgbPixel[1] + 0.25f * (rgbPixel[0] + rgbPixel[2]);
                             yuvBlock[bI][bJ].u = 0.5f * rgbPixel[1] - 0.25f * (rgbPixel[0] + rgbPixel[2]);
                             yuvBlock[bI][bJ].v = 0.5f * (rgbPixel[0] - rgbPixel[2]);
 #if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
-                        } else if (state.mode == AVIF_REFORMAT_MODE_YCGCO_RE || state.mode == AVIF_REFORMAT_MODE_YCGCO_RO) {
+                        } else if (state.yuv.mode == AVIF_REFORMAT_MODE_YCGCO_RE || state.yuv.mode == AVIF_REFORMAT_MODE_YCGCO_RO) {
                             // Formulas from JVET-U0093.
                             const int R = (int)avifRoundf(AVIF_CLAMP(rgbPixel[0] * rgbMaxChannelF, 0.0f, rgbMaxChannelF));
                             const int G = (int)avifRoundf(AVIF_CLAMP(rgbPixel[1] * rgbMaxChannelF, 0.0f, rgbMaxChannelF));
@@ -349,9 +365,9 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                             const int Co = R - B;
                             const int t = B + (Co >> 1);
                             const int Cg = G - t;
-                            yuvBlock[bI][bJ].y = (t + (Cg >> 1)) / state.rangeY;
-                            yuvBlock[bI][bJ].u = Cg / state.rangeUV;
-                            yuvBlock[bI][bJ].v = Co / state.rangeUV;
+                            yuvBlock[bI][bJ].y = (t + (Cg >> 1)) / state.yuv.rangeY;
+                            yuvBlock[bI][bJ].u = Cg / state.yuv.rangeUV;
+                            yuvBlock[bI][bJ].v = Co / state.yuv.rangeUV;
 #endif
                         } else {
                             float Y = (kr * rgbPixel[0]) + (kg * rgbPixel[1]) + (kb * rgbPixel[2]);
@@ -360,25 +376,25 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                             yuvBlock[bI][bJ].v = (rgbPixel[0] - Y) / (2 * (1 - kr));
                         }
 
-                        if (state.yuvChannelBytes > 1) {
+                        if (state.yuv.channelBytes > 1) {
                             uint16_t * pY = (uint16_t *)&yuvPlanes[AVIF_CHAN_Y][(i * 2) + (j * yuvRowBytes[AVIF_CHAN_Y])];
-                            *pY = (uint16_t)avifReformatStateYToUNorm(&state, yuvBlock[bI][bJ].y);
+                            *pY = (uint16_t)avifYUVColorSpaceInfoYToUNorm(&state.yuv, yuvBlock[bI][bJ].y);
                             if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) {
                                 // YUV444, full chroma
                                 uint16_t * pU = (uint16_t *)&yuvPlanes[AVIF_CHAN_U][(i * 2) + (j * yuvRowBytes[AVIF_CHAN_U])];
-                                *pU = (uint16_t)avifReformatStateUVToUNorm(&state, yuvBlock[bI][bJ].u);
+                                *pU = (uint16_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, yuvBlock[bI][bJ].u);
                                 uint16_t * pV = (uint16_t *)&yuvPlanes[AVIF_CHAN_V][(i * 2) + (j * yuvRowBytes[AVIF_CHAN_V])];
-                                *pV = (uint16_t)avifReformatStateUVToUNorm(&state, yuvBlock[bI][bJ].v);
+                                *pV = (uint16_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, yuvBlock[bI][bJ].v);
                             }
                         } else {
                             yuvPlanes[AVIF_CHAN_Y][i + (j * yuvRowBytes[AVIF_CHAN_Y])] =
-                                (uint8_t)avifReformatStateYToUNorm(&state, yuvBlock[bI][bJ].y);
+                                (uint8_t)avifYUVColorSpaceInfoYToUNorm(&state.yuv, yuvBlock[bI][bJ].y);
                             if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) {
                                 // YUV444, full chroma
                                 yuvPlanes[AVIF_CHAN_U][i + (j * yuvRowBytes[AVIF_CHAN_U])] =
-                                    (uint8_t)avifReformatStateUVToUNorm(&state, yuvBlock[bI][bJ].u);
+                                    (uint8_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, yuvBlock[bI][bJ].u);
                                 yuvPlanes[AVIF_CHAN_V][i + (j * yuvRowBytes[AVIF_CHAN_V])] =
-                                    (uint8_t)avifReformatStateUVToUNorm(&state, yuvBlock[bI][bJ].v);
+                                    (uint8_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, yuvBlock[bI][bJ].v);
                             }
                         }
                     }
@@ -406,16 +422,16 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                     const int chromaShiftY = 1;
                     int uvI = outerI >> chromaShiftX;
                     int uvJ = outerJ >> chromaShiftY;
-                    if (state.yuvChannelBytes > 1) {
+                    if (state.yuv.channelBytes > 1) {
                         uint16_t * pU = (uint16_t *)&yuvPlanes[AVIF_CHAN_U][(uvI * 2) + (uvJ * yuvRowBytes[AVIF_CHAN_U])];
-                        *pU = (uint16_t)avifReformatStateUVToUNorm(&state, avgU);
+                        *pU = (uint16_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgU);
                         uint16_t * pV = (uint16_t *)&yuvPlanes[AVIF_CHAN_V][(uvI * 2) + (uvJ * yuvRowBytes[AVIF_CHAN_V])];
-                        *pV = (uint16_t)avifReformatStateUVToUNorm(&state, avgV);
+                        *pV = (uint16_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgV);
                     } else {
                         yuvPlanes[AVIF_CHAN_U][uvI + (uvJ * yuvRowBytes[AVIF_CHAN_U])] =
-                            (uint8_t)avifReformatStateUVToUNorm(&state, avgU);
+                            (uint8_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgU);
                         yuvPlanes[AVIF_CHAN_V][uvI + (uvJ * yuvRowBytes[AVIF_CHAN_V])] =
-                            (uint8_t)avifReformatStateUVToUNorm(&state, avgV);
+                            (uint8_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgV);
                     }
                 } else if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV422) {
                     // YUV422, average 2 samples (1x2), twice
@@ -434,16 +450,16 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
                         const int chromaShiftX = 1;
                         int uvI = outerI >> chromaShiftX;
                         int uvJ = outerJ + bJ;
-                        if (state.yuvChannelBytes > 1) {
+                        if (state.yuv.channelBytes > 1) {
                             uint16_t * pU = (uint16_t *)&yuvPlanes[AVIF_CHAN_U][(uvI * 2) + (uvJ * yuvRowBytes[AVIF_CHAN_U])];
-                            *pU = (uint16_t)avifReformatStateUVToUNorm(&state, avgU);
+                            *pU = (uint16_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgU);
                             uint16_t * pV = (uint16_t *)&yuvPlanes[AVIF_CHAN_V][(uvI * 2) + (uvJ * yuvRowBytes[AVIF_CHAN_V])];
-                            *pV = (uint16_t)avifReformatStateUVToUNorm(&state, avgV);
+                            *pV = (uint16_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgV);
                         } else {
                             yuvPlanes[AVIF_CHAN_U][uvI + (uvJ * yuvRowBytes[AVIF_CHAN_U])] =
-                                (uint8_t)avifReformatStateUVToUNorm(&state, avgU);
+                                (uint8_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgU);
                             yuvPlanes[AVIF_CHAN_V][uvI + (uvJ * yuvRowBytes[AVIF_CHAN_V])] =
-                                (uint8_t)avifReformatStateUVToUNorm(&state, avgV);
+                                (uint8_t)avifYUVColorSpaceInfoUVToUNorm(&state.yuv, avgV);
                         }
                     }
                 }
@@ -460,14 +476,14 @@ avifResult avifImageRGBToYUV(avifImage * image, const avifRGBImage * rgb)
         params.dstPlane = image->alphaPlane;
         params.dstRowBytes = image->alphaRowBytes;
         params.dstOffsetBytes = 0;
-        params.dstPixelBytes = state.yuvChannelBytes;
+        params.dstPixelBytes = state.yuv.channelBytes;
 
         if (avifRGBFormatHasAlpha(rgb->format) && !rgb->ignoreAlpha) {
             params.srcDepth = rgb->depth;
             params.srcPlane = rgb->pixels;
             params.srcRowBytes = rgb->rowBytes;
-            params.srcOffsetBytes = state.rgbOffsetBytesA;
-            params.srcPixelBytes = state.rgbPixelBytes;
+            params.srcOffsetBytes = state.rgb.offsetBytesA;
+            params.srcPixelBytes = state.rgb.pixelBytes;
 
             avifReformatAlpha(&params);
         } else {
@@ -486,25 +502,25 @@ static avifBool avifCreateYUVToRGBLookUpTables(float ** unormFloatTableY, float 
     const size_t cpCount = (size_t)1 << depth;
 
     assert(unormFloatTableY);
-    *unormFloatTableY = avifAlloc(cpCount * sizeof(**unormFloatTableY));
+    *unormFloatTableY = (float *)avifAlloc(cpCount * sizeof(float));
     AVIF_CHECK(*unormFloatTableY);
     for (uint32_t cp = 0; cp < cpCount; ++cp) {
-        (*unormFloatTableY)[cp] = ((float)cp - state->biasY) / state->rangeY;
+        (*unormFloatTableY)[cp] = ((float)cp - state->yuv.biasY) / state->yuv.rangeY;
     }
 
     if (unormFloatTableUV) {
-        if (state->mode == AVIF_REFORMAT_MODE_IDENTITY) {
+        if (state->yuv.mode == AVIF_REFORMAT_MODE_IDENTITY) {
             // Just reuse the luma table since the chroma values are the same.
             *unormFloatTableUV = *unormFloatTableY;
         } else {
-            *unormFloatTableUV = avifAlloc(cpCount * sizeof(**unormFloatTableUV));
+            *unormFloatTableUV = (float *)avifAlloc(cpCount * sizeof(float));
             if (!*unormFloatTableUV) {
                 avifFree(*unormFloatTableY);
                 *unormFloatTableY = NULL;
                 return AVIF_FALSE;
             }
             for (uint32_t cp = 0; cp < cpCount; ++cp) {
-                (*unormFloatTableUV)[cp] = ((float)cp - state->biasUV) / state->rangeUV;
+                (*unormFloatTableUV)[cp] = ((float)cp - state->yuv.biasUV) / state->yuv.rangeUV;
             }
         }
     }
@@ -541,6 +557,20 @@ static void avifStoreRGB8Pixel(avifRGBFormat format, uint8_t R, uint8_t G, uint8
     *ptrB = B;
 }
 
+static void avifGetRGB565(const uint8_t * ptrR, uint8_t * R, uint8_t * G, uint8_t * B)
+{
+    // References for RGB565 color conversion:
+    // * https://docs.microsoft.com/en-us/windows/win32/directshow/working-with-16-bit-rgb
+    // * https://chromium.googlesource.com/libyuv/libyuv/+/331c361581896292fb46c8c6905e41262b7ca95f/source/row_common.cc#185
+    const uint16_t rgb656 = ((const uint16_t *)ptrR)[0];
+    const uint16_t r5 = (rgb656 & 0xF800) >> 11;
+    const uint16_t g6 = (rgb656 & 0x07E0) >> 5;
+    const uint16_t b5 = (rgb656 & 0x001F);
+    *R = (uint8_t)((r5 << 3) | (r5 >> 2));
+    *G = (uint8_t)((g6 << 2) | (g6 >> 4));
+    *B = (uint8_t)((b5 << 3) | (b5 >> 2));
+}
+
 // Note: This function handles alpha (un)multiply.
 static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
                                               avifRGBImage * rgb,
@@ -548,14 +578,14 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
                                               avifAlphaMultiplyMode alphaMultiplyMode)
 {
     // Aliases for some state
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
     float * unormFloatTableY = NULL;
     float * unormFloatTableUV = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
-    const uint32_t yuvChannelBytes = state->yuvChannelBytes;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const uint32_t yuvChannelBytes = state->yuv.channelBytes;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
 
     // Aliases for plane data
     const uint8_t * yPlane = image->yuvPlanes[AVIF_CHAN_Y];
@@ -569,8 +599,8 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
 
     // Various observations and limits
     const avifBool hasColor = (uPlane && vPlane && (image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400));
-    const uint16_t yuvMaxChannel = (uint16_t)state->yuvMaxChannel;
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
 
     // If toRGBAlphaMode is active (not no-op), assert that the alpha plane is present. The end of
     // the avifPrepareReformatState() function should ensure this, but this assert makes it clear
@@ -579,7 +609,7 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
 
     for (uint32_t j = 0; j < image->height; ++j) {
         // uvJ is used only when hasColor is true.
-        const uint32_t uvJ = hasColor ? (j >> state->formatInfo.chromaShiftY) : 0;
+        const uint32_t uvJ = hasColor ? (j >> state->yuv.formatInfo.chromaShiftY) : 0;
         const uint8_t * ptrY8 = &yPlane[j * yRowBytes];
         const uint8_t * ptrU8 = uPlane ? &uPlane[(uvJ * uRowBytes)] : NULL;
         const uint8_t * ptrV8 = vPlane ? &vPlane[(uvJ * vRowBytes)] : NULL;
@@ -589,9 +619,9 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
         const uint16_t * ptrV16 = (const uint16_t *)ptrV8;
         const uint16_t * ptrA16 = (const uint16_t *)ptrA8;
 
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
             float Y, Cb = 0.5f, Cr = 0.5f;
@@ -608,7 +638,7 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
 
             // Calculate Cb and Cr
             if (hasColor) {
-                const uint32_t uvI = i >> state->formatInfo.chromaShiftX;
+                const uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;
                 if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) {
                     uint16_t unormU, unormV;
 
@@ -732,26 +762,26 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
 
             float R, G, B;
             if (hasColor) {
-                if (state->mode == AVIF_REFORMAT_MODE_IDENTITY) {
+                if (state->yuv.mode == AVIF_REFORMAT_MODE_IDENTITY) {
                     // Identity (GBR): Formulas 41,42,43 from https://www.itu.int/rec/T-REC-H.273-201612-I/en
                     G = Y;
                     B = Cb;
                     R = Cr;
-                } else if (state->mode == AVIF_REFORMAT_MODE_YCGCO) {
+                } else if (state->yuv.mode == AVIF_REFORMAT_MODE_YCGCO) {
                     // YCgCo: Formulas 47,48,49,50 from https://www.itu.int/rec/T-REC-H.273-201612-I/en
                     const float t = Y - Cb;
                     G = Y + Cb;
                     B = t - Cr;
                     R = t + Cr;
 #if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
-                } else if (state->mode == AVIF_REFORMAT_MODE_YCGCO_RE || state->mode == AVIF_REFORMAT_MODE_YCGCO_RO) {
+                } else if (state->yuv.mode == AVIF_REFORMAT_MODE_YCGCO_RE || state->yuv.mode == AVIF_REFORMAT_MODE_YCGCO_RO) {
                     const int YY = unormY;
                     const int Cg = (int)avifRoundf(Cb * yuvMaxChannel);
                     const int Co = (int)avifRoundf(Cr * yuvMaxChannel);
                     const int t = YY - (Cg >> 1);
-                    G = (float)AVIF_CLAMP(t + Cg, 0, state->rgbMaxChannel);
-                    B = (float)AVIF_CLAMP(t - (Co >> 1), 0, state->rgbMaxChannel);
-                    R = (float)AVIF_CLAMP(B + Co, 0, state->rgbMaxChannel);
+                    G = (float)AVIF_CLAMP(t + Cg, 0, state->rgb.maxChannel);
+                    B = (float)AVIF_CLAMP(t - (Co >> 1), 0, state->rgb.maxChannel);
+                    R = (float)AVIF_CLAMP(B + Co, 0, state->rgb.maxChannel);
                     G /= rgbMaxChannelF;
                     B /= rgbMaxChannelF;
                     R /= rgbMaxChannelF;
@@ -763,7 +793,7 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
                     G = Y - ((2 * ((kr * (1 - kr) * Cr) + (kb * (1 - kb) * Cb))) / kg);
                 }
             } else {
-                // Monochrome: just populate all channels with luma (state->mode is irrelevant)
+                // Monochrome: just populate all channels with luma (state->yuv.mode is irrelevant)
                 R = Y;
                 G = Y;
                 B = Y;
@@ -781,7 +811,7 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
                 } else {
                     unormA = AVIF_MIN(ptrA16[i], yuvMaxChannel);
                 }
-                const float A = unormA / ((float)state->yuvMaxChannel);
+                const float A = unormA / ((float)state->yuv.maxChannel);
                 const float Ac = AVIF_CLAMP(A, 0.0f, 1.0f);
 
                 if (alphaMultiplyMode == AVIF_ALPHA_MULTIPLY_MODE_MULTIPLY) {
@@ -835,27 +865,27 @@ static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,
 
 static avifResult avifImageYUV16ToRGB16Color(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     float * unormFloatTableUV = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const uint16_t yuvMaxChannel = (uint16_t)state->yuvMaxChannel;
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
-        const uint32_t uvJ = j >> state->formatInfo.chromaShiftY;
+        const uint32_t uvJ = j >> state->yuv.formatInfo.chromaShiftY;
         const uint16_t * const ptrY = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
         const uint16_t * const ptrU = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_U][(uvJ * image->yuvRowBytes[AVIF_CHAN_U])];
         const uint16_t * const ptrV = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_V][(uvJ * image->yuvRowBytes[AVIF_CHAN_V])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
-            uint32_t uvI = i >> state->formatInfo.chromaShiftX;
+            uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;
 
             // clamp incoming data to protect against bad LUT lookups
             const uint16_t unormY = AVIF_MIN(ptrY[i], yuvMaxChannel);
@@ -889,24 +919,24 @@ static avifResult avifImageYUV16ToRGB16Color(const avifImage * image, avifRGBIma
 
 static avifResult avifImageYUV16ToRGB16Mono(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, NULL, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const uint16_t yuvMaxChannel = (uint16_t)state->yuvMaxChannel;
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const uint16_t maxChannel = (uint16_t)state->yuv.maxChannel;
+    const float maxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
         const uint16_t * const ptrY = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
             // clamp incoming data to protect against bad LUT lookups
-            const uint16_t unormY = AVIF_MIN(ptrY[i], yuvMaxChannel);
+            const uint16_t unormY = AVIF_MIN(ptrY[i], maxChannel);
 
             // Convert unorm to float
             const float Y = unormFloatTableY[unormY];
@@ -920,9 +950,9 @@ static avifResult avifImageYUV16ToRGB16Mono(const avifImage * image, avifRGBImag
             const float Gc = AVIF_CLAMP(G, 0.0f, 1.0f);
             const float Bc = AVIF_CLAMP(B, 0.0f, 1.0f);
 
-            *((uint16_t *)ptrR) = (uint16_t)(0.5f + (Rc * rgbMaxChannelF));
-            *((uint16_t *)ptrG) = (uint16_t)(0.5f + (Gc * rgbMaxChannelF));
-            *((uint16_t *)ptrB) = (uint16_t)(0.5f + (Bc * rgbMaxChannelF));
+            *((uint16_t *)ptrR) = (uint16_t)(0.5f + (Rc * maxChannelF));
+            *((uint16_t *)ptrG) = (uint16_t)(0.5f + (Gc * maxChannelF));
+            *((uint16_t *)ptrB) = (uint16_t)(0.5f + (Bc * maxChannelF));
 
             ptrR += rgbPixelBytes;
             ptrG += rgbPixelBytes;
@@ -935,27 +965,27 @@ static avifResult avifImageYUV16ToRGB16Mono(const avifImage * image, avifRGBImag
 
 static avifResult avifImageYUV16ToRGB8Color(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     float * unormFloatTableUV = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const uint16_t yuvMaxChannel = (uint16_t)state->yuvMaxChannel;
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
-        const uint32_t uvJ = j >> state->formatInfo.chromaShiftY;
+        const uint32_t uvJ = j >> state->yuv.formatInfo.chromaShiftY;
         const uint16_t * const ptrY = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
         const uint16_t * const ptrU = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_U][(uvJ * image->yuvRowBytes[AVIF_CHAN_U])];
         const uint16_t * const ptrV = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_V][(uvJ * image->yuvRowBytes[AVIF_CHAN_V])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
-            uint32_t uvI = i >> state->formatInfo.chromaShiftX;
+            uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;
 
             // clamp incoming data to protect against bad LUT lookups
             const uint16_t unormY = AVIF_MIN(ptrY[i], yuvMaxChannel);
@@ -993,20 +1023,20 @@ static avifResult avifImageYUV16ToRGB8Color(const avifImage * image, avifRGBImag
 
 static avifResult avifImageYUV16ToRGB8Mono(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, NULL, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const uint16_t yuvMaxChannel = (uint16_t)state->yuvMaxChannel;
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
         const uint16_t * const ptrY = (uint16_t *)&image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
             // clamp incoming data to protect against bad LUT lookups
@@ -1043,26 +1073,26 @@ static avifResult avifImageYUV16ToRGB8Mono(const avifImage * image, avifRGBImage
 
 static avifResult avifImageYUV8ToRGB16Color(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     float * unormFloatTableUV = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
-        const uint32_t uvJ = j >> state->formatInfo.chromaShiftY;
+        const uint32_t uvJ = j >> state->yuv.formatInfo.chromaShiftY;
         const uint8_t * const ptrY = &image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
         const uint8_t * const ptrU = &image->yuvPlanes[AVIF_CHAN_U][(uvJ * image->yuvRowBytes[AVIF_CHAN_U])];
         const uint8_t * const ptrV = &image->yuvPlanes[AVIF_CHAN_V][(uvJ * image->yuvRowBytes[AVIF_CHAN_V])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
-            uint32_t uvI = i >> state->formatInfo.chromaShiftX;
+            uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;
 
             // Convert unorm to float (no clamp necessary, the full uint8_t range is a legal lookup)
             const float Y = unormFloatTableY[ptrY[i]];
@@ -1091,19 +1121,19 @@ static avifResult avifImageYUV8ToRGB16Color(const avifImage * image, avifRGBImag
 
 static avifResult avifImageYUV8ToRGB16Mono(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, NULL, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
         const uint8_t * const ptrY = &image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
             // Convert unorm to float (no clamp necessary, the full uint8_t range is a legal lookup)
@@ -1133,14 +1163,14 @@ static avifResult avifImageYUV8ToRGB16Mono(const avifImage * image, avifRGBImage
 
 static avifResult avifImageIdentity8ToRGB8ColorFullRange(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     for (uint32_t j = 0; j < image->height; ++j) {
         const uint8_t * const ptrY = &image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
         const uint8_t * const ptrU = &image->yuvPlanes[AVIF_CHAN_U][(j * image->yuvRowBytes[AVIF_CHAN_U])];
         const uint8_t * const ptrV = &image->yuvPlanes[AVIF_CHAN_V][(j * image->yuvRowBytes[AVIF_CHAN_V])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         // This is intentionally a per-row conditional instead of a per-pixel
         // conditional. This makes the "else" path (much more common than the
@@ -1166,26 +1196,26 @@ static avifResult avifImageIdentity8ToRGB8ColorFullRange(const avifImage * image
 
 static avifResult avifImageYUV8ToRGB8Color(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     float * unormFloatTableUV = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
-        const uint32_t uvJ = j >> state->formatInfo.chromaShiftY;
+        const uint32_t uvJ = j >> state->yuv.formatInfo.chromaShiftY;
         const uint8_t * const ptrY = &image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
         const uint8_t * const ptrU = &image->yuvPlanes[AVIF_CHAN_U][(uvJ * image->yuvRowBytes[AVIF_CHAN_U])];
         const uint8_t * const ptrV = &image->yuvPlanes[AVIF_CHAN_V][(uvJ * image->yuvRowBytes[AVIF_CHAN_V])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
-            uint32_t uvI = i >> state->formatInfo.chromaShiftX;
+            uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;
 
             // Convert unorm to float (no clamp necessary, the full uint8_t range is a legal lookup)
             const float Y = unormFloatTableY[ptrY[i]];
@@ -1218,19 +1248,19 @@ static avifResult avifImageYUV8ToRGB8Color(const avifImage * image, avifRGBImage
 
 static avifResult avifImageYUV8ToRGB8Mono(const avifImage * image, avifRGBImage * rgb, avifReformatState * state)
 {
-    const float kr = state->kr;
-    const float kg = state->kg;
-    const float kb = state->kb;
-    const uint32_t rgbPixelBytes = state->rgbPixelBytes;
+    const float kr = state->yuv.kr;
+    const float kg = state->yuv.kg;
+    const float kb = state->yuv.kb;
+    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;
     float * unormFloatTableY = NULL;
     AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, NULL, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);
 
-    const float rgbMaxChannelF = state->rgbMaxChannelF;
+    const float rgbMaxChannelF = state->rgb.maxChannelF;
     for (uint32_t j = 0; j < image->height; ++j) {
         const uint8_t * const ptrY = &image->yuvPlanes[AVIF_CHAN_Y][(j * image->yuvRowBytes[AVIF_CHAN_Y])];
-        uint8_t * ptrR = &rgb->pixels[state->rgbOffsetBytesR + (j * rgb->rowBytes)];
-        uint8_t * ptrG = &rgb->pixels[state->rgbOffsetBytesG + (j * rgb->rowBytes)];
-        uint8_t * ptrB = &rgb->pixels[state->rgbOffsetBytesB + (j * rgb->rowBytes)];
+        uint8_t * ptrR = &rgb->pixels[state->rgb.offsetBytesR + (j * rgb->rowBytes)];
+        uint8_t * ptrG = &rgb->pixels[state->rgb.offsetBytesG + (j * rgb->rowBytes)];
+        uint8_t * ptrB = &rgb->pixels[state->rgb.offsetBytesB + (j * rgb->rowBytes)];
 
         for (uint32_t i = 0; i < image->width; ++i) {
             // Convert unorm to float (no clamp necessary, the full uint8_t range is a legal lookup)
@@ -1262,6 +1292,16 @@ static avifResult avifImageYUV8ToRGB8Mono(const avifImage * image, avifRGBImage 
     return AVIF_RESULT_OK;
 }
 
+// This constant comes from libyuv. For details, see here:
+// https://chromium.googlesource.com/libyuv/libyuv/+/2f87e9a7/source/row_common.cc#3537
+#define F16_MULTIPLIER 1.9259299444e-34f
+
+typedef union avifF16
+{
+    float f;
+    uint32_t u32;
+} avifF16;
+
 static avifResult avifRGBImageToF16(avifRGBImage * rgb)
 {
     avifResult libyuvResult = AVIF_RESULT_NOT_IMPLEMENTED;
@@ -1273,19 +1313,13 @@ static avifResult avifRGBImageToF16(avifRGBImage * rgb)
     }
     const uint32_t channelCount = avifRGBFormatChannelCount(rgb->format);
     const float scale = 1.0f / ((1 << rgb->depth) - 1);
-    // This constant comes from libyuv. For details, see here:
-    // https://chromium.googlesource.com/libyuv/libyuv/+/2f87e9a7/source/row_common.cc#3537
-    const float multiplier = 1.9259299444e-34f * scale;
+    const float multiplier = F16_MULTIPLIER * scale;
     uint16_t * pixelRowBase = (uint16_t *)rgb->pixels;
     const uint32_t stride = rgb->rowBytes >> 1;
     for (uint32_t j = 0; j < rgb->height; ++j) {
         uint16_t * pixel = pixelRowBase;
         for (uint32_t i = 0; i < rgb->width * channelCount; ++i, ++pixel) {
-            union
-            {
-                float f;
-                uint32_t u32;
-            } f16;
+            avifF16 f16;
             f16.f = *pixel * multiplier;
             *pixel = (uint16_t)(f16.u32 >> 13);
         }
@@ -1321,15 +1355,15 @@ static avifResult avifImageYUVToRGBImpl(const avifImage * image, avifRGBImage * 
         params.dstDepth = rgb->depth;
         params.dstPlane = rgb->pixels;
         params.dstRowBytes = rgb->rowBytes;
-        params.dstOffsetBytes = state->rgbOffsetBytesA;
-        params.dstPixelBytes = state->rgbPixelBytes;
+        params.dstOffsetBytes = state->rgb.offsetBytesA;
+        params.dstPixelBytes = state->rgb.pixelBytes;
 
         if (image->alphaPlane && image->alphaRowBytes) {
             params.srcDepth = image->depth;
             params.srcPlane = image->alphaPlane;
             params.srcRowBytes = image->alphaRowBytes;
             params.srcOffsetBytes = 0;
-            params.srcPixelBytes = state->yuvChannelBytes;
+            params.srcPixelBytes = state->yuv.channelBytes;
 
             avifReformatAlpha(&params);
         } else {
@@ -1357,14 +1391,14 @@ static avifResult avifImageYUVToRGBImpl(const avifImage * image, avifRGBImage * 
             // * None of these fast paths currently handle alpha (un)multiply, so avoid all of them
             //   if we can't do alpha (un)multiply as a separated post step (destination format doesn't have alpha).
 
-            if (state->mode == AVIF_REFORMAT_MODE_IDENTITY) {
+            if (state->yuv.mode == AVIF_REFORMAT_MODE_IDENTITY) {
                 if ((image->depth == 8) && (rgb->depth == 8) && (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) &&
                     (image->yuvRange == AVIF_RANGE_FULL)) {
                     convertResult = avifImageIdentity8ToRGB8ColorFullRange(image, rgb, state);
                 }
 
                 // TODO: Add more fast paths for identity
-            } else if (state->mode == AVIF_REFORMAT_MODE_YUV_COEFFICIENTS) {
+            } else if (state->yuv.mode == AVIF_REFORMAT_MODE_YUV_COEFFICIENTS) {
                 if (image->depth > 8) {
                     // yuv:u16
 
@@ -1545,17 +1579,18 @@ avifResult avifImageYUVToRGB(const avifImage * image, avifRGBImage * rgb)
     }
 
     const size_t byteCount = sizeof(YUVToRGBThreadData) * jobs;
-    YUVToRGBThreadData * threadData = avifAlloc(byteCount);
+    YUVToRGBThreadData * threadData = (YUVToRGBThreadData *)avifAlloc(byteCount);
     if (!threadData) {
         return AVIF_RESULT_OUT_OF_MEMORY;
     }
     memset(threadData, 0, byteCount);
-    int rowsPerJob = image->height / jobs;
+    uint32_t rowsPerJob = image->height / jobs;
     if (rowsPerJob % 2) {
         ++rowsPerJob;
+        jobs = (image->height + rowsPerJob - 1) / rowsPerJob; // ceil
     }
-    const int rowsForLastJob = image->height - rowsPerJob * (jobs - 1);
-    int startRow = 0;
+    const uint32_t rowsForLastJob = image->height - rowsPerJob * (jobs - 1);
+    uint32_t startRow = 0;
     uint32_t i;
     for (i = 0; i < jobs; ++i, startRow += rowsPerJob) {
         YUVToRGBThreadData * tdata = &threadData[i];
@@ -1580,7 +1615,7 @@ avifResult avifImageYUVToRGB(const avifImage * image, avifRGBImage * rgb)
             }
         }
     }
-    // If above loop ran successfully, Run the first job in the current thread.
+    // If above loop ran successfully, run the first job in the current thread.
     if (i == jobs) {
         avifImageYUVToRGBThreadWorker(&threadData[0]);
     }
@@ -1688,4 +1723,103 @@ int avifFullToLimitedUV(uint32_t depth, int v)
             break;
     }
     return v;
+}
+
+static inline uint16_t avifFloatToF16(float v)
+{
+    avifF16 f16;
+    f16.f = v * F16_MULTIPLIER;
+    return (uint16_t)(f16.u32 >> 13);
+}
+
+static inline float avifF16ToFloat(uint16_t v)
+{
+    avifF16 f16;
+    f16.u32 = v << 13;
+    return f16.f / F16_MULTIPLIER;
+}
+
+void avifGetRGBAPixel(const avifRGBImage * src, uint32_t x, uint32_t y, const avifRGBColorSpaceInfo * info, float rgbaPixel[4])
+{
+    assert(src != NULL);
+    assert(!src->isFloat || src->depth == 16);
+    assert(src->format != AVIF_RGB_FORMAT_RGB_565 || src->depth == 8);
+
+    const uint8_t * const srcPixel = &src->pixels[y * src->rowBytes + x * info->pixelBytes];
+    if (info->channelBytes > 1) {
+        uint16_t r = *((uint16_t *)(&srcPixel[info->offsetBytesR]));
+        uint16_t g = *((uint16_t *)(&srcPixel[info->offsetBytesG]));
+        uint16_t b = *((uint16_t *)(&srcPixel[info->offsetBytesB]));
+        uint16_t a = avifRGBFormatHasAlpha(src->format) ? *((uint16_t *)(&srcPixel[info->offsetBytesA])) : (uint16_t)info->maxChannel;
+        if (src->isFloat) {
+            rgbaPixel[0] = avifF16ToFloat(r);
+            rgbaPixel[1] = avifF16ToFloat(g);
+            rgbaPixel[2] = avifF16ToFloat(b);
+            rgbaPixel[3] = avifRGBFormatHasAlpha(src->format) ? avifF16ToFloat(a) : 1.0f;
+        } else {
+            rgbaPixel[0] = r / info->maxChannelF;
+            rgbaPixel[1] = g / info->maxChannelF;
+            rgbaPixel[2] = b / info->maxChannelF;
+            rgbaPixel[3] = a / info->maxChannelF;
+        }
+    } else {
+        if (src->format == AVIF_RGB_FORMAT_RGB_565) {
+            uint8_t r, g, b;
+            avifGetRGB565(&srcPixel[info->offsetBytesR], &r, &g, &b);
+            rgbaPixel[0] = r / info->maxChannelF;
+            rgbaPixel[1] = g / info->maxChannelF;
+            rgbaPixel[2] = b / info->maxChannelF;
+            rgbaPixel[3] = 1.0f;
+        } else {
+            rgbaPixel[0] = srcPixel[info->offsetBytesR] / info->maxChannelF;
+            rgbaPixel[1] = srcPixel[info->offsetBytesG] / info->maxChannelF;
+            rgbaPixel[2] = srcPixel[info->offsetBytesB] / info->maxChannelF;
+            rgbaPixel[3] = avifRGBFormatHasAlpha(src->format) ? (srcPixel[info->offsetBytesA] / info->maxChannelF) : 1.0f;
+        }
+    }
+}
+
+void avifSetRGBAPixel(const avifRGBImage * dst, uint32_t x, uint32_t y, const avifRGBColorSpaceInfo * info, const float rgbaPixel[4])
+{
+    assert(dst != NULL);
+    assert(!dst->isFloat || dst->depth == 16);
+    assert(dst->format != AVIF_RGB_FORMAT_RGB_565 || dst->depth == 8);
+    assert(rgbaPixel[0] >= 0.0f && rgbaPixel[0] <= 1.0f);
+    assert(rgbaPixel[1] >= 0.0f && rgbaPixel[1] <= 1.0f);
+    assert(rgbaPixel[2] >= 0.0f && rgbaPixel[2] <= 1.0f);
+
+    uint8_t * const dstPixel = &dst->pixels[y * dst->rowBytes + x * info->pixelBytes];
+
+    uint8_t * const ptrR = &dstPixel[info->offsetBytesR];
+    uint8_t * const ptrG = &dstPixel[info->offsetBytesG];
+    uint8_t * const ptrB = &dstPixel[info->offsetBytesB];
+    uint8_t * const ptrA = avifRGBFormatHasAlpha(dst->format) ? &dstPixel[info->offsetBytesA] : NULL;
+    if (dst->depth > 8) {
+        if (dst->isFloat) {
+            *((uint16_t *)ptrR) = avifFloatToF16(rgbaPixel[0]);
+            *((uint16_t *)ptrG) = avifFloatToF16(rgbaPixel[1]);
+            *((uint16_t *)ptrB) = avifFloatToF16(rgbaPixel[2]);
+            if (ptrA) {
+                *((uint16_t *)ptrA) = avifFloatToF16(rgbaPixel[3]);
+            }
+        } else {
+            *((uint16_t *)ptrR) = (uint16_t)(0.5f + (rgbaPixel[0] * info->maxChannelF));
+            *((uint16_t *)ptrG) = (uint16_t)(0.5f + (rgbaPixel[1] * info->maxChannelF));
+            *((uint16_t *)ptrB) = (uint16_t)(0.5f + (rgbaPixel[2] * info->maxChannelF));
+            if (ptrA) {
+                *((uint16_t *)ptrA) = (uint16_t)(0.5f + (rgbaPixel[3] * info->maxChannelF));
+            }
+        }
+    } else {
+        avifStoreRGB8Pixel(dst->format,
+                           (uint8_t)(0.5f + (rgbaPixel[0] * info->maxChannelF)),
+                           (uint8_t)(0.5f + (rgbaPixel[1] * info->maxChannelF)),
+                           (uint8_t)(0.5f + (rgbaPixel[2] * info->maxChannelF)),
+                           ptrR,
+                           ptrG,
+                           ptrB);
+        if (ptrA) {
+            *ptrA = (uint8_t)(0.5f + (rgbaPixel[3] * info->maxChannelF));
+        }
+    }
 }

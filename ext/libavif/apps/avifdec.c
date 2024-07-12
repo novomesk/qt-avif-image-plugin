@@ -30,8 +30,8 @@ static void syntax(void)
     printf("Options:\n");
     printf("    -h,--help         : Show syntax help\n");
     printf("    -V,--version      : Show the version number\n");
-    printf("    -j,--jobs J       : Number of jobs (worker threads, default: 1. Use \"all\" to use all available cores)\n");
-    printf("    -c,--codec C      : AV1 codec to use (choose from versions list below)\n");
+    printf("    -j,--jobs J       : Number of jobs (worker threads). Use \"all\" to potentially use as many cores as possible (default: all)\n");
+    printf("    -c,--codec C      : Codec to use (choose from versions list below)\n");
     printf("    -d,--depth D      : Output depth [8,16]. (PNG only; For y4m, depth is retained, and JPEG is always 8bpc)\n");
     printf("    -q,--quality Q    : Output quality [0-100]. (JPEG only, default: %d)\n", DEFAULT_JPEG_QUALITY);
     printf("    --png-compress L  : Set PNG compression level (PNG only; 0-9, 0=none, 9=max). Defaults to libpng's builtin default.\n");
@@ -43,6 +43,7 @@ static void syntax(void)
     printf("                        avifdec will use --index to choose which layer to decode (in progressive order).\n");
     printf("    --no-strict       : Disable strict decoding, which disables strict validation checks and errors\n");
     printf("    -i,--info         : Decode all frames and display all image information instead of saving to disk\n");
+    printf("    --icc FILENAME    : Provide an ICC profile payload (implies --ignore-icc)\n");
     printf("    --ignore-icc      : If the input file contains an embedded ICC profile, ignore it (no-op if absent)\n");
     printf("    --size-limit C    : Specifies the image size limit (in total pixels) that should be tolerated.\n");
     printf("                        Default: %u, set to a smaller value to further restrict.\n", AVIF_DEFAULT_IMAGE_SIZE_LIMIT);
@@ -58,12 +59,13 @@ int main(int argc, char * argv[])
     const char * inputFilename = NULL;
     const char * outputFilename = NULL;
     int requestedDepth = 0;
-    int jobs = 1;
+    int jobs = -1;
     int jpegQuality = DEFAULT_JPEG_QUALITY;
     int pngCompressionLevel = -1; // -1 is a sentinel to avifPNGWrite() to skip calling png_set_compression_level()
     avifCodecChoice codecChoice = AVIF_CODEC_CHOICE_AUTO;
     avifBool infoOnly = AVIF_FALSE;
     avifChromaUpsampling chromaUpsampling = AVIF_CHROMA_UPSAMPLING_AUTOMATIC;
+    const char * iccOverrideFilename = NULL;
     avifBool ignoreICC = AVIF_FALSE;
     avifBool rawColor = AVIF_FALSE;
     avifBool allowProgressive = AVIF_FALSE;
@@ -124,7 +126,7 @@ int main(int argc, char * argv[])
             } else {
                 const char * codecName = avifCodecName(codecChoice, AVIF_CODEC_FLAG_CAN_DECODE);
                 if (codecName == NULL) {
-                    fprintf(stderr, "ERROR: AV1 Codec cannot decode: %s\n", arg);
+                    fprintf(stderr, "ERROR: Codec cannot decode: %s\n", arg);
                     return 1;
                 }
             }
@@ -178,6 +180,10 @@ int main(int argc, char * argv[])
             strictFlags = AVIF_STRICT_DISABLED;
         } else if (!strcmp(arg, "-i") || !strcmp(arg, "--info")) {
             infoOnly = AVIF_TRUE;
+        } else if (!strcmp(arg, "--icc")) {
+            NEXTARG();
+            iccOverrideFilename = arg;
+            ignoreICC = AVIF_TRUE;
         } else if (!strcmp(arg, "--ignore-icc")) {
             ignoreICC = AVIF_TRUE;
         } else if (!strcmp(arg, "--size-limit")) {
@@ -216,6 +222,10 @@ int main(int argc, char * argv[])
         ++argIndex;
     }
 
+    if (jobs == -1) {
+        jobs = avifQueryCPUCount();
+    }
+
     if (!inputFilename) {
         syntax();
         return 1;
@@ -228,12 +238,21 @@ int main(int argc, char * argv[])
         }
 
         avifDecoder * decoder = avifDecoderCreate();
+        if (!decoder) {
+            fprintf(stderr, "Memory allocation failure\n");
+            return 1;
+        }
         decoder->maxThreads = jobs;
         decoder->codecChoice = codecChoice;
         decoder->imageSizeLimit = imageSizeLimit;
         decoder->imageDimensionLimit = imageDimensionLimit;
         decoder->strictFlags = strictFlags;
         decoder->allowProgressive = allowProgressive;
+#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
+        // Decode the gain map (if present) to allow showing its info.
+        decoder->enableParsingGainMapMetadata = AVIF_TRUE;
+        decoder->enableDecodingGainMap = AVIF_TRUE;
+#endif
         avifResult result = avifDecoderSetIOFile(decoder, inputFilename);
         if (result != AVIF_RESULT_OK) {
             fprintf(stderr, "Cannot open file for read: %s\n", inputFilename);
@@ -291,13 +310,17 @@ int main(int argc, char * argv[])
         }
     }
 
-    printf("Decoding with AV1 codec '%s' (%d worker thread%s), please wait...\n",
+    printf("Decoding with codec '%s' (%d worker thread%s), please wait...\n",
            avifCodecName(codecChoice, AVIF_CODEC_FLAG_CAN_DECODE),
            jobs,
            (jobs == 1) ? "" : "s");
 
-    int returnCode = 0;
+    int returnCode = 1;
     avifDecoder * decoder = avifDecoderCreate();
+    if (!decoder) {
+        fprintf(stderr, "Memory allocation failure\n");
+        goto cleanup;
+    }
     decoder->maxThreads = jobs;
     decoder->codecChoice = codecChoice;
     decoder->imageSizeLimit = imageSizeLimit;
@@ -308,27 +331,28 @@ int main(int argc, char * argv[])
     avifResult result = avifDecoderSetIOFile(decoder, inputFilename);
     if (result != AVIF_RESULT_OK) {
         fprintf(stderr, "Cannot open file for read: %s\n", inputFilename);
-        returnCode = 1;
         goto cleanup;
     }
 
     result = avifDecoderParse(decoder);
     if (result != AVIF_RESULT_OK) {
         fprintf(stderr, "ERROR: Failed to parse image: %s\n", avifResultToString(result));
-        returnCode = 1;
         goto cleanup;
     }
 
     result = avifDecoderNthImage(decoder, frameIndex);
     if (result != AVIF_RESULT_OK) {
         fprintf(stderr, "ERROR: Failed to decode image: %s\n", avifResultToString(result));
-        returnCode = 1;
         goto cleanup;
     }
 
     printf("Image decoded: %s\n", inputFilename);
     printf("Image details:\n");
-    avifImageDump(decoder->image, 0, 0, decoder->progressiveState);
+    avifBool gainMapPresent = AVIF_FALSE;
+#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
+    gainMapPresent = decoder->gainMapPresent;
+#endif
+    avifImageDump(decoder->image, 0, 0, gainMapPresent, decoder->progressiveState);
 
     if (ignoreICC && (decoder->image->icc.size > 0)) {
         printf("[--ignore-icc] Discarding ICC profile.\n");
@@ -337,13 +361,32 @@ int main(int argc, char * argv[])
         assert(result == AVIF_RESULT_OK);
     }
 
+    if (iccOverrideFilename) {
+        avifRWData iccOverride = AVIF_DATA_EMPTY;
+        if (!avifReadEntireFile(iccOverrideFilename, &iccOverride)) {
+            fprintf(stderr, "ERROR: Unable to read ICC: %s\n", iccOverrideFilename);
+            avifRWDataFree(&iccOverride);
+            goto cleanup;
+        }
+        printf("[--icc] Setting ICC profile: %s\n", iccOverrideFilename);
+        result = avifImageSetProfileICC(decoder->image, iccOverride.data, iccOverride.size);
+        avifRWDataFree(&iccOverride);
+        if (result != AVIF_RESULT_OK) {
+            fprintf(stderr, "ERROR: Failed to set ICC: %s\n", avifResultToString(result));
+            goto cleanup;
+        }
+    }
+
     avifAppFileFormat outputFormat = avifGuessFileFormat(outputFilename);
     if (outputFormat == AVIF_APP_FILE_FORMAT_UNKNOWN) {
         fprintf(stderr, "Cannot determine output file extension: %s\n", outputFilename);
-        returnCode = 1;
+        goto cleanup;
     } else if (outputFormat == AVIF_APP_FILE_FORMAT_Y4M) {
+        if (decoder->image->icc.size || decoder->image->exif.size || decoder->image->xmp.size) {
+            printf("Warning: metadata dropped when saving to y4m.\n");
+        }
         if (!y4mWrite(outputFilename, decoder->image)) {
-            returnCode = 1;
+            goto cleanup;
         }
     } else if (outputFormat == AVIF_APP_FILE_FORMAT_JPEG) {
         // Bypass alpha multiply step during conversion
@@ -351,21 +394,24 @@ int main(int argc, char * argv[])
             decoder->image->alphaPremultiplied = AVIF_TRUE;
         }
         if (!avifJPEGWrite(outputFilename, decoder->image, jpegQuality, chromaUpsampling)) {
-            returnCode = 1;
+            goto cleanup;
         }
     } else if (outputFormat == AVIF_APP_FILE_FORMAT_PNG) {
         if (!avifPNGWrite(outputFilename, decoder->image, requestedDepth, chromaUpsampling, pngCompressionLevel)) {
-            returnCode = 1;
+            goto cleanup;
         }
     } else {
         fprintf(stderr, "Unsupported output file extension: %s\n", outputFilename);
-        returnCode = 1;
+        goto cleanup;
     }
+    returnCode = 0;
 
 cleanup:
-    if (returnCode != 0) {
-        avifDumpDiagnostics(&decoder->diag);
+    if (decoder != NULL) {
+        if (returnCode != 0) {
+            avifDumpDiagnostics(&decoder->diag);
+        }
+        avifDecoderDestroy(decoder);
     }
-    avifDecoderDestroy(decoder);
     return returnCode;
 }

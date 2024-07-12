@@ -47,21 +47,21 @@ support for the following:
   * Animation: An image may have multiple frames with pauses between them,
     making it an animation.
 
+Terminology & Basics
+--------------------
+
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD",
 "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this
 document are to be interpreted as described in BCP 14 [RFC 2119][] [RFC 8174][]
 when, and only when, they appear in all capitals, as shown here.
 
-Bit numbering in chunk diagrams starts at `0` for the most significant bit
-('MSB 0'), as described in [RFC 1166][].
-
-Terminology & Basics
---------------------
-
 A WebP file contains either a still image (that is, an encoded matrix of pixels)
 or an [animation](#animation). Optionally, it can also contain transparency
 information, a color profile and metadata. We refer to the matrix of pixels as
 the _canvas_ of the image.
+
+Bit numbering in chunk diagrams starts at `0` for the most significant bit
+('MSB 0'), as described in [RFC 1166][].
 
 Below are additional terms used throughout this document:
 
@@ -290,15 +290,18 @@ up of:
 For an _animated image_, the _image data_ consists of multiple frames. More
 details about frames can be found in the [Animation](#animation) section.
 
-All chunks SHOULD be placed in the same order as listed above. If a chunk
-appears in the wrong place, the file is invalid, but readers MAY parse the
-file, ignoring the chunks that are out of order.
+All chunks necessary for reconstruction and color correction, that is 'VP8X',
+'ICCP', 'ANIM', 'ANMF', 'ALPH', 'VP8 ' and 'VP8L', MUST appear in the order
+described earlier. Readers SHOULD fail when chunks necessary for reconstruction
+and color correction are out of order.
 
-**Rationale:** Setting the order of chunks should allow quicker file
-parsing. For example, if an 'ALPH' Chunk does not appear in its required
-position, a decoder can choose to stop searching for it. The rule of
-ignoring late chunks should make programs that need to do a full search
-give the same results as the ones stopping early.
+[Metadata](#metadata) and [unknown](#unknown-chunks) chunks MAY appear out of
+order.
+
+**Rationale:** The chunks necessary for reconstruction should appear first in
+the file to allow a reader to begin decoding an image before receiving all of
+the data. An application may benefit from varying the order of metadata and
+custom chunks to suit the implementation.
 
 Extended WebP file header:
 {:#extended_header}
@@ -532,7 +535,7 @@ Frame Data: _Chunk Size_ - `16` bytes
 
   * An optional list of [unknown chunks](#unknown-chunks).
 
-**Note**: The 'ANMF' payload, _Frame Data_ above, consists of individual
+**Note**: The 'ANMF' payload, _Frame Data_, consists of individual
 _padded_ chunks, as described by the [RIFF file format](#riff-file-format).
 
 #### Alpha
@@ -776,7 +779,7 @@ The following pseudocode illustrates the rendering process. The notation
 _VP8X.field_ means the field in the 'VP8X' Chunk with the same description.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-assert VP8X.flags.hasAnimation
+VP8X.flags.hasAnimation MUST be TRUE
 canvas ← new image of size VP8X.canvasWidth x VP8X.canvasHeight with
          background color ANIM.background_color.
 loop_count ← ANIM.loopCount
@@ -784,7 +787,7 @@ dispose_method ← Dispose to background color
 if loop_count == 0:
   loop_count = ∞
 frame_params ← nil
-assert next chunk in image_data is ANMF
+next chunk in image_data is ANMF MUST be TRUE
 for loop = 0..loop_count - 1
   clear canvas to ANIM.background_color or application-defined color
   until eof or non-ANMF chunk
@@ -795,14 +798,16 @@ for loop = 0..loop_count - 1
     frame_params.frameDuration = Frame Duration
     frame_right = frame_params.frameX + frame_params.frameWidth
     frame_bottom = frame_params.frameY + frame_params.frameHeight
-    assert VP8X.canvasWidth >= frame_right
-    assert VP8X.canvasHeight >= frame_bottom
+    VP8X.canvasWidth >= frame_right MUST be TRUE
+    VP8X.canvasHeight >= frame_bottom MUST be TRUE
     for subchunk in 'Frame Data':
       if subchunk.tag == "ALPH":
-        assert alpha subchunks not found in 'Frame Data' earlier
+        alpha subchunks not found in 'Frame Data' earlier MUST be
+          TRUE
         frame_params.alpha = alpha_data
       else if subchunk.tag == "VP8 " OR subchunk.tag == "VP8L":
-        assert bitstream subchunks not found in 'Frame Data' earlier
+        bitstream subchunks not found in 'Frame Data' earlier MUST
+          be TRUE
         frame_params.bitstream = bitstream_data
     render frame with frame_params.alpha and frame_params.bitstream
       on canvas with top-left corner at (frame_params.frameX,
@@ -832,8 +837,8 @@ A lossless-encoded image may look as follows:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 RIFF/WEBP
 +- VP8X (descriptions of features used)
-+- XYZW (unknown chunk)
 +- VP8L (lossless bitstream)
++- XYZW (unknown chunk)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A lossless image with an ICC profile and XMP metadata may

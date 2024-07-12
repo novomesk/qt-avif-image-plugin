@@ -47,26 +47,48 @@ ARE_IMAGES_EQUAL="${BINARY_DIR}/tests/are_images_equal"
 
 # Input file paths.
 INPUT_Y4M="${TESTDATA_DIR}/kodim03_yuv420_8bpc.y4m"
+INPUT_UTF8_Y4M="🐾.y4m"
 # Output file names.
 ENCODED_FILE="avif_test_cmd_encoded.avif"
+ENCODED_UTF8_FILE="🐾.avif"
+ENCODED_FILE_REFERENCE="avif_test_cmd_encoded_ref.avif"
 ENCODED_FILE_WITH_DASH="-avif_test_cmd_encoded.avif"
 DECODED_FILE="avif_test_cmd_decoded.png"
+DECODED_UTF8_FILE="😀.png"
 OUT_MSG="avif_test_cmd_out_msg.txt"
 
 # Cleanup
 cleanup() {
   pushd ${TMP_DIR}
-    rm -- "${ENCODED_FILE}" "${ENCODED_FILE_WITH_DASH}" "${DECODED_FILE}" "${OUT_MSG}"
+    rm -f -- "${ENCODED_FILE}" "${ENCODED_FILE_WITH_DASH}" "${DECODED_FILE}" "${OUT_MSG}"
   popd
 }
 trap cleanup EXIT
 
 pushd ${TMP_DIR}
+  # Test options.
+  echo "Testing options"
+  for pair in aom,end-usage,cbr avm,end-usage,cbr rav1e,tiles,1 svt,film-grain,0; do
+    IFS=','; set -- $pair
+    if "${AVIFENC}" --help | grep $1' \['; then
+      "${AVIFENC}" -s 10 -q 85 -c $1 -a foo=1 "${INPUT_Y4M}" "${ENCODED_FILE}" > "${OUT_MSG}" && exit 1
+      "${AVIFENC}" -s 10 -q 85 -c $1 -a $2=$3 "${INPUT_Y4M}" "${ENCODED_FILE}" > "${OUT_MSG}"
+    fi
+  done
+
   # Lossy test. The decoded pixels should be different from the original image.
   echo "Testing basic lossy"
   "${AVIFENC}" -s 8 "${INPUT_Y4M}" -o "${ENCODED_FILE}"
   "${AVIFDEC}" "${ENCODED_FILE}" "${DECODED_FILE}"
   "${ARE_IMAGES_EQUAL}" "${INPUT_Y4M}" "${DECODED_FILE}" 0 && exit 1
+  cp ${INPUT_Y4M} ${INPUT_UTF8_Y4M}
+  "${AVIFENC}" -s 8 "${INPUT_UTF8_Y4M}" -o "${ENCODED_UTF8_FILE}"
+  "${AVIFDEC}" "${ENCODED_UTF8_FILE}" "${DECODED_UTF8_FILE}"
+  RET=0
+  "${ARE_IMAGES_EQUAL}" "${INPUT_UTF8_Y4M}" "${DECODED_UTF8_FILE}" 0 || RET=$?
+  if [[ ${RET} -ne 1 ]]; then
+    exit 1
+  fi
 
   # Argument parsing test with filenames starting with a dash.
   echo "Testing arguments"
@@ -75,6 +97,28 @@ pushd ${TMP_DIR}
   # Passing a filename starting with a dash without using -- should fail.
   "${AVIFENC}" -s 10 "${INPUT_Y4M}" "${ENCODED_FILE_WITH_DASH}" && exit 1
   "${AVIFDEC}" --info "${ENCODED_FILE_WITH_DASH}" && exit 1
+
+  # Option update handling test
+  # Passing non-update option before input should not print warning.
+  "${AVIFENC}" -s 10 -q 85 "${INPUT_Y4M}" "${ENCODED_FILE_REFERENCE}" 2> "${OUT_MSG}"
+  grep "WARNING: -q" "${OUT_MSG}" && exit 1
+  grep "WARNING: Trailing options" "${OUT_MSG}" && exit 1
+  # Passing non-update option after input should print warning.
+  "${AVIFENC}" -s 10 "${INPUT_Y4M}" "${ENCODED_FILE}" -q 85 2> "${OUT_MSG}"
+  grep "WARNING: -q" "${OUT_MSG}"
+  cmp -s "${ENCODED_FILE_REFERENCE}" "${ENCODED_FILE}"
+  # Passing non-update option after input but before positional output should also print warning.
+  "${AVIFENC}" -s 10 "${INPUT_Y4M}" -q 85 "${ENCODED_FILE}" 2> "${OUT_MSG}"
+  grep "WARNING: -q" "${OUT_MSG}"
+  cmp -s "${ENCODED_FILE_REFERENCE}" "${ENCODED_FILE}"
+  # Passing update option after input should print warning, and has no effect.
+  "${AVIFENC}" -s 10 "${INPUT_Y4M}" "${ENCODED_FILE}" -q:u 85 2> "${OUT_MSG}"
+  grep "WARNING: Trailing options" "${OUT_MSG}"
+  cmp -s "${ENCODED_FILE_REFERENCE}" "${ENCODED_FILE}" && exit 1
+  # Passing update option after input but before positional output should also print warning, and has no effect.
+  "${AVIFENC}" -s 10 "${INPUT_Y4M}" -q:u 85 "${ENCODED_FILE}" 2> "${OUT_MSG}"
+  grep "WARNING: Trailing options" "${OUT_MSG}"
+  cmp -s "${ENCODED_FILE_REFERENCE}" "${ENCODED_FILE}" && exit 1
 
   # --min and --max must be both specified.
   "${AVIFENC}" -s 10 --min 24 "${INPUT_Y4M}" "${ENCODED_FILE}" && exit 1

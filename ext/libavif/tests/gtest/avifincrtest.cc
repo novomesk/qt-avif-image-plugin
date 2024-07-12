@@ -1,7 +1,6 @@
 // Copyright 2022 Google LLC
 // SPDX-License-Identifier: BSD-2-Clause
 
-#include <fstream>
 #include <iostream>
 #include <string>
 #include <tuple>
@@ -15,39 +14,23 @@ using testing::Bool;
 using testing::Combine;
 using testing::Values;
 
-namespace libavif {
+namespace avif {
 namespace {
-
-//------------------------------------------------------------------------------
 
 // Used to pass the data folder path to the GoogleTest suites.
 const char* data_path = nullptr;
-
-// Reads the file with file_name into bytes and returns them.
-testutil::AvifRwData ReadFile(const char* file_name) {
-  std::ifstream file(std::string(data_path) + "/" + file_name,
-                     std::ios::binary | std::ios::ate);
-  testutil::AvifRwData bytes;
-  if (avifRWDataRealloc(&bytes, file.good() ? static_cast<size_t>(file.tellg())
-                                            : 0) != AVIF_RESULT_OK) {
-    return {};
-  }
-  file.seekg(0, std::ios::beg);
-  file.read(reinterpret_cast<char*>(bytes.data),
-            static_cast<std::streamsize>(bytes.size));
-  return bytes;
-}
 
 //------------------------------------------------------------------------------
 
 // Check that non-incremental and incremental decodings of a grid AVIF produce
 // the same pixels.
 TEST(IncrementalTest, Decode) {
-  const testutil::AvifRwData encoded_avif = ReadFile("sofa_grid1x5_420.avif");
+  const testutil::AvifRwData encoded_avif =
+      testutil::ReadFile(std::string(data_path) + "sofa_grid1x5_420.avif");
   ASSERT_NE(encoded_avif.size, 0u);
-  testutil::AvifImagePtr reference(avifImageCreateEmpty(), avifImageDestroy);
+  ImagePtr reference(avifImageCreateEmpty());
   ASSERT_NE(reference, nullptr);
-  testutil::AvifDecoderPtr decoder(avifDecoderCreate(), avifDecoderDestroy);
+  DecoderPtr decoder(avifDecoderCreate());
   ASSERT_NE(decoder, nullptr);
   ASSERT_EQ(avifDecoderReadMemory(decoder.get(), reference.get(),
                                   encoded_avif.data, encoded_avif.size),
@@ -55,10 +38,13 @@ TEST(IncrementalTest, Decode) {
 
   // Cell height is hardcoded because there is no API to extract it from an
   // encoded payload.
-  testutil::DecodeIncrementally(
-      encoded_avif, /*is_persistent=*/true, /*give_size_hint=*/true,
-      /*use_nth_image_api=*/false, *reference, /*cell_height=*/154,
-      /*enable_fine_incremental_check=*/true);
+  ASSERT_EQ(testutil::DecodeIncrementally(
+                encoded_avif, decoder.get(),
+                /*is_persistent=*/true, /*give_size_hint=*/true,
+                /*use_nth_image_api=*/false, *reference,
+                /*cell_height=*/154,
+                /*enable_fine_incremental_check=*/true),
+            AVIF_RESULT_OK);
 }
 
 //------------------------------------------------------------------------------
@@ -82,11 +68,12 @@ TEST_P(IncrementalTest, EncodeDecode) {
   const bool use_nth_image_api = std::get<6>(GetParam());
 
   // Load an image. It does not matter that it comes from an AVIF file.
-  testutil::AvifImagePtr image(avifImageCreateEmpty(), avifImageDestroy);
+  ImagePtr image(avifImageCreateEmpty());
   ASSERT_NE(image, nullptr);
-  const testutil::AvifRwData image_bytes = ReadFile("sofa_grid1x5_420.avif");
+  const testutil::AvifRwData image_bytes =
+      testutil::ReadFile(std::string(data_path) + "sofa_grid1x5_420.avif");
   ASSERT_NE(image_bytes.size, 0u);
-  testutil::AvifDecoderPtr decoder(avifDecoderCreate(), avifDecoderDestroy);
+  DecoderPtr decoder(avifDecoderCreate());
   ASSERT_NE(decoder, nullptr);
   ASSERT_EQ(avifDecoderReadMemory(decoder.get(), image.get(), image_bytes.data,
                                   image_bytes.size),
@@ -98,9 +85,12 @@ TEST_P(IncrementalTest, EncodeDecode) {
   testutil::EncodeRectAsIncremental(*image, width, height, create_alpha,
                                     flat_cells, &encoded_avif, &cell_width,
                                     &cell_height);
-  testutil::DecodeNonIncrementallyAndIncrementally(
-      encoded_avif, encoded_avif_is_persistent, give_size_hint,
-      use_nth_image_api, cell_height, /*enable_fine_incremental_check=*/true);
+
+  ASSERT_EQ(testutil::DecodeNonIncrementallyAndIncrementally(
+                encoded_avif, decoder.get(), encoded_avif_is_persistent,
+                give_size_hint, use_nth_image_api, cell_height,
+                /*enable_fine_incremental_check=*/true),
+            AVIF_RESULT_OK);
 }
 
 INSTANTIATE_TEST_SUITE_P(WholeImage, IncrementalTest,
@@ -137,7 +127,7 @@ INSTANTIATE_TEST_SUITE_P(SinglePixel, IncrementalTest,
 //------------------------------------------------------------------------------
 
 }  // namespace
-}  // namespace libavif
+}  // namespace avif
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
@@ -147,6 +137,6 @@ int main(int argc, char** argv) {
         << std::endl;
     return 1;
   }
-  libavif::data_path = argv[1];
+  avif::data_path = argv[1];
   return RUN_ALL_TESTS();
 }

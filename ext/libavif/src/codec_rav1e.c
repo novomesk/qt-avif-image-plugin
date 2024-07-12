@@ -88,11 +88,6 @@ static avifResult rav1eCodecEncodeImage(avifCodec * codec,
     RaFrame * rav1eFrame = NULL;
 
     if (!codec->internal->rav1eContext) {
-        if (codec->csOptions->count > 0) {
-            // None are currently supported!
-            return AVIF_RESULT_INVALID_CODEC_SPECIFIC_OPTION;
-        }
-
         const avifBool supports400 = rav1eSupports400();
         RaPixelRange rav1eRange;
         if (alpha) {
@@ -179,6 +174,14 @@ static avifResult rav1eCodecEncodeImage(avifCodec * codec,
         if (encoder->keyframeInterval > 0) {
             // "key_frame_interval" is the maximum interval between two keyframes.
             if (rav1e_config_parse_int(rav1eConfig, "key_frame_interval", encoder->keyframeInterval) == -1) {
+                goto cleanup;
+            }
+        }
+        for (uint32_t i = 0; i < codec->csOptions->count; ++i) {
+            avifCodecSpecificOption * entry = &codec->csOptions->entries[i];
+            if (rav1e_config_parse(rav1eConfig, entry->key, entry->value) < 0) {
+                avifDiagnosticsPrintf(codec->diag, "Invalid value for %s: %s.", entry->key, entry->value);
+                result = AVIF_RESULT_INVALID_CODEC_SPECIFIC_OPTION;
                 goto cleanup;
             }
         }
@@ -301,12 +304,19 @@ const char * avifCodecVersionRav1e(void)
 avifCodec * avifCodecCreateRav1e(void)
 {
     avifCodec * codec = (avifCodec *)avifAlloc(sizeof(avifCodec));
+    if (codec == NULL) {
+        return NULL;
+    }
     memset(codec, 0, sizeof(struct avifCodec));
     codec->encodeImage = rav1eCodecEncodeImage;
     codec->encodeFinish = rav1eCodecEncodeFinish;
     codec->destroyInternal = rav1eCodecDestroyInternal;
 
     codec->internal = (struct avifCodecInternal *)avifAlloc(sizeof(struct avifCodecInternal));
+    if (codec->internal == NULL) {
+        avifFree(codec);
+        return NULL;
+    }
     memset(codec->internal, 0, sizeof(struct avifCodecInternal));
     return codec;
 }

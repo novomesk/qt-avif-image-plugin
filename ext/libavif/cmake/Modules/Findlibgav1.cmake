@@ -33,7 +33,6 @@ endif(LIBGAV1_LIBRARY)
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     libgav1
-    FOUND_VAR LIBGAV1_FOUND
     REQUIRED_VARS LIBGAV1_LIBRARY LIBGAV1_LIBRARIES LIBGAV1_INCLUDE_DIR
     VERSION_VAR _LIBGAV1_VERSION
 )
@@ -41,3 +40,9 @@ find_package_handle_standard_args(
 # show the LIBGAV1_INCLUDE_DIR, LIBGAV1_LIBRARY and LIBGAV1_LIBRARIES variables
 # only in the advanced view
 mark_as_advanced(LIBGAV1_INCLUDE_DIR LIBGAV1_LIBRARY LIBGAV1_LIBRARIES)
+
+if(LIBGAV1_LIBRARY)
+    add_library(libgav1::libgav1 STATIC IMPORTED GLOBAL)
+    set_target_properties(libgav1::libgav1 PROPERTIES IMPORTED_LOCATION "${LIBGAV1_LIBRARY}" IMPORTED_SONAME gav1)
+    target_include_directories(libgav1::libgav1 INTERFACE ${LIBGAV1_INCLUDE_DIR})
+endif()

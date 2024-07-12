@@ -28,7 +28,7 @@ extern "C" {
 #define AVIF_FMT_ZU "zu"
 #endif
 
-void avifImageDump(const avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifProgressiveState progressiveState);
+void avifImageDump(const avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifBool gainMapPresent, avifProgressiveState progressiveState);
 void avifContainerDump(const avifDecoder * decoder);
 void avifPrintVersions(void);
 void avifDumpDiagnostics(const avifDiagnostics * diag);
@@ -44,7 +44,11 @@ typedef enum avifAppFileFormat
     AVIF_APP_FILE_FORMAT_Y4M
 } avifAppFileFormat;
 
+// Guesses the format of a file by looking at the first bytes, or at the extension if the file
+// can't be read or is empty.
 avifAppFileFormat avifGuessFileFormat(const char * filename);
+// Guesses the format of a buffer by looking at the first bytes.
+avifAppFileFormat avifGuessBufferFileFormat(const uint8_t * data, size_t size);
 
 // This structure holds any timing data coming from source (typically non-AVIF) inputs being fed
 // into avifenc. If either or both values are 0, the timing is "invalid" / sentinel and the values
@@ -58,8 +62,13 @@ typedef struct avifAppSourceTiming
 
 struct y4mFrameIterator;
 // Reads an image from a file with the requested format and depth.
+// At most imageSizeLimit pixels will be read or an error returned.
 // In case of a y4m file, sourceTiming and frameIter can be set.
 // Returns AVIF_APP_FILE_FORMAT_UNKNOWN in case of error.
+// 'ignoreGainMap' is only relevant for jpeg files that have a gain map
+// and only if AVIF_ENABLE_EXPERIMENTAL_JPEG_GAIN_MAP_CONVERSION is ON
+// (requires AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP and libxml2). Otherwise
+// it has no effect.
 avifAppFileFormat avifReadImage(const char * filename,
                                 avifPixelFormat requestedFormat,
                                 int requestedDepth,
@@ -68,10 +77,15 @@ avifAppFileFormat avifReadImage(const char * filename,
                                 avifBool ignoreExif,
                                 avifBool ignoreXMP,
                                 avifBool allowChangingCicp,
+                                avifBool ignoreGainMap,
+                                uint32_t imageSizeLimit,
                                 avifImage * image,
                                 uint32_t * outDepth,
                                 avifAppSourceTiming * sourceTiming,
                                 struct y4mFrameIterator ** frameIter);
+
+// Copies all the bytes from the file at filename to a newly allocated memory chunk.
+avifBool avifReadEntireFile(const char * filename, avifRWData * raw);
 
 // Removes a single trailing null character from the image->xmp, if there is exactly one.
 void avifImageFixXMP(avifImage * image);

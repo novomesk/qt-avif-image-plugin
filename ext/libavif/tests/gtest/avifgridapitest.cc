@@ -4,11 +4,10 @@
 #include <vector>
 
 #include "avif/avif.h"
-#include "avif/internal.h"
 #include "aviftest_helpers.h"
 #include "gtest/gtest.h"
 
-namespace libavif {
+namespace avif {
 namespace {
 
 // One AVIF cell in an AVIF grid.
@@ -19,7 +18,7 @@ struct Cell {
 avifResult EncodeDecodeGrid(const std::vector<std::vector<Cell>>& cell_rows,
                             avifPixelFormat yuv_format) {
   // Construct a grid.
-  std::vector<testutil::AvifImagePtr> cell_images;
+  std::vector<ImagePtr> cell_images;
   cell_images.reserve(cell_rows.size() * cell_rows.front().size());
   for (const std::vector<Cell>& cell_row : cell_rows) {
     assert(cell_row.size() == cell_rows.front().size());
@@ -34,7 +33,7 @@ avifResult EncodeDecodeGrid(const std::vector<std::vector<Cell>>& cell_rows,
   }
 
   // Encode the grid image (losslessly for easy pixel-by-pixel comparison).
-  testutil::AvifEncoderPtr encoder(avifEncoderCreate(), avifEncoderDestroy);
+  EncoderPtr encoder(avifEncoderCreate());
   if (!encoder) {
     return AVIF_RESULT_OUT_OF_MEMORY;
   }
@@ -61,8 +60,8 @@ avifResult EncodeDecodeGrid(const std::vector<std::vector<Cell>>& cell_rows,
   }
 
   // Decode the grid image.
-  testutil::AvifImagePtr image(avifImageCreateEmpty(), avifImageDestroy);
-  testutil::AvifDecoderPtr decoder(avifDecoderCreate(), avifDecoderDestroy);
+  ImagePtr image(avifImageCreateEmpty());
+  DecoderPtr decoder(avifDecoderCreate());
   if (!image || !decoder) {
     return AVIF_RESULT_OUT_OF_MEMORY;
   }
@@ -73,35 +72,19 @@ avifResult EncodeDecodeGrid(const std::vector<std::vector<Cell>>& cell_rows,
   }
 
   // Reconstruct the input image by merging all cells into a single avifImage.
-  testutil::AvifImagePtr grid = testutil::CreateImage(
+  ImagePtr grid = testutil::CreateImage(
       static_cast<int>(image->width), static_cast<int>(image->height),
       /*depth=*/8, yuv_format, AVIF_PLANES_ALL);
-  testutil::AvifImagePtr view(avifImageCreateEmpty(), avifImageDestroy);
-  if (!view) {
-    return AVIF_RESULT_OUT_OF_MEMORY;
-  }
-  avifCropRect rect = {};
-  auto it = cell_images.cbegin();
-  for (const std::vector<Cell>& cell_row : cell_rows) {
-    rect.x = 0;
-    for (const Cell& cell : cell_row) {
-      rect.width = cell.width;
-      rect.height = cell.height;
-      result = avifImageSetViewRect(view.get(), grid.get(), &rect);
-      if (result != AVIF_RESULT_OK) {
-        return result;
-      }
-      avifImageCopySamples(/*dstImage=*/view.get(), it->get(), AVIF_PLANES_ALL);
-      assert(!view->imageOwnsYUVPlanes);
-      ++it;
-      rect.x += rect.width;
-    }
-    rect.y += rect.height;
-  }
-  if ((rect.x != image->width) || (rect.y != image->height) ||
+  const int num_rows = (int)cell_rows.size();
+  const int num_cols = (int)cell_rows[0].size();
+  AVIF_CHECKRES(
+      testutil::MergeGrid(num_cols, num_rows, cell_images, grid.get()));
+
+  if ((grid->width != image->width) || (grid->height != image->height) ||
       !testutil::AreImagesEqual(*image, *grid)) {
     return AVIF_RESULT_UNKNOWN_ERROR;
   }
+
   return AVIF_RESULT_OK;
 }
 
@@ -239,9 +222,9 @@ TEST(GridApiTest, CellsOfDifferentDimensions) {
 //------------------------------------------------------------------------------
 
 TEST(GridApiTest, SameMatrixCoefficients) {
-  testutil::AvifImagePtr cell_0 = testutil::CreateImage(
+  ImagePtr cell_0 = testutil::CreateImage(
       64, 64, /*depth=*/8, AVIF_PIXEL_FORMAT_YUV444, AVIF_PLANES_ALL);
-  testutil::AvifImagePtr cell_1 = testutil::CreateImage(
+  ImagePtr cell_1 = testutil::CreateImage(
       1, 64, /*depth=*/8, AVIF_PIXEL_FORMAT_YUV444, AVIF_PLANES_ALL);
   ASSERT_NE(cell_0, nullptr);
   ASSERT_NE(cell_1, nullptr);
@@ -254,7 +237,7 @@ TEST(GridApiTest, SameMatrixCoefficients) {
   cell_0->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT601;
   cell_1->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT601;
 
-  testutil::AvifEncoderPtr encoder(avifEncoderCreate(), avifEncoderDestroy);
+  EncoderPtr encoder(avifEncoderCreate());
   ASSERT_NE(encoder, nullptr);
   encoder->speed = AVIF_SPEED_FASTEST;
   const avifImage* cell_image_ptrs[2] = {cell_0.get(), cell_1.get()};
@@ -268,9 +251,9 @@ TEST(GridApiTest, SameMatrixCoefficients) {
 }
 
 TEST(GridApiTest, DifferentMatrixCoefficients) {
-  testutil::AvifImagePtr cell_0 = testutil::CreateImage(
+  ImagePtr cell_0 = testutil::CreateImage(
       64, 64, /*depth=*/8, AVIF_PIXEL_FORMAT_YUV444, AVIF_PLANES_ALL);
-  testutil::AvifImagePtr cell_1 = testutil::CreateImage(
+  ImagePtr cell_1 = testutil::CreateImage(
       1, 64, /*depth=*/8, AVIF_PIXEL_FORMAT_YUV444, AVIF_PLANES_ALL);
   ASSERT_NE(cell_0, nullptr);
   ASSERT_NE(cell_1, nullptr);
@@ -283,7 +266,7 @@ TEST(GridApiTest, DifferentMatrixCoefficients) {
   cell_0->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT601;
   cell_1->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_UNSPECIFIED;
 
-  testutil::AvifEncoderPtr encoder(avifEncoderCreate(), avifEncoderDestroy);
+  EncoderPtr encoder(avifEncoderCreate());
   ASSERT_NE(encoder, nullptr);
   encoder->speed = AVIF_SPEED_FASTEST;
   // Encoding should fail.
@@ -295,4 +278,4 @@ TEST(GridApiTest, DifferentMatrixCoefficients) {
 }
 
 }  // namespace
-}  // namespace libavif
+}  // namespace avif

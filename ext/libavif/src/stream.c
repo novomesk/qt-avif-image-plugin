@@ -5,7 +5,6 @@
 
 #include <assert.h>
 #include <inttypes.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -189,36 +188,6 @@ avifBool avifROStreamReadBits(avifROStream * stream, uint32_t * v, size_t bitCou
     return AVIF_TRUE;
 }
 
-// Based on https://sqlite.org/src4/doc/trunk/www/varint.wiki.
-avifBool avifROStreamReadVarInt(avifROStream * stream, uint32_t * v)
-{
-    uint32_t a[5];
-    AVIF_CHECK(avifROStreamReadBits(stream, &a[0], 8));
-    if (a[0] <= 240) {
-        *v = a[0];
-    } else {
-        AVIF_CHECK(avifROStreamReadBits(stream, &a[1], 8));
-        if (a[0] <= 248) {
-            *v = 240 + 256 * (a[0] - 241) + a[1];
-        } else {
-            AVIF_CHECK(avifROStreamReadBits(stream, &a[2], 8));
-            if (a[0] == 249) {
-                *v = 2288 + 256 * a[1] + a[2];
-            } else {
-                AVIF_CHECK(avifROStreamReadBits(stream, &a[3], 8));
-                if (a[0] == 250) {
-                    *v = (a[3] << 16) | (a[2] << 8) | a[1];
-                } else {
-                    // TODO(yguyon): Use values of a[0] in range [252-255] (avoid pessimization).
-                    AVIF_CHECK(avifROStreamReadBits(stream, &a[4], 8));
-                    *v = (a[4] << 24) | (a[3] << 16) | (a[2] << 8) | a[1];
-                }
-            }
-        }
-    }
-    return AVIF_TRUE;
-}
-
 avifBool avifROStreamReadString(avifROStream * stream, char * output, size_t outputSize)
 {
     assert(stream->numUsedBitsInPartialByte == 0); // Byte alignment is required.
@@ -253,35 +222,56 @@ avifBool avifROStreamReadString(avifROStream * stream, char * output, size_t out
     return AVIF_TRUE;
 }
 
-avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader * header)
+avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader * header, avifBool topLevel)
 {
+    // Section 4.2.2 of ISO/IEC 14496-12.
     size_t startOffset = stream->offset;
 
     uint32_t smallSize;
-    AVIF_CHECK(avifROStreamReadU32(stream, &smallSize));
-    AVIF_CHECK(avifROStreamRead(stream, header->type, 4));
+    AVIF_CHECK(avifROStreamReadU32(stream, &smallSize));   // unsigned int(32) size;
+    AVIF_CHECK(avifROStreamRead(stream, header->type, 4)); // unsigned int(32) type = boxtype;
 
     uint64_t size = smallSize;
     if (size == 1) {
-        AVIF_CHECK(avifROStreamReadU64(stream, &size));
+        AVIF_CHECK(avifROStreamReadU64(stream, &size)); // unsigned int(64) largesize;
     }
 
     if (!memcmp(header->type, "uuid", 4)) {
-        AVIF_CHECK(avifROStreamSkip(stream, 16));
+        AVIF_CHECK(avifROStreamSkip(stream, 16)); // unsigned int(8) usertype[16] = extended_type;
     }
 
     size_t bytesRead = stream->offset - startOffset;
+    if (size == 0) {
+        // Section 4.2.2 of ISO/IEC 14496-12.
+        //   if size is 0, then this box shall be in a top-level box (i.e. not contained in another
+        //   box), and be the last box in its 'file', and its payload extends to the end of that
+        //   enclosing 'file'. This is normally only used for a MediaDataBox.
+        if (!topLevel) {
+            avifDiagnosticsPrintf(stream->diag, "%s: Non-top-level box with size 0", stream->diagContext);
+            return AVIF_FALSE;
+        }
+
+        // The given stream may be incomplete and there is no guarantee that sizeHint is available and accurate.
+        // Otherwise size could be set to avifROStreamRemainingBytes(stream) + (stream->offset - startOffset) right now.
+
+        // Wait for avifIOReadFunc() to return AVIF_RESULT_OK.
+        header->isSizeZeroBox = AVIF_TRUE;
+        header->size = 0;
+        return AVIF_TRUE;
+    }
+
     if ((size < bytesRead) || ((size - bytesRead) > SIZE_MAX)) {
         avifDiagnosticsPrintf(stream->diag, "%s: Header size overflow check failure", stream->diagContext);
         return AVIF_FALSE;
     }
+    header->isSizeZeroBox = AVIF_FALSE;
     header->size = (size_t)(size - bytesRead);
     return AVIF_TRUE;
 }
 
 avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header)
 {
-    AVIF_CHECK(avifROStreamReadBoxHeaderPartial(stream, header));
+    AVIF_CHECK(avifROStreamReadBoxHeaderPartial(stream, header, /*topLevel=*/AVIF_FALSE));
     if (header->size > avifROStreamRemainingBytes(stream)) {
         avifDiagnosticsPrintf(stream->diag, "%s: Child box too large, possibly truncated data", stream->diagContext);
         return AVIF_FALSE;
@@ -466,7 +456,7 @@ avifResult avifRWStreamWriteZeros(avifRWStream * stream, size_t byteCount)
 
 avifResult avifRWStreamWriteBits(avifRWStream * stream, uint32_t v, size_t bitCount)
 {
-    assert(((uint64_t)v >> bitCount) == 0); // (uint32_t >> 32 is undefined behavior)
+    AVIF_CHECKERR(bitCount >= 32 || (v >> bitCount) == 0, AVIF_RESULT_INVALID_ARGUMENT);
     while (bitCount) {
         if (stream->numUsedBitsInPartialByte == 0) {
             AVIF_CHECKRES(makeRoom(stream, 1)); // Book a new partial byte in the stream.
@@ -491,33 +481,6 @@ avifResult avifRWStreamWriteBits(avifRWStream * stream, uint32_t v, size_t bitCo
             // Start a new partial byte the next time a bit is needed.
             stream->numUsedBitsInPartialByte = 0;
         }
-    }
-    return AVIF_RESULT_OK;
-}
-
-// Based on https://sqlite.org/src4/doc/trunk/www/varint.wiki.
-avifResult avifRWStreamWriteVarInt(avifRWStream * stream, uint32_t v)
-{
-    if (v <= 240) {
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, v, 8));
-    } else if (v <= 2287) {
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v - 240) / 256 + 241, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v - 240) % 256, 8));
-    } else if (v <= 67823) {
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, 249, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v - 2288) / 256, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v - 2288) % 256, 8));
-    } else if (v <= 16777215) {
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, 250, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v >> 0) & 0xff, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v >> 8) & 0xff, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v >> 16) & 0xff, 8));
-    } else {
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, 251, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v >> 0) & 0xff, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v >> 8) & 0xff, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v >> 16) & 0xff, 8));
-        AVIF_CHECKRES(avifRWStreamWriteBits(stream, (v >> 24) & 0xff, 8));
     }
     return AVIF_RESULT_OK;
 }

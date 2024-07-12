@@ -4,20 +4,24 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <vector>
 
 #include "avif/internal.h"
 #include "aviftest_helpers.h"
 #include "gtest/gtest.h"
 
-namespace libavif {
+namespace avif {
 namespace {
+
+// Taken from stream.c.
+static const int VARINT_DEPTH_0 = 7;
+static const int VARINT_DEPTH_1 = 3;
+static const int VARINT_DEPTH_2 = 18;
 
 //------------------------------------------------------------------------------
 
 TEST(StreamTest, Roundtrip) {
-  // TODO(yguyon): Check return values once pull request #1498 is merged.
-
   // Write some fields.
   testutil::AvifRwData rw_data;
   avifRWStream rw_stream;
@@ -60,17 +64,10 @@ TEST(StreamTest, Roundtrip) {
   const uint32_t rw_someu32 = 0xAABBCCDD;
   EXPECT_EQ(avifRWStreamWriteU32(&rw_stream, rw_someu32), AVIF_RESULT_OK);
 
-  size_t offset = avifRWStreamOffset(&rw_stream);
-  const uint32_t rw_somevarint_1byte = 240;
-  EXPECT_EQ(avifRWStreamWriteVarInt(&rw_stream, rw_somevarint_1byte),
+  // Pad till byte alignment.
+  EXPECT_EQ(avifRWStreamWriteBits(&rw_stream, 0,
+                                  8 - rw_stream.numUsedBitsInPartialByte),
             AVIF_RESULT_OK);
-  EXPECT_EQ(avifRWStreamOffset(&rw_stream), offset + 1);
-
-  offset = avifRWStreamOffset(&rw_stream);
-  const uint32_t rw_somevarint_2bytes = 241;
-  EXPECT_EQ(avifRWStreamWriteVarInt(&rw_stream, rw_somevarint_2bytes),
-            AVIF_RESULT_OK);
-  EXPECT_EQ(avifRWStreamOffset(&rw_stream), offset + 2);
 
   const uint64_t rw_someu64 = 0xAABBCCDDEEFF0011;
   EXPECT_EQ(avifRWStreamWriteU64(&rw_stream, rw_someu64), AVIF_RESULT_OK);
@@ -84,27 +81,13 @@ TEST(StreamTest, Roundtrip) {
   EXPECT_EQ(avifRWStreamWriteBits(&rw_stream, rw_maxbits, rw_maxbitcount),
             AVIF_RESULT_OK);
 
-  offset = avifRWStreamOffset(&rw_stream);
-  const uint32_t rw_somevarint_3bytes = 2288;
-  EXPECT_EQ(avifRWStreamWriteVarInt(&rw_stream, rw_somevarint_3bytes),
-            AVIF_RESULT_OK);
-  const uint32_t rw_somevarint_4bytes = 67824;
-  EXPECT_EQ(avifRWStreamWriteVarInt(&rw_stream, rw_somevarint_4bytes),
-            AVIF_RESULT_OK);
-  EXPECT_EQ(avifRWStreamOffset(&rw_stream), offset + 3 + 4);
-
   const uint32_t rw_somebit = 1;
   EXPECT_EQ(avifRWStreamWriteBits(&rw_stream, rw_somebit, /*bitCount=*/1),
             AVIF_RESULT_OK);
   // Pad till byte alignment.
-  EXPECT_EQ(avifRWStreamWriteBits(&rw_stream, rw_somebit, /*bitCount=*/1),
+  EXPECT_EQ(avifRWStreamWriteBits(&rw_stream, 0,
+                                  8 - rw_stream.numUsedBitsInPartialByte),
             AVIF_RESULT_OK);
-
-  offset = avifRWStreamOffset(&rw_stream);
-  const uint32_t rw_somevarint_5bytes = std::numeric_limits<uint32_t>::max();
-  EXPECT_EQ(avifRWStreamWriteVarInt(&rw_stream, rw_somevarint_5bytes),
-            AVIF_RESULT_OK);
-  EXPECT_EQ(avifRWStreamOffset(&rw_stream), offset + 5);
 
   const size_t num_zeros = 10000;
   EXPECT_EQ(avifRWStreamWriteZeros(&rw_stream, /*byteCount=*/num_zeros),
@@ -163,13 +146,9 @@ TEST(StreamTest, Roundtrip) {
   EXPECT_TRUE(avifROStreamReadU32(&ro_stream, &ro_someu32));
   EXPECT_EQ(rw_someu32, ro_someu32);
 
-  uint32_t ro_somevarint_1byte;
-  EXPECT_TRUE(avifROStreamReadVarInt(&ro_stream, &ro_somevarint_1byte));
-  EXPECT_EQ(rw_somevarint_1byte, ro_somevarint_1byte);
-
-  uint32_t ro_somevarint_2bytes;
-  EXPECT_TRUE(avifROStreamReadVarInt(&ro_stream, &ro_somevarint_2bytes));
-  EXPECT_EQ(rw_somevarint_2bytes, ro_somevarint_2bytes);
+  // Pad till byte alignment.
+  EXPECT_TRUE(avifROStreamReadBits8(&ro_stream, &ro_someu8,
+                                    8 - ro_stream.numUsedBitsInPartialByte));
 
   uint64_t ro_someu64;
   EXPECT_TRUE(avifROStreamReadU64(&ro_stream, &ro_someu64));
@@ -182,29 +161,28 @@ TEST(StreamTest, Roundtrip) {
   EXPECT_TRUE(avifROStreamReadBits(&ro_stream, &ro_maxbits, rw_maxbitcount));
   EXPECT_EQ(rw_maxbits, ro_maxbits);
 
-  uint32_t ro_somevarint_3bytes;
-  EXPECT_TRUE(avifROStreamReadVarInt(&ro_stream, &ro_somevarint_3bytes));
-  EXPECT_EQ(rw_somevarint_3bytes, ro_somevarint_3bytes);
-
-  uint32_t ro_somevarint_4bytes;
-  EXPECT_TRUE(avifROStreamReadVarInt(&ro_stream, &ro_somevarint_4bytes));
-  EXPECT_EQ(rw_somevarint_4bytes, ro_somevarint_4bytes);
-
   uint8_t ro_somebit;
   EXPECT_TRUE(avifROStreamReadBits8(&ro_stream, &ro_somebit, /*bitCount=*/1));
   EXPECT_EQ(rw_somebit, ro_somebit);
-  EXPECT_TRUE(avifROStreamReadBits8(&ro_stream, &ro_somebit, /*bitCount=*/1));
-  EXPECT_EQ(rw_somebit, ro_somebit);
 
-  uint32_t ro_somevarint_5bytes;
-  EXPECT_TRUE(avifROStreamReadVarInt(&ro_stream, &ro_somevarint_5bytes));
-  EXPECT_EQ(rw_somevarint_5bytes, ro_somevarint_5bytes);
+  // Pad till byte alignment.
+  EXPECT_TRUE(avifROStreamReadBits8(&ro_stream, &ro_someu8,
+                                    8 - ro_stream.numUsedBitsInPartialByte));
 
   EXPECT_TRUE(avifROStreamSkip(&ro_stream, /*byteCount=*/num_zeros));
   EXPECT_FALSE(avifROStreamSkip(&ro_stream, /*byteCount=*/1));
 }
 
+TEST(StreamTest, WriteBitsLimit) {
+  testutil::AvifRwData rw_data;
+  avifRWStream rw_stream;
+  avifRWStreamStart(&rw_stream, &rw_data);
+  EXPECT_EQ(avifRWStreamWriteBits(&rw_stream, 7, 3), AVIF_RESULT_OK);
+  EXPECT_EQ(avifRWStreamWriteBits(&rw_stream, 8, 3),
+            AVIF_RESULT_INVALID_ARGUMENT);
+}
+
 //------------------------------------------------------------------------------
 
 }  // namespace
-}  // namespace libavif
+}  // namespace avif
