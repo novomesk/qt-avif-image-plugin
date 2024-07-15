@@ -659,7 +659,15 @@ bool QAVIFHandler::write(const QImage &image)
         QImage tmpgrayimage = image.convertToFormat(tmpformat);
 
         avif = avifImageCreate(tmpgrayimage.width(), tmpgrayimage.height(), save_depth, AVIF_PIXEL_FORMAT_YUV400);
+#if AVIF_VERSION >= 110000
+        res = avifImageAllocatePlanes(avif, AVIF_PLANES_YUV);
+        if (res != AVIF_RESULT_OK) {
+            qWarning("ERROR in avifImageAllocatePlanes: %s", avifResultToString(res));
+            return false;
+        }
+#else
         avifImageAllocatePlanes(avif, AVIF_PLANES_YUV);
+#endif
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
         if (tmpgrayimage.colorSpace().isValid()) {
@@ -851,7 +859,15 @@ bool QAVIFHandler::write(const QImage &image)
         avif->transferCharacteristics = transfer_to_save;
 
         if (iccprofile.size() > 0) {
+#if AVIF_VERSION >= 1000000
+            res = avifImageSetProfileICC(avif, reinterpret_cast<const uint8_t *>(iccprofile.constData()), iccprofile.size());
+            if (res != AVIF_RESULT_OK) {
+                qWarning("ERROR in avifImageSetProfileICC: %s", avifResultToString(res));
+                return false;
+            }
+#else
             avifImageSetProfileICC(avif, reinterpret_cast<const uint8_t *>(iccprofile.constData()), iccprofile.size());
+#endif
         }
 #endif
 
@@ -1017,6 +1033,8 @@ bool QAVIFHandler::jumpToNextImage()
         return false;
     }
 
+    avifResult decodeResult;
+
     if (m_decoder->imageIndex >= 0) {
         if (m_decoder->imageCount < 2) {
             m_parseState = ParseAvifSuccess;
@@ -1024,11 +1042,16 @@ bool QAVIFHandler::jumpToNextImage()
         }
 
         if (m_decoder->imageIndex >= m_decoder->imageCount - 1) { // start from beginning
-            avifDecoderReset(m_decoder);
+            decodeResult = avifDecoderReset(m_decoder);
+            if (decodeResult != AVIF_RESULT_OK) {
+                qWarning("ERROR in avifDecoderReset: %s", avifResultToString(decodeResult));
+                m_parseState = ParseAvifError;
+                return false;
+            }
         }
     }
 
-    avifResult decodeResult = avifDecoderNextImage(m_decoder);
+    decodeResult = avifDecoderNextImage(m_decoder);
 
     if (decodeResult != AVIF_RESULT_OK) {
         qWarning("ERROR: Failed to decode Next image in sequence: %s", avifResultToString(decodeResult));
