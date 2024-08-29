@@ -8,6 +8,32 @@ The changes are relative to the previous release, unless the baseline is specifi
 
 ## [Unreleased]
 
+## [1.1.1] - 2024-07-30
+
+### Changed since 1.1.0
+* In avif.h, change "AVIF_API AVIF_NODISCARD" back to "AVIF_NODISCARD AVIF_API"
+  to fix clang-cl and MSVC compilation errors in the shared library build on
+  Windows.
+* Fix -DAVIF_GTEST=SYSTEM, https://github.com/AOMediaCodec/libavif/issues/2258.
+* Fix infe_type and codec_config_type wrongly read as byte-aligned fields in the
+  experimental feature AVIF_ENABLE_EXPERIMENTAL_METAV1.
+* When building aom as a local dependency, runtime CPU detection
+  (`CONFIG_RUNTIME_CPU_DETECT`) is now always `ON`; in 1.1.0 it had been
+  disabled for non-native builds.
+* Fix CMake config shared library leaks
+  https://github.com/AOMediaCodec/libavif/issues/2264.
+* Fix clang-cl compilation.
+* Update gain map metadata to current ISO 21496-1 draft.
+* cmake: Only search for ASM_NASM language on x86_64 platforms.
+* Fix "No known features for CXX compiler" CMake error.
+* Fix aom link flags so that transitive library link flags are included when
+  aom is a static library
+  https://github.com/AOMediaCodec/libavif/issues/2274.
+* Fix out-of-order 'dimg' grid associations
+  https://github.com/AOMediaCodec/libavif/issues/2311.
+* Report files with an item used in multiple 'dimg' boxes with
+  AVIF_RESULT_NOT_IMPLEMENTED instead of AVIF_RESULT_INVALID_IMAGE_GRID.
+
 ## [1.1.0] - 2024-07-11
 
 ### Added since 1.0.0
@@ -1108,7 +1134,8 @@ code.
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/AOMediaCodec/libavif/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/AOMediaCodec/libavif/compare/v1.0.0...v1.1.0
 [1.0.4]: https://github.com/AOMediaCodec/libavif/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/AOMediaCodec/libavif/compare/v1.0.2...v1.0.3

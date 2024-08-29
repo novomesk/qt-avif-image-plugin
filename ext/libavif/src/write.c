@@ -248,7 +248,7 @@ typedef struct avifEncoderData
 static void avifEncoderDataDestroy(avifEncoderData * data);
 
 // Returns NULL if a memory allocation failed.
-static avifEncoderData * avifEncoderDataCreate()
+static avifEncoderData * avifEncoderDataCreate(void)
 {
     avifEncoderData * data = (avifEncoderData *)avifAlloc(sizeof(avifEncoderData));
     if (!data) {
@@ -892,6 +892,11 @@ static avifBool avifWriteToneMappedImagePayload(avifRWData * data, const avifGai
     const uint8_t version = 0;
     AVIF_CHECKRES(avifRWStreamWriteU8(&s, version));
 
+    const uint16_t minimumVersion = 0;
+    AVIF_CHECKRES(avifRWStreamWriteU16(&s, minimumVersion));
+    const uint16_t writerVersion = 0;
+    AVIF_CHECKRES(avifRWStreamWriteU16(&s, writerVersion));
+
     uint8_t flags = 0u;
     // Always write three channels for now for simplicity.
     // TODO(maryla): the draft says that this specifies the count of channels of the
@@ -912,54 +917,29 @@ static avifBool avifWriteToneMappedImagePayload(avifRWData * data, const avifGai
         metadata->alternateOffsetD[0] == metadata->alternateOffsetD[2];
     const uint8_t channelCount = allChannelsIdentical ? 1u : 3u;
     if (channelCount == 3) {
-        flags |= 1;
+        flags |= (1 << 7);
     }
     if (metadata->useBaseColorSpace) {
-        flags |= 2;
-    }
-    const uint32_t denom = metadata->baseHdrHeadroomD;
-    avifBool useCommonDenominator = metadata->baseHdrHeadroomD == denom && metadata->alternateHdrHeadroomD == denom;
-    for (int c = 0; c < channelCount; ++c) {
-        useCommonDenominator = useCommonDenominator && metadata->gainMapMinD[c] == denom && metadata->gainMapMaxD[c] == denom &&
-                               metadata->gainMapGammaD[c] == denom && metadata->baseOffsetD[c] == denom &&
-                               metadata->alternateOffsetD[c] == denom;
-    }
-    if (useCommonDenominator) {
-        flags |= 8;
+        flags |= (1 << 6);
     }
     AVIF_CHECKRES(avifRWStreamWriteU8(&s, flags));
 
-    if (useCommonDenominator) {
-        AVIF_CHECKRES(avifRWStreamWriteU32(&s, denom));
+    AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->baseHdrHeadroomN));
+    AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->baseHdrHeadroomD));
+    AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->alternateHdrHeadroomN));
+    AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->alternateHdrHeadroomD));
 
-        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->baseHdrHeadroomN));
-        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->alternateHdrHeadroomN));
-
-        for (int c = 0; c < channelCount; ++c) {
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->gainMapMinN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->gainMapMaxN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapGammaN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->baseOffsetN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->alternateOffsetN[c]));
-        }
-    } else {
-        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->baseHdrHeadroomN));
-        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->baseHdrHeadroomD));
-        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->alternateHdrHeadroomN));
-        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->alternateHdrHeadroomD));
-
-        for (int c = 0; c < channelCount; ++c) {
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->gainMapMinN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapMinD[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->gainMapMaxN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapMaxD[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapGammaN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapGammaD[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->baseOffsetN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->baseOffsetD[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->alternateOffsetN[c]));
-            AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->alternateOffsetD[c]));
-        }
+    for (int c = 0; c < channelCount; ++c) {
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->gainMapMinN[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapMinD[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->gainMapMaxN[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapMaxD[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapGammaN[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->gainMapGammaD[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->baseOffsetN[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->baseOffsetD[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, (uint32_t)metadata->alternateOffsetN[c]));
+        AVIF_CHECKRES(avifRWStreamWriteU32(&s, metadata->alternateOffsetD[c]));
     }
 
     avifRWStreamFinishWrite(&s);
@@ -1002,7 +982,7 @@ static avifResult avifEncoderWriteSampleTransformTokens(avifRWStream * s, const 
 
         if (token->type == AVIF_SAMPLE_TRANSFORM_CONSTANT) {
             // TODO(yguyon): Verify two's complement representation is guaranteed here.
-            const uint32_t constant = *(uint32_t *)&token->constant;
+            const uint32_t constant = *(const uint32_t *)&token->constant;
             AVIF_CHECKRES(avifRWStreamWriteU32(s, constant)); // signed int(1<<(bit_depth+3)) constant;
         } else if (token->type == AVIF_SAMPLE_TRANSFORM_INPUT_IMAGE_ITEM_INDEX) {
             AVIF_CHECKRES(avifRWStreamWriteU8(s, token->inputImageItemIndex)); // unsigned int(8) input_image_item_index;
@@ -1025,7 +1005,7 @@ static avifResult avifEncoderWriteSampleTransformPayload(avifEncoder * encoder, 
     const avifResult result = avifEncoderWriteSampleTransformTokens(&s, &expression);
     avifArrayDestroy(&expression);
     if (result != AVIF_RESULT_OK) {
-        avifDiagnosticsPrintf(&encoder->diag, "Failed to write sample transform metadata for recipe %d", encoder->sampleTransformRecipe);
+        avifDiagnosticsPrintf(&encoder->diag, "Failed to write sample transform metadata for recipe %d", (int)encoder->sampleTransformRecipe);
         return result;
     }
 
@@ -1309,7 +1289,7 @@ static avifResult avifImageApplyImgOpConst(avifImage * result,
     // Postfix notation.
     const avifSampleTransformToken tokens[] = { { AVIF_SAMPLE_TRANSFORM_INPUT_IMAGE_ITEM_INDEX, 0, /*inputImageItemIndex=*/1 },
                                                 { AVIF_SAMPLE_TRANSFORM_CONSTANT, constant, 0 },
-                                                { op, 0, 0 } };
+                                                { (uint8_t)op, 0, 0 } };
     return avifImageApplyOperations(result, AVIF_SAMPLE_TRANSFORM_BIT_DEPTH_32, /*numTokens=*/3, tokens, /*numInputImageItems=*/1, &inputImageItem, planes);
 }
 
@@ -1487,7 +1467,7 @@ static avifResult avifValidateGrid(uint32_t gridCols,
         const uint32_t expectedCellHeight = (cellIndex < (cellCount - gridCols)) ? tileHeight : bottomRightCell->height;
         if ((cellImage->width != expectedCellWidth) || (cellImage->height != expectedCellHeight)) {
             avifDiagnosticsPrintf(diag,
-                                  "%s cell %d has invalid dimensions: expected %dx%d found %dx%d",
+                                  "%s cell %u has invalid dimensions: expected %ux%u found %ux%u",
                                   validateGainMap ? "gain map" : "image",
                                   cellIndex,
                                   expectedCellWidth,
@@ -1518,7 +1498,7 @@ static avifResult avifValidateGrid(uint32_t gridCols,
 
     if ((bottomRightCell->width > tileWidth) || (bottomRightCell->height > tileHeight)) {
         avifDiagnosticsPrintf(diag,
-                              "the last %s cell can be smaller but not larger than the other cells which are %dx%d, found %dx%d",
+                              "the last %s cell can be smaller but not larger than the other cells which are %ux%u, found %ux%u",
                               validateGainMap ? "gain map" : "image",
                               tileWidth,
                               tileHeight,

@@ -47,14 +47,16 @@ if(AVIF_ENABLE_FUZZTEST OR AVIF_ENABLE_GTEST OR AVIF_BUILD_APPS)
     target_link_libraries(aviftest_helpers_internal avif_apps_internal avif_internal)
 endif()
 
-# Fuzz target without any fuzzing engine dependency. For easy reproduction of oss-fuzz issues.
-add_executable(repro_avif_decode_fuzzer oss-fuzz/avif_decode_fuzzer.cc oss-fuzz/repro_fuzz.cc)
-set_target_properties(repro_avif_decode_fuzzer PROPERTIES LINKER_LANGUAGE "CXX")
-target_link_libraries(repro_avif_decode_fuzzer avif)
-# The test below exists for coverage and as a usage example: repro_avif_decode_fuzzer [reproducer file path]
-add_test(NAME repro_avif_decode_fuzzer COMMAND repro_avif_decode_fuzzer
-                                               ${CMAKE_CURRENT_SOURCE_DIR}/data/color_grid_alpha_nogrid.avif
-)
+if(CMAKE_CXX_COMPILER_LOADED)
+    # Fuzz target without any fuzzing engine dependency. For easy reproduction of oss-fuzz issues.
+    add_executable(repro_avif_decode_fuzzer oss-fuzz/avif_decode_fuzzer.cc oss-fuzz/repro_fuzz.cc)
+    set_target_properties(repro_avif_decode_fuzzer PROPERTIES LINKER_LANGUAGE "CXX")
+    target_link_libraries(repro_avif_decode_fuzzer avif)
+    # The test below exists for coverage and as a usage example: repro_avif_decode_fuzzer [reproducer file path]
+    add_test(NAME repro_avif_decode_fuzzer COMMAND repro_avif_decode_fuzzer
+                                                   ${CMAKE_CURRENT_SOURCE_DIR}/data/color_grid_alpha_nogrid.avif
+    )
+endif()
 
 ################################################################################
 # GoogleTest
@@ -63,39 +65,41 @@ add_test(NAME repro_avif_decode_fuzzer COMMAND repro_avif_decode_fuzzer
 # are considered as extra linked libraries.
 macro(add_avif_gtest TEST_NAME)
     add_executable(${TEST_NAME} gtest/${TEST_NAME}.cc)
-    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers GTest::gtest GTest::gtest_main ${ARGN})
+    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers GTest::GTest GTest::Main ${ARGN})
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
     register_test_for_coverage(${TEST_NAME})
 endmacro()
 macro(add_avif_internal_gtest TEST_NAME)
     add_executable(${TEST_NAME} gtest/${TEST_NAME}.cc)
-    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers_internal GTest::gtest GTest::gtest_main ${ARGN})
+    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers_internal GTest::GTest GTest::Main ${ARGN})
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
     register_test_for_coverage(${TEST_NAME})
 endmacro()
 macro(add_avif_gtest_with_data TEST_NAME)
     add_executable(${TEST_NAME} gtest/${TEST_NAME}.cc)
-    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers GTest::gtest ${ARGN})
+    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers GTest::GTest ${ARGN})
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/data/)
     register_test_for_coverage(${TEST_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/data/)
 endmacro()
 macro(add_avif_internal_gtest_with_data TEST_NAME)
     add_executable(${TEST_NAME} gtest/${TEST_NAME}.cc)
-    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers_internal GTest::gtest ${ARGN})
+    target_link_libraries(${TEST_NAME} PRIVATE aviftest_helpers_internal GTest::GTest ${ARGN})
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/data/)
     register_test_for_coverage(${TEST_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/data/)
 endmacro()
 
 if(AVIF_ENABLE_GTEST)
-    check_avif_option(AVIF_GTEST TARGET GTest::gtest PKG_NAME Googletest)
+    check_avif_option(AVIF_GTEST TARGET GTest::GTest PKG_NAME GTest)
     add_library(avifincrtest_helpers OBJECT gtest/avifincrtest_helpers.cc)
-    target_link_libraries(avifincrtest_helpers avif_internal GTest::gtest)
+    target_link_libraries(avifincrtest_helpers avif GTest::GTest)
+    add_library(avifincrtest_helpers_internal OBJECT gtest/avifincrtest_helpers.cc)
+    target_link_libraries(avifincrtest_helpers_internal avif_internal GTest::GTest)
 endif()
 
 if(AVIF_ENABLE_GTEST)
     if(AVIF_ENABLE_EXPERIMENTAL_SAMPLE_TRANSFORM)
-        add_avif_gtest_with_data(avif16bittest)
-        add_avif_gtest(avifsampletransformtest)
+        add_avif_internal_gtest_with_data(avif16bittest)
+        add_avif_internal_gtest(avifsampletransformtest)
     endif()
 
     add_avif_gtest(avifallocationtest)
@@ -110,10 +114,11 @@ if(AVIF_ENABLE_GTEST)
     add_avif_internal_gtest_with_data(avifcolrconverttest)
     add_avif_internal_gtest(avifcolrtest)
     add_avif_gtest_with_data(avifdecodetest)
+    add_avif_gtest_with_data(avifdimgtest avifincrtest_helpers)
     add_avif_gtest_with_data(avifencodetest)
 
     if(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
-        add_avif_internal_gtest_with_data(avifgainmaptest avifincrtest_helpers)
+        add_avif_internal_gtest_with_data(avifgainmaptest avifincrtest_helpers_internal)
 
         if(AVIF_ENABLE_EXPERIMENTAL_JPEG_GAIN_MAP_CONVERSION)
             add_avif_gtest_with_data(avifjpeggainmaptest)
@@ -343,6 +348,7 @@ if(AVIF_CODEC_AVM_ENABLED)
                 avifchangesettingtest
                 avifcllitest
                 avifcolrconverttest
+                avifdimgtest
                 avifencodetest
                 avifgridapitest
                 avifincrtest

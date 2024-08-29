@@ -28,9 +28,9 @@ class AvifExpression : public avifSampleTransformExpression {
     token.type = AVIF_SAMPLE_TRANSFORM_INPUT_IMAGE_ITEM_INDEX;
     token.inputImageItemIndex = inputImageItemIndex;
   }
-  void AddOperator(uint8_t op) {
+  void AddOperator(avifSampleTransformTokenType op) {
     avifSampleTransformToken& token = AddToken();
-    token.type = op;
+    token.type = static_cast<uint8_t>(op);
   }
 
   int32_t Apply() const {

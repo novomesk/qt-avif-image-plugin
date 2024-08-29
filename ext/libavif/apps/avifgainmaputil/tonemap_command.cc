@@ -52,7 +52,7 @@ avifResult TonemapCommand::Run() {
   avifContentLightLevelInformationBox clli_box = {};
   bool clli_set = false;
   if (arg_clli_str_.value().size() > 0) {
-    std::vector<uint32_t> clli;
+    std::vector<uint16_t> clli;
     if (!ParseList(arg_clli_str_, ',', 2, &clli)) {
       std::cerr << "Invalid clli values, expected format: maxCLL,maxPALL where "
                    "both maxCLL and maxPALL are positive integers, got: "
@@ -129,9 +129,9 @@ avifResult TonemapCommand::Run() {
   }
   if (cicp.transfer_characteristics ==
       AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED) {
-    cicp.transfer_characteristics = tone_mapping_to_hdr
-                                        ? AVIF_TRANSFER_CHARACTERISTICS_PQ
-                                        : AVIF_TRANSFER_CHARACTERISTICS_SRGB;
+    cicp.transfer_characteristics = static_cast<avifTransferCharacteristics>(
+        tone_mapping_to_hdr ? AVIF_TRANSFER_CHARACTERISTICS_PQ
+                            : AVIF_TRANSFER_CHARACTERISTICS_SRGB);
   }
 
   // Determine output depth.

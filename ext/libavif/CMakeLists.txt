@@ -14,6 +14,14 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # valid for DOWNLOAD_EXTRACT_TIMESTAMP option in CMake 3.24 and later
 endif()
 
+# New in CMake version 3.30. FetchContent_Populate(<name>) is deprecated, call
+# FetchContent_MakeAvailable(<name>) instead.
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif()
+
+project(libavif LANGUAGES C VERSION 1.1.1)
+
 # The root directory of the avif source
 set(AVIF_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -24,8 +32,6 @@ include(ExternalProject)
 include(FetchContent)
 include(FindPkgConfig)
 include(AvifExternalProjectUtils)
-
-project(libavif LANGUAGES C VERSION 1.1.0)
 
 # Set C99 as the default
 set(CMAKE_C_STANDARD 99)
@@ -39,7 +45,7 @@ set(CMAKE_C_STANDARD 99)
 #     Increment PATCH.
 set(LIBRARY_VERSION_MAJOR 16)
 set(LIBRARY_VERSION_MINOR 1)
-set(LIBRARY_VERSION_PATCH 0)
+set(LIBRARY_VERSION_PATCH 1)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
 set(LIBRARY_SOVERSION ${LIBRARY_VERSION_MAJOR})
 
@@ -116,27 +122,31 @@ set_local_or_system_option(
     "GTEST" OFF
     "Build the GoogleTest framework by providing your own copy of the repo in ext/googletest (see Local Builds in README)"
 )
-option(AVIF_LOCAL_FUZZTEST
-       "Build the Google FuzzTest framework by providing your own copy of the repo in ext/fuzztest (see Local Builds in README)"
-       OFF
-)
-
+option(AVIF_BUILD_APPS "Build avif apps." OFF)
+option(AVIF_BUILD_TESTS "Build avif tests." OFF)
 option(
     AVIF_ENABLE_COMPLIANCE_WARDEN
     "Check all avifEncoderFinish() output for AVIF specification compliance. Depends on gpac/ComplianceWarden which can be added with ext/compliance_warden.sh"
     OFF
 )
-
-set(AVIF_USE_CXX OFF)
-
-if(AVIF_BUILD_APPS
-   OR AVIF_ENABLE_FUZZTEST
-   OR AVIF_ENABLE_GTEST
-   OR AVIF_CODEC_LIBGAV1 STREQUAL "LOCAL"
-   OR AVIF_CODEC_LIBGAV1 STREQUAL "SYSTEM"
+option(
+    AVIF_ENABLE_GOLDEN_TESTS
+    "Build tests that compare encoding outputs to golden files. Needs AVIF_BUILD_APPS=ON and AVIF_BUILD_TESTS=ON, and depends on MP4box which can be built with ext/mp4box.sh"
+    OFF
 )
-    set(AVIF_USE_CXX ON)
-endif()
+option(AVIF_ENABLE_GTEST
+       "Build avif C++ tests, which depend on GoogleTest. Requires GoogleTest. Has no effect unless AVIF_BUILD_TESTS is ON." ON
+)
+option(AVIF_ENABLE_FUZZTEST "Build avif fuzztest targets. Requires Google FuzzTest. Has no effect unless AVIF_BUILD_TESTS is ON."
+       OFF
+)
+option(AVIF_LOCAL_FUZZTEST
+       "Build the Google FuzzTest framework by providing your own copy of the repo in ext/fuzztest (see Local Builds in README)"
+       OFF
+)
+
+# Whether the libavif library uses c++ indirectly (e.g. through linking to libyuv).
+set(AVIF_LIB_USE_CXX OFF)
 
 if(APPLE)
     set(XCRUN xcrun)
@@ -156,8 +166,8 @@ add_library(avif_obj OBJECT)
 add_library(avif)
 
 # Adds <target> to avif_obj's public link libraries for build, and adds
-# the <target> library as an install link library for export if a consumer
-# would need to include that library alongside libavif when linking.
+# the <target> library as an install link library for export in case a consumer
+# needs to include that library alongside libavif when statically linking.
 function(avif_target_link_library target)
     target_link_libraries(avif_obj PUBLIC $<BUILD_INTERFACE:${target}>)
     get_target_property(target_is_local ${target} AVIF_LOCAL)
@@ -168,10 +178,8 @@ function(avif_target_link_library target)
     if(NOT install_target)
         set(install_target ${target})
     endif()
-    # The transitive dependency is an export link library if it is a shared
-    # library, or if it is a static library in a static build
-    get_target_property(target_type ${target} TYPE)
-    if(target_type STREQUAL "SHARED_LIBRARY" OR NOT BUILD_SHARED_LIBS)
+    # The transitive dependency needs to be an export link library in a static build.
+    if(NOT BUILD_SHARED_LIBS)
         target_link_libraries(avif PUBLIC $<INSTALL_INTERFACE:${install_target}>)
     endif()
 endfunction()
@@ -240,6 +248,7 @@ if(AVIF_LIBYUV_ENABLED)
     target_compile_definitions(avif_obj PRIVATE -DAVIF_LIBYUV_ENABLED=1)
     avif_target_link_library(yuv::yuv)
     set(AVIF_PKG_CONFIG_EXTRA_LIBS_PRIVATE "${AVIF_PKG_CONFIG_EXTRA_LIBS_PRIVATE} -lyuv")
+    set(AVIF_LIB_USE_CXX ON)
 endif(AVIF_LIBYUV_ENABLED)
 
 set_local_or_system_option("LIBSHARPYUV" "OFF" "Use libsharpyuv.")
@@ -263,40 +272,51 @@ endif()
 
 # Enable all warnings
 include(CheckCCompilerFlag)
-if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+if(MSVC)
+    message(STATUS "libavif: Enabling warnings for MSVC")
+    target_compile_options(
+        avif_obj
+        PUBLIC $<BUILD_INTERFACE: /W4 # For clang-cl, /W4 enables -Wall and -Wextra
+               /wd4324 # Disable: structure was padded due to alignment specifier
+               >
+    )
+    # clang-cl documentation says:
+    #   /execution-charset:<value>
+    #                           Runtime encoding, supports only UTF-8
+    #   ...
+    #   /source-charset:<value> Source encoding, supports only UTF-8
+    # So we don't need to pass /source-charset:utf-8 to clang-cl, and we cannot pass /execution-charset:us-ascii to clang-cl.
+    if(CMAKE_C_COMPILER_ID MATCHES "MSVC")
+        target_compile_options(
+            avif_obj
+            PUBLIC $<BUILD_INTERFACE:
+                   # This tells MSVC to read source code as UTF-8 and assume console can only use ASCII (minimal safe).
+                   # libavif uses ANSI API to print to console, which is not portable between systems using different
+                   # languages and results in mojibake unless we only use codes shared by every code page: ASCII.
+                   # A C4556 warning will be generated on violation.
+                   # Commonly used /utf-8 flag assumes UTF-8 for both source and console, which is usually not the case.
+                   # Warnings can be suppressed but there will still be random characters printed to the console.
+                   /source-charset:utf-8
+                   /execution-charset:us-ascii
+                   >
+        )
+    endif()
+elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
     message(STATUS "libavif: Enabling warnings for Clang")
     target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:-Wall -Wextra -Wshorten-64-to-32>)
 elseif(CMAKE_C_COMPILER_ID MATCHES "GNU")
     message(STATUS "libavif: Enabling warnings for GCC")
     target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:-Wall -Wextra>)
-elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
-    message(STATUS "libavif: Enabling warnings for MSVC")
-    target_compile_options(
-        avif_obj
-        PUBLIC $<BUILD_INTERFACE:
-               /W4
-               /wd4324 # Disable: structure was padded due to alignment specifier
-               /wd4996 # Disable: potentially unsafe stdlib methods
-               # This tells MSVC to read source code as UTF-8 and assume console can only use ASCII (minimal safe).
-               # libavif uses ANSI API to print to console, which is not portable between systems using different
-               # languages and results in mojibake unless we only use codes shared by every code page: ASCII.
-               # A C4556 warning will be generated on violation.
-               # Commonly used /utf-8 flag assumes UTF-8 for both source and console, which is usually not the case.
-               # Warnings can be suppressed but there will still be random characters printed to the console.
-               /source-charset:utf-8
-               /execution-charset:us-ascii
-               >
-    )
 else()
     message(FATAL_ERROR "libavif: Unknown compiler, bailing out")
 endif()
 
 if(AVIF_ENABLE_WERROR)
     # Warnings as errors
-    if(CMAKE_C_COMPILER_ID MATCHES "Clang" OR CMAKE_C_COMPILER_ID MATCHES "GNU")
-        target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:-Werror>)
-    elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
+    if(MSVC)
         target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:/WX>)
+    elseif(CMAKE_C_COMPILER_ID MATCHES "Clang" OR CMAKE_C_COMPILER_ID MATCHES "GNU")
+        target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:-Werror>)
     else()
         message(FATAL_ERROR "libavif: Unknown compiler, bailing out")
     endif()
@@ -309,9 +329,12 @@ if(AVIF_ENABLE_NODISCARD)
     else()
         unset(CMAKE_C_STANDARD)
         set_property(TARGET avif_obj PROPERTY C_STANDARD)
-        target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:C>:-std=gnu2x>>)
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang" OR CMAKE_C_COMPILER_ID MATCHES "GNU")
+            target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:C>:-std=gnu2x>>)
+        elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
+            target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:C>:/std:clatest>>)
+        endif()
     endif()
-    target_compile_options(avif_obj PUBLIC $<BUILD_INTERFACE:-Wunused-result>)
     target_compile_definitions(avif_obj PUBLIC $<BUILD_INTERFACE:AVIF_ENABLE_NODISCARD=1>)
 endif()
 
@@ -326,6 +349,13 @@ if(AVIF_ENABLE_COVERAGE)
         message(WARNING "libavif: Ignoring request for coverage (AVIF_ENABLE_COVERAGE); only clang is currently supported.")
         set(AVIF_ENABLE_COVERAGE OFF)
     endif()
+endif()
+
+if(MSVC)
+    # Disable deprecation warnings about POSIX function names such as setmode (replaced by the ISO C and C++ conformant name _setmode).
+    add_compile_definitions(_CRT_NONSTDC_NO_WARNINGS)
+    # Disable deprecation warnings about unsafe CRT library functions such as fopen (replaced by fopen_s).
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
 if(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
@@ -376,7 +406,7 @@ if(AVIF_ENABLE_COMPLIANCE_WARDEN)
         message(FATAL_ERROR "AVIF_ENABLE_COMPLIANCE_WARDEN: ext/ComplianceWarden is missing, bailing out")
     endif()
 
-    set(AVIF_USE_CXX ON)
+    set(AVIF_LIB_USE_CXX ON)
     target_compile_definitions(avif_obj PRIVATE AVIF_ENABLE_COMPLIANCE_WARDEN)
 
     list(
@@ -456,6 +486,7 @@ endif()
 
 check_avif_option(AVIF_CODEC_LIBGAV1 TARGET libgav1::libgav1 PKG_NAME libgav1)
 if(AVIF_CODEC_LIBGAV1_ENABLED)
+    set(AVIF_LIB_USE_CXX ON)
     target_compile_definitions(avif_obj PRIVATE -DAVIF_CODEC_LIBGAV1=1)
     target_sources(avif_obj PRIVATE src/codec_libgav1.c)
     avif_target_link_library(libgav1::libgav1)
@@ -518,6 +549,11 @@ if(AVIF_CODEC_AOM_ENABLED)
 
     message(STATUS "libavif: Codec enabled: aom (${AVIF_CODEC_AOM_ENCODE_DECODE_CONFIG})")
     set(AVIF_PKG_CONFIG_EXTRA_REQUIRES_PRIVATE "${AVIF_PKG_CONFIG_EXTRA_REQUIRES_PRIVATE} aom")
+
+    get_target_property(AOM_INTERFACE_LINK_LIBRARIES aom INTERFACE_LINK_LIBRARIES)
+    if(AOM_INTERFACE_LINK_LIBRARIES MATCHES vmaf)
+        set(AVIF_LIB_USE_CXX ON)
+    endif()
 endif()
 
 check_avif_option(AVIF_CODEC_AVM TARGET aom PKG_NAME avm)
@@ -546,6 +582,17 @@ if(NOT AVIF_CODEC_AOM_ENABLED
     message(WARNING "libavif: No decoding library is enabled.")
 endif()
 
+if(AVIF_LIB_USE_CXX OR (AVIF_BUILD_APPS AND AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP) OR (AVIF_BUILD_TESTS AND (AVIF_ENABLE_FUZZTEST
+                                                                                                         OR AVIF_ENABLE_GTEST))
+)
+    enable_language(CXX)
+    if(AVIF_ENABLE_NODISCARD)
+        set(CMAKE_CXX_STANDARD 17)
+    else()
+        set(CMAKE_CXX_STANDARD 14)
+    endif()
+endif()
+
 set_target_properties(avif_obj PROPERTIES C_VISIBILITY_PRESET hidden)
 target_include_directories(avif_obj PUBLIC $<BUILD_INTERFACE:${libavif_SOURCE_DIR}/include>)
 if(NOT AVIF_LIBYUV_ENABLED)
@@ -566,7 +613,7 @@ target_link_libraries(avif PRIVATE avif_obj)
 target_include_directories(avif PUBLIC $<BUILD_INTERFACE:${libavif_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 if(BUILD_SHARED_LIBS)
     target_compile_definitions(avif INTERFACE AVIF_DLL)
-    if(AVIF_USE_CXX)
+    if(AVIF_LIB_USE_CXX)
         set_target_properties(avif PROPERTIES LINKER_LANGUAGE "CXX")
     endif()
 endif()
@@ -597,7 +644,7 @@ if(AVIF_BUILD_EXAMPLES)
 
     foreach(EXAMPLE ${AVIF_EXAMPLES})
         add_executable(${EXAMPLE} examples/${EXAMPLE}.c)
-        if(AVIF_USE_CXX)
+        if(AVIF_LIB_USE_CXX)
             set_target_properties(${EXAMPLE} PROPERTIES LINKER_LANGUAGE "CXX")
         endif()
         target_link_libraries(${EXAMPLE} avif)
@@ -611,35 +658,6 @@ endif()
 if(NOT SKIP_INSTALL_ALL)
     include(GNUInstallDirs)
 endif()
-
-if(AVIF_CODEC_AOM_ENABLED)
-    get_target_property(AOM_INTERFACE_LINK_LIBRARIES aom INTERFACE_LINK_LIBRARIES)
-    if(AOM_INTERFACE_LINK_LIBRARIES MATCHES vmaf)
-        # vmaf only affects the avifenc and avifdec targets below, not the avif library nor examples targets.
-        set(AVIF_USE_CXX ON)
-    endif()
-endif()
-
-if(AVIF_USE_CXX)
-    enable_language(CXX)
-    set(CMAKE_CXX_STANDARD 14)
-endif()
-
-option(AVIF_BUILD_APPS "Build avif apps." OFF)
-option(AVIF_BUILD_TESTS "Build avif tests." OFF)
-option(
-    AVIF_ENABLE_GOLDEN_TESTS
-    "Build tests that compare encoding outputs to golden files. Needs AVIF_BUILD_APPS=ON, and depends on MP4box which can be built with ext/mp4box.sh"
-    OFF
-)
-option(AVIF_ENABLE_GTEST
-       "Build avif C++ tests, which depend on GoogleTest. Requires GoogleTest. Has no effect unless AVIF_BUILD_TESTS is ON." ON
-)
-option(
-    AVIF_ENABLE_FUZZTEST
-    "Build avif fuzztest targets. Requires Google FuzzTest. Has no effect unless AVIF_BUILD_TESTS and AVIF_ENABLE_GTEST are ON."
-    OFF
-)
 
 if(AVIF_BUILD_APPS OR (AVIF_BUILD_TESTS AND (AVIF_ENABLE_FUZZTEST OR AVIF_ENABLE_GTEST)))
     if(AVIF_ZLIBPNG STREQUAL "OFF")
@@ -655,8 +673,8 @@ if(AVIF_BUILD_APPS OR (AVIF_BUILD_TESTS AND (AVIF_ENABLE_FUZZTEST OR AVIF_ENABLE
     endif()
 
     add_library(
-        avif_apps_obj OBJECT $<TARGET_OBJECTS:avif_obj> apps/shared/avifexif.c apps/shared/avifjpeg.c apps/shared/avifpng.c
-                             apps/shared/avifutil.c apps/shared/iccmaker.c apps/shared/y4m.c third_party/iccjpeg/iccjpeg.c
+        avif_apps_obj OBJECT apps/shared/avifexif.c apps/shared/avifjpeg.c apps/shared/avifpng.c apps/shared/avifutil.c
+                             apps/shared/iccmaker.c apps/shared/y4m.c third_party/iccjpeg/iccjpeg.c
     )
     # Instead of building avif_apps/avif_apps_internal and linking to avif/avif_internal, avif_apps_obj only does one compilation.
     # Still, the compile definitions needs to be passed from avif to avif_apps. The following also passes them to avif_apps_internal but AVIF_DLL does not impact avif_apps_internal.
@@ -713,7 +731,7 @@ if(AVIF_BUILD_APPS)
             target_link_options(avifenc PRIVATE /MANIFEST:NO)
         endif()
     endif()
-    if(AVIF_USE_CXX)
+    if(AVIF_LIB_USE_CXX)
         set_target_properties(avifenc PROPERTIES LINKER_LANGUAGE "CXX")
     endif()
     target_link_libraries(avifenc avif_apps)
@@ -724,7 +742,7 @@ if(AVIF_BUILD_APPS)
             target_link_options(avifdec PRIVATE /MANIFEST:NO)
         endif()
     endif()
-    if(AVIF_USE_CXX)
+    if(AVIF_LIB_USE_CXX)
         set_target_properties(avifdec PROPERTIES LINKER_LANGUAGE "CXX")
     endif()
     target_link_libraries(avifdec avif_apps)
@@ -770,6 +788,18 @@ endif()
 if(AVIF_BUILD_TESTS)
     enable_testing() # Allow ctest to be called from top-level directory.
     add_subdirectory(tests)
+    # An executable on Windows searches for DLLs it is linked with in the same
+    # directory where it resides and in the directories listed in the Path
+    # environment variable. For convenience, copy avif.dll to the tests binary
+    # directory to allow are_images_equal.exe and the test programs find it.
+    if(WIN32 AND BUILD_SHARED_LIBS)
+        add_custom_command(
+            TARGET avif
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:avif>" ${CMAKE_CURRENT_BINARY_DIR}/tests
+            COMMENT "Copying avif.dll to the tests binary directory"
+        )
+    endif()
 endif()
 
 option(AVIF_BUILD_MAN_PAGES "Build avif man pages." OFF)
