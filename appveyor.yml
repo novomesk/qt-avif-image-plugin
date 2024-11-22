@@ -6,7 +6,7 @@ install:
 - cmd: >-
     call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 
-    appveyor DownloadFile "https://github.com/joedrago/nasm_mirror/raw/master/nasm-2.15.05-win64.zip" -FileName "nasm.zip"
+    appveyor DownloadFile "https://github.com/novomesk/downloads/raw/main/nasm-2.16.03-win64.zip" -FileName "nasm.zip"
 
     7z x "nasm.zip"
 
