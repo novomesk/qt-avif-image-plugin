@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2017, Alliance for Open Media. All rights reserved
+# Copyright (c) 2017, Alliance for Open Media. All rights reserved.
 #
 # This source code is subject to the terms of the BSD 2 Clause License and the
 # Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License was
@@ -28,8 +28,7 @@ function(add_to_libaom_test_srcs src_list_name)
   set(AOM_TEST_SOURCE_VARS "${AOM_TEST_SOURCE_VARS}" PARENT_SCOPE)
 endfunction()
 
-list(APPEND AOM_UNIT_TEST_WRAPPER_SOURCES "${AOM_GEN_SRC_DIR}/usage_exit.c"
-            "${AOM_ROOT}/test/test_libaom.cc")
+list(APPEND AOM_UNIT_TEST_WRAPPER_SOURCES "${AOM_ROOT}/test/test_libaom.cc")
 add_to_libaom_test_srcs(AOM_UNIT_TEST_WRAPPER_SOURCES)
 
 list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
@@ -87,7 +86,6 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/horz_superres_test.cc"
             "${AOM_ROOT}/test/i420_video_source.h"
             "${AOM_ROOT}/test/level_test.cc"
-            "${AOM_ROOT}/test/metadata_test.cc"
             "${AOM_ROOT}/test/monochrome_test.cc"
             "${AOM_ROOT}/test/postproc_filters_test.cc"
             "${AOM_ROOT}/test/resize_test.cc"
@@ -102,7 +100,7 @@ add_to_libaom_test_srcs(AOM_UNIT_TEST_ENCODER_SOURCES)
 list(APPEND AOM_ENCODE_PERF_TEST_SOURCES "${AOM_ROOT}/test/encode_perf_test.cc")
 list(APPEND AOM_UNIT_TEST_WEBM_SOURCES "${AOM_ROOT}/test/webm_video_source.h")
 add_to_libaom_test_srcs(AOM_UNIT_TEST_WEBM_SOURCES)
-list(APPEND AOM_TEST_INTRA_PRED_SPEED_SOURCES "${AOM_GEN_SRC_DIR}/usage_exit.c"
+list(APPEND AOM_TEST_INTRA_PRED_SPEED_SOURCES
             "${AOM_ROOT}/test/test_intra_pred_speed.cc")
 
 if(CONFIG_AV1_DECODER)
@@ -133,7 +131,6 @@ if(CONFIG_REALTIME_ONLY)
                    "${AOM_ROOT}/test/gf_pyr_height_test.cc"
                    "${AOM_ROOT}/test/horz_superres_test.cc"
                    "${AOM_ROOT}/test/level_test.cc"
-                   "${AOM_ROOT}/test/metadata_test.cc"
                    "${AOM_ROOT}/test/monochrome_test.cc"
                    "${AOM_ROOT}/test/postproc_filters_test.cc"
                    "${AOM_ROOT}/test/sharpness_test.cc")
@@ -143,6 +140,7 @@ if(NOT BUILD_SHARED_LIBS)
   list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
               "${AOM_ROOT}/test/aom_mem_test.cc"
               "${AOM_ROOT}/test/av1_common_int_test.cc"
+              "${AOM_ROOT}/test/av1_scale_test.cc"
               "${AOM_ROOT}/test/cdef_test.cc"
               "${AOM_ROOT}/test/cfl_test.cc"
               "${AOM_ROOT}/test/convolve_test.cc"
@@ -154,8 +152,15 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/lpf_test.cc"
               "${AOM_ROOT}/test/scan_test.cc"
               "${AOM_ROOT}/test/selfguided_filter_test.cc"
-              "${AOM_ROOT}/test/simd_cmp_impl.h"
+              "${AOM_ROOT}/test/simd_cmp_impl.inc"
               "${AOM_ROOT}/test/simd_impl.h")
+
+  if(CONFIG_REALTIME_ONLY AND NOT CONFIG_AV1_DECODER)
+    list(REMOVE_ITEM AOM_UNIT_TEST_COMMON_SOURCES "${AOM_ROOT}/test/cfl_test.cc"
+                     "${AOM_ROOT}/test/hiprec_convolve_test.cc"
+                     "${AOM_ROOT}/test/hiprec_convolve_test_util.cc"
+                     "${AOM_ROOT}/test/hiprec_convolve_test_util.h")
+  endif()
 
   if(HAVE_SSE2)
     list(APPEND AOM_UNIT_TEST_COMMON_INTRIN_SSE2
@@ -199,7 +204,6 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/blend_a64_mask_1d_test.cc"
               "${AOM_ROOT}/test/blend_a64_mask_test.cc"
               "${AOM_ROOT}/test/comp_avg_pred_test.cc"
-              "${AOM_ROOT}/test/comp_avg_pred_test.h"
               "${AOM_ROOT}/test/comp_mask_pred_test.cc"
               "${AOM_ROOT}/test/disflow_test.cc"
               "${AOM_ROOT}/test/encodemb_test.cc"
@@ -210,15 +214,16 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/fdct4x4_test.cc"
               "${AOM_ROOT}/test/fft_test.cc"
               "${AOM_ROOT}/test/firstpass_test.cc"
+              "${AOM_ROOT}/test/frame_resize_test.cc"
               "${AOM_ROOT}/test/fwht4x4_test.cc"
               "${AOM_ROOT}/test/hadamard_test.cc"
               "${AOM_ROOT}/test/horver_correlation_test.cc"
               "${AOM_ROOT}/test/masked_sad_test.cc"
               "${AOM_ROOT}/test/masked_variance_test.cc"
+              "${AOM_ROOT}/test/metadata_test.cc"
               "${AOM_ROOT}/test/minmax_test.cc"
               "${AOM_ROOT}/test/motion_vector_test.cc"
               "${AOM_ROOT}/test/mv_cost_test.cc"
-              "${AOM_ROOT}/test/noise_model_test.cc"
               "${AOM_ROOT}/test/obmc_sad_test.cc"
               "${AOM_ROOT}/test/obmc_variance_test.cc"
               "${AOM_ROOT}/test/pickrst_test.cc"
@@ -261,6 +266,7 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/film_grain_table_test.cc"
                 "${AOM_ROOT}/test/kf_test.cc"
                 "${AOM_ROOT}/test/lossless_test.cc"
+                "${AOM_ROOT}/test/noise_model_test.cc"
                 "${AOM_ROOT}/test/quant_test.cc"
                 "${AOM_ROOT}/test/ratectrl_test.cc"
                 "${AOM_ROOT}/test/rd_test.cc"
@@ -283,11 +289,14 @@ if(NOT BUILD_SHARED_LIBS)
                      "${AOM_ROOT}/test/altref_test.cc"
                      "${AOM_ROOT}/test/av1_encoder_parms_get_to_decoder.cc"
                      "${AOM_ROOT}/test/av1_ext_tile_test.cc"
+                     "${AOM_ROOT}/test/binary_codes_test.cc"
                      "${AOM_ROOT}/test/cnn_test.cc"
                      "${AOM_ROOT}/test/decode_multithreaded_test.cc"
                      "${AOM_ROOT}/test/error_resilience_test.cc"
+                     "${AOM_ROOT}/test/film_grain_table_test.cc"
                      "${AOM_ROOT}/test/kf_test.cc"
                      "${AOM_ROOT}/test/lossless_test.cc"
+                     "${AOM_ROOT}/test/noise_model_test.cc"
                      "${AOM_ROOT}/test/sb_multipass_test.cc"
                      "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
                      "${AOM_ROOT}/test/selfguided_filter_test.cc"
@@ -406,8 +415,11 @@ if(ENABLE_TESTS)
     aom_gtest STATIC
     "${AOM_ROOT}/third_party/googletest/src/googletest/src/gtest-all.cc")
   set_property(TARGET aom_gtest PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
+  # There are -Wundef warnings in the gtest headers. Tell the compiler to treat
+  # the gtest include directories as system include directories and suppress
+  # compiler warnings in the gtest headers.
   target_include_directories(
-    aom_gtest
+    aom_gtest SYSTEM
     PUBLIC "${AOM_ROOT}/third_party/googletest/src/googletest/include"
     PRIVATE "${AOM_ROOT}/third_party/googletest/src/googletest")
 
@@ -420,16 +432,6 @@ if(ENABLE_TESTS)
       target_compile_definitions(aom_gtest PUBLIC GTEST_HAS_PTHREAD=0)
     endif()
   endif()
-
-  add_library(
-    aom_gmock STATIC
-    "${AOM_ROOT}/third_party/googletest/src/googlemock/src/gmock-all.cc")
-  set_property(TARGET aom_gmock PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
-  target_include_directories(
-    aom_gmock
-    PUBLIC "${AOM_ROOT}/third_party/googletest/src/googlemock/include"
-    PRIVATE "${AOM_ROOT}/third_party/googletest/src/googlemock")
-  target_link_libraries(aom_gmock ${AOM_LIB_LINK_TYPE} aom_gtest)
 endif()
 
 # Setup testdata download targets, test build targets, and test run targets. The
@@ -462,6 +464,7 @@ function(setup_aom_test_targets)
 
   add_executable(test_libaom ${AOM_UNIT_TEST_WRAPPER_SOURCES}
                              $<TARGET_OBJECTS:aom_common_app_util>
+                             $<TARGET_OBJECTS:aom_usage_exit>
                              $<TARGET_OBJECTS:test_aom_common>)
   set_property(TARGET test_libaom PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
   list(APPEND AOM_APP_TARGETS test_libaom)
@@ -484,9 +487,9 @@ function(setup_aom_test_targets)
     endif()
 
     if(NOT BUILD_SHARED_LIBS)
-      add_executable(test_intra_pred_speed
-                     ${AOM_TEST_INTRA_PRED_SPEED_SOURCES}
-                     $<TARGET_OBJECTS:aom_common_app_util>)
+      add_executable(test_intra_pred_speed ${AOM_TEST_INTRA_PRED_SPEED_SOURCES}
+                                           $<TARGET_OBJECTS:aom_common_app_util>
+                                           $<TARGET_OBJECTS:aom_usage_exit>)
       set_property(TARGET test_intra_pred_speed
                    PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
       target_link_libraries(test_intra_pred_speed ${AOM_LIB_LINK_TYPE} aom
@@ -634,11 +637,9 @@ function(setup_aom_test_targets)
   if(CONFIG_AV1_ENCODER
      AND ENABLE_TESTS
      AND CONFIG_WEBM_IO
-     AND NOT BUILD_SHARED_LIBS
      AND NOT CONFIG_REALTIME_ONLY)
     add_executable(test_aom_rc ${AOM_RC_TEST_SOURCES})
-    target_link_libraries(test_aom_rc ${AOM_LIB_LINK_TYPE} aom aom_av1_rc
-                          aom_gtest aom_gmock webm)
+    target_link_libraries(test_aom_rc ${AOM_LIB_LINK_TYPE} aom_av1_rc aom_gtest)
     set_property(TARGET test_aom_rc PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
     list(APPEND AOM_APP_TARGETS test_aom_rc)
   endif()

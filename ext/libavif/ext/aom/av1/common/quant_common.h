@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2016, Alliance for Open Media. All rights reserved.
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -54,16 +54,13 @@ bool av1_use_qmatrix(const struct CommonQuantParams *quant_params,
 
 // Reduce the large number of quantizers to a smaller number of levels for which
 // different matrices may be defined
-static INLINE int aom_get_qmlevel(int qindex, int first, int last) {
+static inline int aom_get_qmlevel(int qindex, int first, int last) {
   return first + (qindex * (last + 1 - first)) / QINDEX_RANGE;
 }
 
 // Initialize all global quant/dequant matrices.
 void av1_qm_init(struct CommonQuantParams *quant_params, int num_planes);
 
-// Get global dequant matrix.
-const qm_val_t *av1_iqmatrix(const struct CommonQuantParams *quant_params,
-                             int qmlevel, int plane, TX_SIZE tx_size);
 // Get global quant matrix.
 const qm_val_t *av1_qmatrix(const struct CommonQuantParams *quant_params,
                             int qmlevel, int plane, TX_SIZE tx_size);

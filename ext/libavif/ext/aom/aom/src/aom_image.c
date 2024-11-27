@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2016, Alliance for Open Media. All rights reserved.
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -19,7 +19,7 @@
 #include "aom/internal/aom_image_internal.h"
 #include "aom_mem/aom_mem.h"
 
-static INLINE unsigned int align_image_dimension(unsigned int d,
+static inline unsigned int align_image_dimension(unsigned int d,
                                                  unsigned int subsampling,
                                                  unsigned int size_align) {
   unsigned int align;
@@ -182,7 +182,9 @@ static aom_image_t *img_alloc_helper(
 
   /* Default viewport to entire image. (This aom_img_set_rect call always
    * succeeds.) */
-  aom_img_set_rect(img, 0, 0, d_w, d_h, border);
+  int ret = aom_img_set_rect(img, 0, 0, d_w, d_h, border);
+  assert(ret == 0);
+  (void)ret;
   return img;
 
 fail:

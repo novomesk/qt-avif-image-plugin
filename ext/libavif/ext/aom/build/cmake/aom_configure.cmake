@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2016, Alliance for Open Media. All rights reserved
+# Copyright (c) 2016, Alliance for Open Media. All rights reserved.
 #
 # This source code is subject to the terms of the BSD 2 Clause License and the
 # Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License was
@@ -190,7 +190,7 @@ elseif(AOM_TARGET_CPU MATCHES "arm")
     set(AOM_AS_FLAGS -arch ${AOM_TARGET_CPU} -isysroot ${CMAKE_OSX_SYSROOT})
   elseif(AOM_TARGET_SYSTEM STREQUAL "Windows")
     if(NOT CMAKE_ASM_COMPILER)
-      set(CMAKE_ASM_COMPILER ${CMAKE_C_COMPILER} -c -mimplicit-it=always)
+      set(CMAKE_ASM_COMPILER ${CMAKE_C_COMPILER} "-c -mimplicit-it=always")
     endif()
   else()
     if(NOT CMAKE_ASM_COMPILER)
@@ -249,9 +249,6 @@ endif()
 # Fix CONFIG_* dependencies. This must be done before including cpu.cmake to
 # ensure RTCD_CONFIG_* are properly set.
 fix_experiment_configs()
-
-# Test compiler support.
-aom_get_inline("INLINE")
 
 # Don't just check for pthread.h, but use the result of the full pthreads
 # including a linking check in FindThreads above.
@@ -346,12 +343,19 @@ else()
   add_compiler_flag_if_supported("-Wformat=2")
   add_c_flag_if_supported("-Wimplicit-function-declaration")
   add_compiler_flag_if_supported("-Wlogical-op")
+  add_compiler_flag_if_supported("-Wmissing-declarations")
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    add_compiler_flag_if_supported("-Wmissing-prototypes")
+  else()
+    add_c_flag_if_supported("-Wmissing-prototypes")
+  endif()
   add_compiler_flag_if_supported("-Wpointer-arith")
   add_compiler_flag_if_supported("-Wshadow")
   add_compiler_flag_if_supported("-Wshorten-64-to-32")
   add_compiler_flag_if_supported("-Wsign-compare")
   add_compiler_flag_if_supported("-Wstring-conversion")
   add_compiler_flag_if_supported("-Wtype-limits")
+  add_compiler_flag_if_supported("-Wundef")
   add_compiler_flag_if_supported("-Wuninitialized")
   add_compiler_flag_if_supported("-Wunreachable-code-aggressive")
   add_compiler_flag_if_supported("-Wunused")
@@ -378,9 +382,6 @@ else()
     # Disable no optimization warning when compiling with sanitizers
     add_compiler_flag_if_supported("-Wno-disabled-optimization")
   endif()
-
-  # Add -Wundef only for C files to avoid massive gtest warning spam.
-  add_c_flag_if_supported("-Wundef")
 
   # Quiet gcc 6 vs 7 abi warnings:
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=77728

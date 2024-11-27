@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2021, Alliance for Open Media. All rights reserved.
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -148,7 +148,7 @@ void aom_upsampled_pred_sse2(MACROBLOCKD *xd, const struct AV1Common *const cm,
 }
 
 #if CONFIG_AV1_HIGHBITDEPTH
-static INLINE void highbd_compute_dist_wtd_comp_avg(__m128i *p0, __m128i *p1,
+static inline void highbd_compute_dist_wtd_comp_avg(__m128i *p0, __m128i *p1,
                                                     const __m128i *w0,
                                                     const __m128i *w1,
                                                     const __m128i *r,

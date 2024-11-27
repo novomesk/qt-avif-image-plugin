@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2018, Alliance for Open Media. All rights reserved.
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -12,7 +12,7 @@
 #include <tuple>
 #include <vector>
 
-#include "third_party/googletest/src/googletest/include/gtest/gtest.h"
+#include "gtest/gtest.h"
 
 #include "config/av1_rtcd.h"
 
@@ -300,6 +300,11 @@ TEST_P(LowBDConvolveHorizRSTest, DISABLED_Speed) { SpeedTest(); }
 
 INSTANTIATE_TEST_SUITE_P(C, LowBDConvolveHorizRSTest,
                          ::testing::Values(av1_convolve_horiz_rs_c));
+
+#if HAVE_NEON
+INSTANTIATE_TEST_SUITE_P(NEON, LowBDConvolveHorizRSTest,
+                         ::testing::Values(av1_convolve_horiz_rs_neon));
+#endif
 
 #if HAVE_SSE4_1
 INSTANTIATE_TEST_SUITE_P(SSE4_1, LowBDConvolveHorizRSTest,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Alliance for Open Media. All rights reserved
+ * Copyright (c) 2019, Alliance for Open Media. All rights reserved.
  *
  * This source code is subject to the terms of the BSD 2 Clause License and
  * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
@@ -31,9 +31,9 @@ typedef struct {
   int th_step;
 } CONVOLVE_OPS;
 
-static INLINE float softsign(float x) { return x / (fabsf(x) + 1.0f); }
+static inline float softsign(float x) { return x / (fabsf(x) + 1.0f); }
 
-static INLINE float relu(float x) { return (x < 0) ? 0 : x; }
+static inline float relu(float x) { return (x < 0) ? 0 : x; }
 
 typedef struct {
   int allocsize;
@@ -138,14 +138,16 @@ static bool concat_tensor(const TENSOR *src, TENSOR *dst) {
   return true;
 }
 
-int check_tensor_equal_dims(TENSOR *t1, TENSOR *t2) {
+#ifndef NDEBUG
+static int check_tensor_equal_dims(TENSOR *t1, TENSOR *t2) {
   return (t1->width == t2->width && t1->height == t2->height);
 }
 
-int check_tensor_equal_size(TENSOR *t1, TENSOR *t2) {
+static int check_tensor_equal_size(TENSOR *t1, TENSOR *t2) {
   return (t1->channels == t2->channels && t1->width == t2->width &&
           t1->height == t2->height);
 }
+#endif  // NDEBUG
 
 void av1_find_cnn_layer_output_size(int in_width, int in_height,
                                     const CNN_LAYER_CONFIG *layer_config,
@@ -189,8 +191,8 @@ void av1_find_cnn_layer_output_size(int in_width, int in_height,
   }
 }
 
-void find_cnn_out_channels(const CNN_LAYER_CONFIG *layer_config,
-                           int channels_per_branch[]) {
+static void find_cnn_out_channels(const CNN_LAYER_CONFIG *layer_config,
+                                  int channels_per_branch[]) {
   int branch = layer_config->branch;
   const CNN_BRANCH_CONFIG *branch_config = &layer_config->branch_config;
   for (int b = 0; b < CNN_MAX_BRANCHES; ++b) {
@@ -220,7 +222,7 @@ void find_cnn_out_channels(const CNN_LAYER_CONFIG *layer_config,
 }
 
 #if CONFIG_DEBUG
-static INLINE int cnn_has_at_least_one_output(const CNN_CONFIG *cnn_config) {
+static inline int cnn_has_at_least_one_output(const CNN_CONFIG *cnn_config) {
   const int num_layers = cnn_config->num_layers;
   const CNN_LAYER_CONFIG *layer_configs = cnn_config->layer_config;
 
@@ -287,7 +289,7 @@ void av1_find_cnn_output_size(int in_width, int in_height,
   }
 }
 
-static INLINE int get_start_shift_convolve(int width, int filt_width,
+static inline int get_start_shift_convolve(int width, int filt_width,
                                            int stride) {
   const int mod = (width % stride);
   const int filt_off = (filt_width - 1) / 2;
@@ -753,7 +755,7 @@ static void convolve_layer_mt(const float **input, int in_width, int in_height,
   }
 }
 
-static INLINE int get_start_shift_deconvolve(int filt_width, int stride) {
+static inline int get_start_shift_deconvolve(int filt_width, int stride) {
   const int dif = AOMMAX(filt_width - stride, 0);
   return dif / 2;
 }

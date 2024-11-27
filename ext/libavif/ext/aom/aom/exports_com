@@ -17,8 +17,6 @@ text aom_img_alloc_with_border
 text aom_img_flip
 text aom_img_free
 text aom_img_get_metadata
-text aom_img_metadata_array_free
-text aom_img_metadata_array_alloc
 text aom_img_metadata_free
 text aom_img_metadata_alloc
 text aom_img_num_metadata
@@ -39,4 +37,3 @@ text aom_uleb_size_in_bytes
 text aom_wb_bytes_written
 text aom_wb_write_bit
 text aom_wb_write_literal
-text aom_wb_write_unsigned_literal
