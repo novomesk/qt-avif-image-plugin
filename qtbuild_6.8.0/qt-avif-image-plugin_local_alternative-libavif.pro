@@ -6,7 +6,7 @@ OTHER_FILES = ../src/avif.json
 
 SOURCES += ../src/main.cpp
 
-LIBS += ../ext/libavif/build-ro/libavif.a ../ext/libavif/ext/dav1d/build/src/libdav1d.a ../ext/libavif/ext/libyuv/build/libyuv.a
+LIBS += ../ext/libavif/build/libavif.a ../ext/libavif/ext/aom/build.libavif/libaom.a ../ext/libavif/ext/dav1d/build/src/libdav1d.a ../ext/libavif/ext/libyuv/build/libyuv.a ../ext/libavif/ext/libwebp/build/libsharpyuv.a
 unix:LIBS += -ldl
 
 INCLUDEPATH += ../ext/libavif/include
@@ -21,4 +21,4 @@ QMAKE_TARGET_COMPANY = "Daniel Novomesky"
 QMAKE_TARGET_PRODUCT = "qt-avif-image-plugin"
 QMAKE_TARGET_DESCRIPTION = "Qt plug-in to allow Qt and KDE based applications to read/write AVIF images."
 QMAKE_TARGET_COPYRIGHT = "Copyright (C) 2020-2024 Daniel Novomesky"
-QMAKE_TARGET_COMMENTS = "Build using Qt 6.7.2, read-only AVIF support"
+QMAKE_TARGET_COMMENTS = "Build using Qt 6.8.0"

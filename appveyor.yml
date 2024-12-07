@@ -117,15 +117,15 @@ build_script:
 
     nmake.exe
 
-    cd ..\qtbuild_6.7.2
+    cd ..\qtbuild_6.8.0
 
-    C:\Qt\6.7.2\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
+    C:\Qt\6.8.0\msvc2022_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif.pro
 
     nmake.exe
 
-    cd ..\qtbuild_6.7.2-ro
+    cd ..\qtbuild_6.8.0-ro
 
-    C:\Qt\6.7.2\msvc2019_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
+    C:\Qt\6.8.0\msvc2022_64\bin\qmake.exe qt-avif-image-plugin_local_alternative-libavif-ro.pro
 
     nmake.exe
 
@@ -135,5 +135,5 @@ artifacts:
 - path: qtbuild_6.2.4\*.dll
 - path: qtbuild_6.5.3\*.dll
 - path: qtbuild_6.5.3-ro\*.dll
-- path: qtbuild_6.7.2\*.dll
-- path: qtbuild_6.7.2-ro\*.dll
+- path: qtbuild_6.8.0\*.dll
+- path: qtbuild_6.8.0-ro\*.dll
