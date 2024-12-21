@@ -276,11 +276,15 @@ bool QAVIFHandler::decode_one_frame()
     }
 
     bool loadalpha;
+    bool loadgray = false;
 
     if (m_decoder->image->alphaPlane) {
         loadalpha = true;
     } else {
         loadalpha = false;
+        if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
+            loadgray = true;
+        }
     }
 
     QImage::Format resultformat;
@@ -313,6 +317,38 @@ bool QAVIFHandler::decode_one_frame()
         if (!colorspace.isValid()) {
             qWarning("AVIF image has Qt-unsupported or invalid ICC profile!");
         }
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+        else {
+            if (colorspace.colorModel() == QColorSpace::ColorModel::Cmyk) {
+                qWarning("CMYK ICC profile is not extected for AVIF, discarding the ICCprofile!");
+                colorspace = QColorSpace();
+            } else if (colorspace.colorModel() == QColorSpace::ColorModel::Rgb && loadgray) {
+                // Input is GRAY but ICC is RGB, we will return RGB image
+                loadgray = false;
+            } else if (colorspace.colorModel() == QColorSpace::ColorModel::Gray && !loadgray) {
+                // ICC is GRAY but we must return RGB (image has alpha channel for example)
+                // we create similar RGB profile (same whitepoint and TRC)
+                QPointF gray_whitePoint = colorspace.whitePoint();
+                if (gray_whitePoint.isNull()) {
+                    gray_whitePoint = QPointF(0.3127f, 0.329f);
+                }
+
+                const QPointF redP(0.64f, 0.33f);
+                const QPointF greenP(0.3f, 0.6f);
+                const QPointF blueP(0.15f, 0.06f);
+
+                QColorSpace::TransferFunction trc_new = colorspace.transferFunction();
+                float gamma_new = colorspace.gamma();
+                if (trc_new == QColorSpace::TransferFunction::Custom) {
+                    trc_new = QColorSpace::TransferFunction::SRgb;
+                }
+                colorspace = QColorSpace(gray_whitePoint, redP, greenP, blueP, trc_new, gamma_new);
+                if (!colorspace.isValid()) {
+                    qWarning("AVIF plugin created invalid QColorSpace!");
+                }
+            }
+        }
+#endif
     } else {
         float prim[8] = {0.64f, 0.33f, 0.3f, 0.6f, 0.15f, 0.06f, 0.3127f, 0.329f};
         // outPrimaries: rX, rY, gX, gY, bX, bY, wX, wY
@@ -347,6 +383,14 @@ bool QAVIFHandler::decode_one_frame()
         case 13:
             q_trc = QColorSpace::TransferFunction::SRgb;
             break;
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+        case 16: /* AVIF_TRANSFER_CHARACTERISTICS_PQ */
+            q_trc = QColorSpace::TransferFunction::St2084;
+            break;
+        case 18: /* AVIF_TRANSFER_CHARACTERISTICS_HLG */
+            q_trc = QColorSpace::TransferFunction::Hlg;
+            break;
+#endif
         default:
             qWarning("CICP colorPrimaries: %d, transferCharacteristics: %d\nThe colorspace is unsupported by this plug-in yet.",
                      m_decoder->image->colorPrimaries,
@@ -356,29 +400,35 @@ bool QAVIFHandler::decode_one_frame()
         }
 
         if (q_trc != QColorSpace::TransferFunction::Custom) { // we create new colorspace using Qt
-            switch (m_decoder->image->colorPrimaries) {
-            /* AVIF_COLOR_PRIMARIES_BT709 */
-            case 0:
-            case 1:
-            case 2: /* AVIF_COLOR_PRIMARIES_UNSPECIFIED */
-                colorspace = QColorSpace(QColorSpace::Primaries::SRgb, q_trc, q_trc_gamma);
-                break;
-            /* AVIF_COLOR_PRIMARIES_SMPTE432 */
-            case 12:
-                colorspace = QColorSpace(QColorSpace::Primaries::DciP3D65, q_trc, q_trc_gamma);
-                break;
-            default:
-                colorspace = QColorSpace(whitePoint, redPoint, greenPoint, bluePoint, q_trc, q_trc_gamma);
-                break;
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+            if (loadgray) {
+                colorspace = QColorSpace(whitePoint, q_trc, q_trc_gamma);
+            } else {
+#endif
+                switch (m_decoder->image->colorPrimaries) {
+                /* AVIF_COLOR_PRIMARIES_BT709 */
+                case 0:
+                case 1:
+                case 2: /* AVIF_COLOR_PRIMARIES_UNSPECIFIED */
+                    colorspace = QColorSpace(QColorSpace::Primaries::SRgb, q_trc, q_trc_gamma);
+                    break;
+                /* AVIF_COLOR_PRIMARIES_SMPTE432 */
+                case 12:
+                    colorspace = QColorSpace(QColorSpace::Primaries::DciP3D65, q_trc, q_trc_gamma);
+                    break;
+                default:
+                    colorspace = QColorSpace(whitePoint, redPoint, greenPoint, bluePoint, q_trc, q_trc_gamma);
+                    break;
+                }
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
             }
+#endif
         }
 
         if (!colorspace.isValid()) {
             qWarning("AVIF plugin created invalid QColorSpace from NCLX/CICP!");
         }
     }
-
-    result.setColorSpace(colorspace);
 #endif
 
     avifRGBImage rgb;
@@ -393,7 +443,7 @@ bool QAVIFHandler::decode_one_frame()
         rgb.format = AVIF_RGB_FORMAT_RGBA;
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 13, 0))
-        if (!loadalpha && (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400)) {
+        if (loadgray) {
             resultformat = QImage::Format_Grayscale16;
         }
 #endif
@@ -412,7 +462,7 @@ bool QAVIFHandler::decode_one_frame()
         }
 #endif
 
-        if (!loadalpha && (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400)) {
+        if (loadgray) {
             resultformat = QImage::Format_Grayscale8;
         }
     }
@@ -503,6 +553,10 @@ bool QAVIFHandler::decode_one_frame()
     } else {
         m_current_image = result.convertToFormat(resultformat);
     }
+
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+    m_current_image.setColorSpace(colorspace);
+#endif
 
     m_estimated_dimensions = m_current_image.size();
 
@@ -624,6 +678,9 @@ bool QAVIFHandler::write(const QImage &image)
     case QImage::Format_RGBX64:
     case QImage::Format_RGBA64:
     case QImage::Format_RGBA64_Premultiplied:
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    case QImage::Format_CMYK8888:
+#endif
         save_depth = 10;
         break;
     default:
@@ -683,6 +740,14 @@ bool QAVIFHandler::write(const QImage &image)
                 /* AVIF_TRANSFER_CHARACTERISTICS_SRGB */
                 avif->transferCharacteristics = (avifTransferCharacteristics)13;
                 break;
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+            case QColorSpace::TransferFunction::St2084:
+                avif->transferCharacteristics = (avifTransferCharacteristics)16;
+                break;
+            case QColorSpace::TransferFunction::Hlg:
+                avif->transferCharacteristics = (avifTransferCharacteristics)18;
+                break;
+#endif
             default:
                 /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
                 break;
@@ -728,7 +793,24 @@ bool QAVIFHandler::write(const QImage &image)
             }
         }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+        QImage tmpcolorimage;
+        auto cs = image.colorSpace();
+        if (cs.isValid() && cs.colorModel() == QColorSpace::ColorModel::Cmyk && image.format() == QImage::Format_CMYK8888) {
+            tmpcolorimage = image.convertedToColorSpace(QColorSpace(QColorSpace::SRgb), tmpformat);
+        } else if (cs.isValid() && cs.colorModel() == QColorSpace::ColorModel::Gray) {
+            QColorSpace::TransferFunction trc_new = cs.transferFunction();
+            float gamma_new = cs.gamma();
+            if (trc_new == QColorSpace::TransferFunction::Custom) {
+                trc_new = QColorSpace::TransferFunction::SRgb;
+            }
+            tmpcolorimage = image.convertedToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, trc_new, gamma_new), tmpformat);
+        } else {
+            tmpcolorimage = image.convertToFormat(tmpformat);
+        }
+#else
         QImage tmpcolorimage = image.convertToFormat(tmpformat);
+#endif
 
         avifPixelFormat pixel_format = AVIF_PIXEL_FORMAT_YUV420;
         if (m_quality >= KIMG_AVIF_QUALITY_HIGH) {
@@ -790,6 +872,14 @@ bool QAVIFHandler::write(const QImage &image)
                 /* AVIF_TRANSFER_CHARACTERISTICS_SRGB */
                 transfer_to_save = (avifTransferCharacteristics)13;
                 break;
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+            case QColorSpace::TransferFunction::St2084:
+                transfer_to_save = (avifTransferCharacteristics)16;
+                break;
+            case QColorSpace::TransferFunction::Hlg:
+                transfer_to_save = (avifTransferCharacteristics)18;
+                break;
+#endif
             default:
                 /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
                 transfer_to_save = (avifTransferCharacteristics)2;
@@ -825,6 +915,14 @@ bool QAVIFHandler::write(const QImage &image)
                         case 5: // AVIF_TRANSFER_CHARACTERISTICS_BT470BG
                             tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, 2.8f));
                             break;
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+                        case 16:
+                            tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::St2084));
+                            break;
+                        case 18:
+                            tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::Hlg));
+                            break;
+#endif
                         default: // AVIF_TRANSFER_CHARACTERISTICS_SRGB + any other
                             tmpcolorimage.convertToColorSpace(QColorSpace(QColorSpace::Primaries::SRgb, QColorSpace::TransferFunction::SRgb));
                             transfer_to_save = (avifTransferCharacteristics)13;
