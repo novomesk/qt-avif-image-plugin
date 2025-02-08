@@ -320,7 +320,7 @@ bool QAVIFHandler::decode_one_frame()
 #if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
         else {
             if (colorspace.colorModel() == QColorSpace::ColorModel::Cmyk) {
-                qWarning("CMYK ICC profile is not extected for AVIF, discarding the ICCprofile!");
+                qWarning("CMYK ICC profile is not expected for AVIF, discarding the ICCprofile!");
                 colorspace = QColorSpace();
             } else if (colorspace.colorModel() == QColorSpace::ColorModel::Rgb && loadgray) {
                 // Input is GRAY but ICC is RGB, we will return RGB image
