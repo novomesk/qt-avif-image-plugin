@@ -92,22 +92,20 @@ typedef struct {
 uint32_t av1_write_sequence_header_obu(const SequenceHeader *seq_params,
                                        uint8_t *const dst, size_t dst_size);
 
-// Writes the OBU header byte, and the OBU header extension byte when
-// has_nonzero_operating_point_idc is true and the OBU is part of a frame.
+// Writes the OBU header byte, and the OBU header extension byte when both
+// has_nonzero_operating_point_idc and is_layer_specific_obu are true.
 // Returns number of bytes written to 'dst'.
 uint32_t av1_write_obu_header(AV1LevelParams *const level_params,
                               int *frame_header_count, OBU_TYPE obu_type,
                               bool has_nonzero_operating_point_idc,
-                              int obu_extension, uint8_t *const dst);
+                              bool is_layer_specific_obu, int obu_extension,
+                              uint8_t *const dst);
 
 // Encodes obu_payload_size as a leb128 integer and writes it to the dest
 // buffer. The output must fill the buffer exactly. Returns AOM_CODEC_OK on
 // success, AOM_CODEC_ERROR on failure.
 int av1_write_uleb_obu_size(size_t obu_payload_size, uint8_t *dest,
                             size_t dest_size);
-
-// Deprecated. Use av1_write_uleb_obu_size() instead.
-int av1_write_uleb_obu_size_unsafe(size_t obu_payload_size, uint8_t *dest);
 
 // Pack tile data in the bitstream with tile_group, frame
 // and OBU header.

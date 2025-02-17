@@ -28,10 +28,6 @@ bool av1_resize_plane(const uint8_t *input, int height, int width,
                       int in_stride, uint8_t *output, int height2, int width2,
                       int out_stride);
 
-void av1_highbd_resize_plane(const uint8_t *input, int height, int width,
-                             int in_stride, uint8_t *output, int height2,
-                             int width2, int out_stride, int bd);
-
 void av1_upscale_normative_rows(const AV1_COMMON *cm, const uint8_t *src,
                                 int src_stride, uint8_t *dst, int dst_stride,
                                 int plane, int rows);
@@ -53,11 +49,6 @@ void av1_calculate_scaled_size(int *width, int *height, int resize_denom);
 // given original dimensions and superres scale denominator.
 void av1_calculate_scaled_superres_size(int *width, int *height,
                                         int superres_denom);
-
-// Inverse of av1_calculate_scaled_superres_size() above: calculates the
-// original dimensions from the given scaled dimensions and the scale
-// denominator.
-void av1_calculate_unscaled_superres_size(int *width, int *height, int denom);
 
 void av1_superres_upscale(AV1_COMMON *cm, BufferPool *const pool,
                           bool alloc_pyramid);

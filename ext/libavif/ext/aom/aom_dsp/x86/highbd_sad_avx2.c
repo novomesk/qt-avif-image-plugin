@@ -289,7 +289,6 @@ HIGHBD_SADMXN_AVX2(32, 8)
 HIGHBD_SADMXN_AVX2(64, 16)
 #endif  // !CONFIG_REALTIME_ONLY
 
-HIGHBD_SAD_SKIP_MXN_AVX2(16, 8)
 HIGHBD_SAD_SKIP_MXN_AVX2(16, 16)
 HIGHBD_SAD_SKIP_MXN_AVX2(16, 32)
 
@@ -306,22 +305,7 @@ HIGHBD_SAD_SKIP_MXN_AVX2(128, 128)
 
 #if !CONFIG_REALTIME_ONLY
 HIGHBD_SAD_SKIP_MXN_AVX2(16, 64)
-HIGHBD_SAD_SKIP_MXN_AVX2(32, 8)
 HIGHBD_SAD_SKIP_MXN_AVX2(64, 16)
-#endif  // !CONFIG_REALTIME_ONLY
-
-#if !CONFIG_REALTIME_ONLY
-unsigned int aom_highbd_sad16x4_avg_avx2(const uint8_t *src, int src_stride,
-                                         const uint8_t *ref, int ref_stride,
-                                         const uint8_t *second_pred) {
-  __m256i sad = _mm256_setzero_si256();
-  uint16_t *srcp = CONVERT_TO_SHORTPTR(src);
-  uint16_t *refp = CONVERT_TO_SHORTPTR(ref);
-  uint16_t *secp = CONVERT_TO_SHORTPTR(second_pred);
-  sad16x4(srcp, src_stride, refp, ref_stride, secp, &sad);
-
-  return get_sad_from_mm256_epi32(&sad);
-}
 #endif  // !CONFIG_REALTIME_ONLY
 
 unsigned int aom_highbd_sad16x8_avg_avx2(const uint8_t *src, int src_stride,
@@ -697,7 +681,6 @@ HIGHBD_SAD_MXNX4D_AVX2(32, 8)
 HIGHBD_SAD_MXNX4D_AVX2(64, 16)
 #endif  // !CONFIG_REALTIME_ONLY
 
-HIGHBD_SAD_SKIP_MXNX4D_AVX2(16, 8)
 HIGHBD_SAD_SKIP_MXNX4D_AVX2(16, 16)
 HIGHBD_SAD_SKIP_MXNX4D_AVX2(16, 32)
 
@@ -714,7 +697,6 @@ HIGHBD_SAD_SKIP_MXNX4D_AVX2(128, 128)
 
 #if !CONFIG_REALTIME_ONLY
 HIGHBD_SAD_SKIP_MXNX4D_AVX2(16, 64)
-HIGHBD_SAD_SKIP_MXNX4D_AVX2(32, 8)
 HIGHBD_SAD_SKIP_MXNX4D_AVX2(64, 16)
 #endif  // !CONFIG_REALTIME_ONLY
 

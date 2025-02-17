@@ -87,8 +87,8 @@ extern "C" {
   (RESTORATION_UNITPELS_HORZ_MAX * RESTORATION_UNITPELS_VERT_MAX)
 
 // Two 32-bit buffers needed for the restored versions from two filters
-// TODO(debargha, rupert): Refactor to not need the large tilesize to be stored
-// on the decoder side.
+// TODO(debargha, rupert): Refactor to not need the large tile size to be
+// stored on the decoder side.
 #define SGRPROJ_TMPBUF_SIZE (RESTORATION_UNITPELS_MAX * 2 * sizeof(int32_t))
 
 #define SGRPROJ_EXTBUF_SIZE (0)
@@ -439,8 +439,6 @@ void av1_loop_restoration_filter_frame_init(AV1LrStruct *lr_ctxt,
                                             YV12_BUFFER_CONFIG *frame,
                                             struct AV1Common *cm,
                                             int optimized_lr, int num_planes);
-void av1_loop_restoration_copy_planes(AV1LrStruct *loop_rest_ctxt,
-                                      struct AV1Common *cm, int num_planes);
 void av1_foreach_rest_unit_in_row(
     RestorationTileLimits *limits, int plane_w,
     rest_unit_visitor_t on_rest_unit, int row_number, int unit_size,

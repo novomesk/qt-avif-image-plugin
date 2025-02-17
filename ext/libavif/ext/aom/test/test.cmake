@@ -131,7 +131,6 @@ if(CONFIG_REALTIME_ONLY)
                    "${AOM_ROOT}/test/gf_pyr_height_test.cc"
                    "${AOM_ROOT}/test/horz_superres_test.cc"
                    "${AOM_ROOT}/test/level_test.cc"
-                   "${AOM_ROOT}/test/monochrome_test.cc"
                    "${AOM_ROOT}/test/postproc_filters_test.cc"
                    "${AOM_ROOT}/test/sharpness_test.cc")
 endif()
@@ -191,6 +190,7 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/av1_convolve_test.cc"
               "${AOM_ROOT}/test/av1_fwd_txfm1d_test.cc"
               "${AOM_ROOT}/test/av1_fwd_txfm2d_test.cc"
+              "${AOM_ROOT}/test/av1_get_qmlevel_test.cc"
               "${AOM_ROOT}/test/av1_inv_txfm1d_test.cc"
               "${AOM_ROOT}/test/av1_inv_txfm2d_test.cc"
               "${AOM_ROOT}/test/av1_k_means_test.cc"
@@ -203,7 +203,6 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/avg_test.cc"
               "${AOM_ROOT}/test/blend_a64_mask_1d_test.cc"
               "${AOM_ROOT}/test/blend_a64_mask_test.cc"
-              "${AOM_ROOT}/test/comp_avg_pred_test.cc"
               "${AOM_ROOT}/test/comp_mask_pred_test.cc"
               "${AOM_ROOT}/test/disflow_test.cc"
               "${AOM_ROOT}/test/encodemb_test.cc"
@@ -268,7 +267,6 @@ if(NOT BUILD_SHARED_LIBS)
                 "${AOM_ROOT}/test/lossless_test.cc"
                 "${AOM_ROOT}/test/noise_model_test.cc"
                 "${AOM_ROOT}/test/quant_test.cc"
-                "${AOM_ROOT}/test/ratectrl_test.cc"
                 "${AOM_ROOT}/test/rd_test.cc"
                 "${AOM_ROOT}/test/sb_multipass_test.cc"
                 "${AOM_ROOT}/test/sb_qp_sweep_test.cc"
@@ -387,6 +385,11 @@ if(NOT BUILD_SHARED_LIBS)
                      "${AOM_ROOT}/test/warp_filter_test_util.h"
                      "${AOM_ROOT}/test/wiener_test.cc")
   endif()
+endif()
+
+if(ENABLE_EXAMPLES)
+  list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
+              "${AOM_ROOT}/test/multilayer_metadata_test.cc")
 endif()
 
 if(CONFIG_AV1_ENCODER AND ENABLE_TESTS)

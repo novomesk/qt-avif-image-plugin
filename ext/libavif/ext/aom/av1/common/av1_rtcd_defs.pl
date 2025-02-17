@@ -285,12 +285,6 @@ if (aom_config("CONFIG_AV1_ENCODER") eq "yes") {
                                                             const MV *const mv, uint8_t *comp_pred8, const uint8_t *pred8, int width,
                                                             int height, int subpel_x_q3, int subpel_y_q3, const uint8_t *ref8, int ref_stride, int bd, int subpel_search";
     specialize qw/aom_highbd_comp_avg_upsampled_pred sse2 neon/;
-
-    add_proto qw/void aom_highbd_dist_wtd_comp_avg_upsampled_pred/, "MACROBLOCKD *xd, const struct AV1Common *const cm, int mi_row, int mi_col,
-                                                                const MV *const mv, uint8_t *comp_pred8, const uint8_t *pred8, int width,
-                                                                int height, int subpel_x_q3, int subpel_y_q3, const uint8_t *ref8,
-                                                                int ref_stride, int bd, const DIST_WTD_COMP_PARAMS *jcp_param, int subpel_search";
-    specialize qw/aom_highbd_dist_wtd_comp_avg_upsampled_pred sse2 neon/;
   }
 
   # the transform coefficients are held in 32-bit
@@ -501,22 +495,22 @@ if (aom_config("CONFIG_AV1_HIGHBITDEPTH") eq "yes") {
 # structs as arguments, which makes the v256 type of the intrinsics
 # hard to support, so optimizations for this target are disabled.
 if ($opts{config} !~ /libs-x86-win32-vs.*/) {
-  specialize qw/cdef_find_dir sse4_1 avx2 neon/, "$ssse3_x86";
+  specialize qw/cdef_find_dir sse4_1 avx2 neon rvv/, "$ssse3_x86";
   specialize qw/cdef_find_dir_dual sse4_1 avx2 neon/, "$ssse3_x86";
 
-  specialize qw/cdef_filter_8_0 sse4_1 avx2 neon/, "$ssse3_x86";
-  specialize qw/cdef_filter_8_1 sse4_1 avx2 neon/, "$ssse3_x86";
-  specialize qw/cdef_filter_8_2 sse4_1 avx2 neon/, "$ssse3_x86";
-  specialize qw/cdef_filter_8_3 sse4_1 avx2 neon/, "$ssse3_x86";
+  specialize qw/cdef_filter_8_0 sse4_1 avx2 neon rvv/, "$ssse3_x86";
+  specialize qw/cdef_filter_8_1 sse4_1 avx2 neon rvv/, "$ssse3_x86";
+  specialize qw/cdef_filter_8_2 sse4_1 avx2 neon rvv/, "$ssse3_x86";
+  specialize qw/cdef_filter_8_3 sse4_1 avx2 neon rvv/, "$ssse3_x86";
 
-  specialize qw/cdef_filter_16_0 sse4_1 avx2 neon/, "$ssse3_x86";
-  specialize qw/cdef_filter_16_1 sse4_1 avx2 neon/, "$ssse3_x86";
-  specialize qw/cdef_filter_16_2 sse4_1 avx2 neon/, "$ssse3_x86";
-  specialize qw/cdef_filter_16_3 sse4_1 avx2 neon/, "$ssse3_x86";
+  specialize qw/cdef_filter_16_0 sse4_1 avx2 neon rvv/, "$ssse3_x86";
+  specialize qw/cdef_filter_16_1 sse4_1 avx2 neon rvv/, "$ssse3_x86";
+  specialize qw/cdef_filter_16_2 sse4_1 avx2 neon rvv/, "$ssse3_x86";
+  specialize qw/cdef_filter_16_3 sse4_1 avx2 neon rvv/, "$ssse3_x86";
 
-  specialize qw/cdef_copy_rect8_8bit_to_16bit sse4_1 avx2 neon/, "$ssse3_x86";
+  specialize qw/cdef_copy_rect8_8bit_to_16bit sse4_1 avx2 neon rvv/, "$ssse3_x86";
   if (aom_config("CONFIG_AV1_HIGHBITDEPTH") eq "yes") {
-    specialize qw/cdef_copy_rect8_16bit_to_16bit sse4_1 avx2 neon/, "$ssse3_x86";
+    specialize qw/cdef_copy_rect8_16bit_to_16bit sse4_1 avx2 neon rvv/, "$ssse3_x86";
   }
 }
 

@@ -1307,7 +1307,7 @@ to estimate the entropy cost of a transform block. Note that
 Related functions:
 - \ref av1_cost_coeffs_txb()
 - \ref av1_cost_coeffs_txb_laplacian()
-- \ref av1_cost_coeffs_txb_estimate()
+- av1_cost_coeffs_txb_estimate() (see av1/encoder/txb_rdopt.c)
 
 \paragraph architecture_entropy_coef_opt Quantized level optimization
 Beside computing entropy cost, the encoder also uses \ref av1_optimize_txb()

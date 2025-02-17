@@ -932,9 +932,9 @@ static void highbd_fill_arr_to_col(uint16_t *img, int stride, int len,
   }
 }
 
-void av1_highbd_resize_plane(const uint8_t *input, int height, int width,
-                             int in_stride, uint8_t *output, int height2,
-                             int width2, int out_stride, int bd) {
+static void highbd_resize_plane(const uint8_t *input, int height, int width,
+                                int in_stride, uint8_t *output, int height2,
+                                int width2, int out_stride, int bd) {
   int i;
   uint16_t *intbuf = (uint16_t *)aom_malloc(sizeof(uint16_t) * width2 * height);
   uint16_t *tmpbuf =
@@ -1092,10 +1092,10 @@ bool av1_resize_and_extend_frame_nonnormative(const YV12_BUFFER_CONFIG *src,
     const int is_uv = i > 0;
 #if CONFIG_AV1_HIGHBITDEPTH
     if (src->flags & YV12_FLAG_HIGHBITDEPTH) {
-      av1_highbd_resize_plane(src->buffers[i], src->crop_heights[is_uv],
-                              src->crop_widths[is_uv], src->strides[is_uv],
-                              dst->buffers[i], dst->crop_heights[is_uv],
-                              dst->crop_widths[is_uv], dst->strides[is_uv], bd);
+      highbd_resize_plane(src->buffers[i], src->crop_heights[is_uv],
+                          src->crop_widths[is_uv], src->strides[is_uv],
+                          dst->buffers[i], dst->crop_heights[is_uv],
+                          dst->crop_widths[is_uv], dst->strides[is_uv], bd);
     } else if (!av1_resize_plane(src->buffers[i], src->crop_heights[is_uv],
                                  src->crop_widths[is_uv], src->strides[is_uv],
                                  dst->buffers[i], dst->crop_heights[is_uv],
@@ -1258,6 +1258,11 @@ YV12_BUFFER_CONFIG *av1_realloc_and_scale_if_required(
                            "Failed to allocate buffers during resize");
     }
 #endif
+    if (unscaled->metadata &&
+        aom_copy_metadata_to_frame_buffer(scaled, unscaled->metadata)) {
+      aom_internal_error(cm->error, AOM_CODEC_MEM_ERROR,
+                         "Failed to copy source metadata to scaled frame");
+    }
     return scaled;
   }
   return unscaled;
@@ -1292,15 +1297,6 @@ void av1_calculate_scaled_superres_size(int *width, int *height,
                                         int superres_denom) {
   (void)height;
   calculate_scaled_size_helper(width, superres_denom);
-}
-
-void av1_calculate_unscaled_superres_size(int *width, int *height, int denom) {
-  if (denom != SCALE_NUMERATOR) {
-    // Note: av1_calculate_scaled_superres_size() rounds *up* after division
-    // when the resulting dimensions are odd. So here, we round *down*.
-    *width = *width * denom / SCALE_NUMERATOR;
-    (void)height;
-  }
 }
 
 // Copy only the config data from 'src' to 'dst'.

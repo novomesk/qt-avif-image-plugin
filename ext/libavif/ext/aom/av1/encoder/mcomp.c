@@ -9,6 +9,7 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
+#include <assert.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -110,7 +111,9 @@ void av1_make_default_fullpel_ms_params(
   ms_params->sdx3df = ms_params->vfp->sdx3df;
 
   if (mv_sf->use_downsampled_sad == 2 && block_size_high[bsize] >= 16) {
+    assert(ms_params->vfp->sdsf != NULL);
     ms_params->sdf = ms_params->vfp->sdsf;
+    assert(ms_params->vfp->sdsx4df != NULL);
     ms_params->sdx4df = ms_params->vfp->sdsx4df;
     // Skip version of sadx3 is not available yet
     ms_params->sdx3df = ms_params->vfp->sdsx4df;
@@ -128,6 +131,7 @@ void av1_make_default_fullpel_ms_params(
     const int src_stride = src->stride;
 
     unsigned int start_mv_sad_even_rows, start_mv_sad_odd_rows;
+    assert(ms_params->vfp->sdsf != NULL);
     start_mv_sad_even_rows =
         ms_params->vfp->sdsf(src_buf, src_stride, best_address, ref_stride);
     start_mv_sad_odd_rows =
@@ -141,6 +145,7 @@ void av1_make_default_fullpel_ms_params(
     const int mult_thresh = 4;
     if (odd_to_even_diff_sad * mult_thresh < (int)start_mv_sad_even_rows) {
       ms_params->sdf = ms_params->vfp->sdsf;
+      assert(ms_params->vfp->sdsx4df != NULL);
       ms_params->sdx4df = ms_params->vfp->sdsx4df;
       ms_params->sdx3df = ms_params->vfp->sdsx4df;
     }
@@ -739,6 +744,7 @@ static inline int get_mvpred_compound_sad(
     return vfp->msdf(src_buf, src_stride, ref_address, ref_stride, second_pred,
                      mask, mask_stride, invert_mask);
   } else if (second_pred) {
+    assert(vfp->sdaf != NULL);
     return vfp->sdaf(src_buf, src_stride, ref_address, ref_stride, second_pred);
   } else {
     return ms_params->sdf(src_buf, src_stride, ref_address, ref_stride);
@@ -3336,7 +3342,6 @@ int av1_return_max_sub_pixel_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   (void)cm;
   (void)start_mv;
   (void)start_mv_stats;
-  (void)sse1;
   (void)distortion;
   (void)last_mv_search_list;
 
@@ -3351,6 +3356,7 @@ int av1_return_max_sub_pixel_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   // In the sub-pel motion search, if hp is not used, then the last bit of mv
   // has to be 0.
   lower_mv_precision(bestmv, allow_hp, 0);
+  *sse1 = besterr;
   return besterr;
 }
 
@@ -3365,7 +3371,6 @@ int av1_return_min_sub_pixel_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   (void)cm;
   (void)start_mv;
   (void)start_mv_stats;
-  (void)sse1;
   (void)distortion;
   (void)last_mv_search_list;
 
@@ -3379,6 +3384,7 @@ int av1_return_min_sub_pixel_mv(MACROBLOCKD *xd, const AV1_COMMON *const cm,
   // In the sub-pel motion search, if hp is not used, then the last bit of mv
   // has to be 0.
   lower_mv_precision(bestmv, allow_hp, 0);
+  *sse1 = besterr;
   return besterr;
 }
 
