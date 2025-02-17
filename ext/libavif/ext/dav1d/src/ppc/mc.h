@@ -1,5 +1,6 @@
 /*
- * Copyright © 2021, VideoLAN and dav1d authors
+ * Copyright © 2024, VideoLAN and dav1d authors
+ * Copyright © 2024, Luca Barbato
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,35 +25,22 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ARM_ASM_OFFSETS_H
-#define ARM_ASM_OFFSETS_H
+#include "src/cpu.h"
+#include "src/mc.h"
 
-#include "config.h"
+decl_blend_fn(BF(dav1d_blend, pwr9));
+decl_blend_dir_fn(BF(dav1d_blend_h, pwr9));
+decl_blend_dir_fn(BF(dav1d_blend_v, pwr9));
 
-#define FGD_SEED                         0
-#define FGD_AR_COEFF_LAG                 92
-#define FGD_AR_COEFFS_Y                  96
-#define FGD_AR_COEFFS_UV                 120
-#define FGD_AR_COEFF_SHIFT               176
-#define FGD_GRAIN_SCALE_SHIFT            184
+static ALWAYS_INLINE void mc_dsp_init_ppc(Dav1dMCDSPContext *const c) {
+  const unsigned flags = dav1d_get_cpu_flags();
 
-#define FGD_SCALING_SHIFT                88
-#define FGD_UV_MULT                      188
-#define FGD_UV_LUMA_MULT                 196
-#define FGD_UV_OFFSET                    204
-#define FGD_CLIP_TO_RESTRICTED_RANGE     216
+  if (!(flags & DAV1D_PPC_CPU_FLAG_PWR9)) return;
 
-#if ARCH_AARCH64
-#define RMVSF_IW8                        16
-#define RMVSF_IH8                        20
-#define RMVSF_MFMV_REF                   53
-#define RMVSF_MFMV_REF2CUR               56
-#define RMVSF_MFMV_REF2REF               68
-#define RMVSF_N_MFMVS                    152
-#define RMVSF_RP_REF                     168
-#define RMVSF_RP_PROJ                    176
-#define RMVSF_RP_STRIDE                  184
-#define RMVSF_N_TILE_THREADS             200
+#if BITDEPTH == 8
+  c->blend = BF(dav1d_blend, pwr9);
+  c->blend_h = BF(dav1d_blend_h, pwr9);
+  c->blend_v = BF(dav1d_blend_v, pwr9);
 #endif
 
-#endif /* ARM_ASM_OFFSETS_H */
+}
