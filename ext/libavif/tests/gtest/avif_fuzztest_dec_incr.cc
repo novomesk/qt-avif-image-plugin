@@ -19,8 +19,6 @@ namespace avif {
 namespace testutil {
 namespace {
 
-::testing::Environment* const kStackLimitEnv = SetStackLimitTo512x1024Bytes();
-
 //------------------------------------------------------------------------------
 
 struct DecoderInput {
@@ -56,7 +54,9 @@ void DecodeIncr(const std::string& arbitrary_bytes, bool is_persistent,
 
   DecoderInput data = {reinterpret_cast<const uint8_t*>(arbitrary_bytes.data()),
                        arbitrary_bytes.size(), 0};
-  avifIO io = {.read = AvifIoRead,
+  avifIO io = {.destroy = nullptr,
+               .read = AvifIoRead,
+               .write = nullptr,
                .sizeHint = arbitrary_bytes.size(),
                .persistent = AVIF_TRUE,
                .data = &data};
@@ -99,7 +99,10 @@ void DecodeIncr(const std::string& arbitrary_bytes, bool is_persistent,
     const uint32_t max_cell_height = reference->height;
     const avifResult result = DecodeIncrementally(
         encoded_data, decoder.get(), is_persistent, give_size_hint,
-        use_nth_image_api, *reference, max_cell_height);
+        use_nth_image_api, *reference, max_cell_height,
+        /*enable_fine_incremental_check=*/false,
+        /*expect_whole_file_read=*/true,
+        /*expect_parse_success_from_partial_file=*/false);
     // The result does not matter, as long as we do not crash.
     (void)result;
   }

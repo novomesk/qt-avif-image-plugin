@@ -366,7 +366,9 @@ TEST(RGBToYUVTest, AllMatrixCoefficients) {
                    AVIF_MATRIX_COEFFICIENTS_SMPTE240,
                    AVIF_MATRIX_COEFFICIENTS_YCGCO,
                    AVIF_MATRIX_COEFFICIENTS_BT2020_NCL,
-                   AVIF_MATRIX_COEFFICIENTS_CHROMA_DERIVED_NCL
+                   AVIF_MATRIX_COEFFICIENTS_CHROMA_DERIVED_NCL,
+                   AVIF_MATRIX_COEFFICIENTS_YCGCO_RE,
+                   AVIF_MATRIX_COEFFICIENTS_YCGCO_RO,
                    // These are unsupported. See avifPrepareReformatState().
                    // AVIF_MATRIX_COEFFICIENTS_BT2020_CL
                    // AVIF_MATRIX_COEFFICIENTS_SMPTE2085
@@ -376,6 +378,19 @@ TEST(RGBToYUVTest, AllMatrixCoefficients) {
             if (matrix_coefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO &&
                 yuv_range == AVIF_RANGE_LIMITED) {
               // See avifPrepareReformatState().
+              continue;
+            }
+            if ((matrix_coefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RE &&
+                 yuv_depth - 2 != rgb_depth) ||
+                (matrix_coefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RO &&
+                 yuv_depth - 1 != rgb_depth)) {
+              // See avifPrepareReformatState().
+              continue;
+            }
+            if ((matrix_coefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RE ||
+                 matrix_coefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RO) &&
+                yuv_range != AVIF_RANGE_FULL) {
+              // YCgCo-R is for lossless.
               continue;
             }
             for (avifChromaDownsampling chroma_downsampling :
@@ -458,6 +473,8 @@ constexpr avifMatrixCoefficients kMatrixCoefficientsBT709 =
     AVIF_MATRIX_COEFFICIENTS_BT709;
 constexpr avifMatrixCoefficients kMatrixCoefficientsIdentity =
     AVIF_MATRIX_COEFFICIENTS_IDENTITY;
+constexpr avifMatrixCoefficients kMatrixCoefficientsYCgCoRe =
+    AVIF_MATRIX_COEFFICIENTS_YCGCO_RE;
 
 // This is the default avifenc setup when encoding from 8b PNG files to AVIF.
 INSTANTIATE_TEST_SUITE_P(
@@ -589,6 +606,20 @@ INSTANTIATE_TEST_SUITE_P(MonochromeLossless16b, RGBToYUVTest,
                                  Values(AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC),
                                  /*add_noise=*/Values(false),
                                  /*rgb_step=*/Values(401),
+                                 /*max_abs_average_diff=*/Values(0.),
+                                 /*min_psnr=*/Values(99.)));
+
+// Tests YCGCO_RE is lossless.
+INSTANTIATE_TEST_SUITE_P(YCgCo_Re8b, RGBToYUVTest,
+                         Combine(/*rgb_depth=*/Values(8),
+                                 /*yuv_depth=*/Values(10),
+                                 Values(AVIF_RGB_FORMAT_RGBA),
+                                 Values(AVIF_PIXEL_FORMAT_YUV444),
+                                 Values(AVIF_RANGE_FULL),
+                                 Values(kMatrixCoefficientsYCgCoRe),
+                                 Values(AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC),
+                                 /*add_noise=*/Values(true),
+                                 /*rgb_step=*/Values(101),
                                  /*max_abs_average_diff=*/Values(0.),
                                  /*min_psnr=*/Values(99.)));
 

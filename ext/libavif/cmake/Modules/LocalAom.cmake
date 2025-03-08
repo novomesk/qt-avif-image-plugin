@@ -1,5 +1,5 @@
-set(AVIF_LOCAL_AOM_GIT_TAG v3.9.1)
-set(AVIF_LOCAL_AVM_GIT_TAG research-v7.0.1)
+set(AVIF_AOM_GIT_TAG v3.12.0)
+set(AVIF_AVM_GIT_TAG research-v9.0.0)
 
 if(AVIF_CODEC_AVM)
     # Building the avm repository generates files such as "libaom.a" because it is a fork of aom,
@@ -93,15 +93,17 @@ else()
             libaom
             GIT_REPOSITORY "https://gitlab.com/AOMediaCodec/avm.git"
             BINARY_DIR "${AOM_BINARY_DIR}"
-            GIT_TAG ${AVIF_LOCAL_AVM_GIT_TAG}
+            GIT_TAG ${AVIF_AVM_GIT_TAG}
             GIT_PROGRESS ON
             GIT_SHALLOW ON
             UPDATE_COMMAND ""
         )
+        # This will disable the tensorflow dependency.
+        set(CONFIG_ML_PART_SPLIT 0 CACHE INTERNAL "")
     else()
         FetchContent_Declare(
-            libaom URL "https://aomedia.googlesource.com/aom/+archive/${AVIF_LOCAL_AOM_GIT_TAG}.tar.gz" BINARY_DIR
-                       "${AOM_BINARY_DIR}" UPDATE_COMMAND ""
+            libaom URL "https://aomedia.googlesource.com/aom/+archive/${AVIF_AOM_GIT_TAG}.tar.gz" BINARY_DIR "${AOM_BINARY_DIR}"
+            UPDATE_COMMAND ""
         )
     endif()
 
@@ -143,8 +145,10 @@ else()
         endif()
         avif_set_aom_compile_options(aom ${_aom_config})
 
+        # Restore the variables.
         foreach(_config_setting CMAKE_C_FLAGS CMAKE_CXX_FLAGS CMAKE_EXE_LINKER_FLAGS)
             foreach(_config_type DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+                unset(${_config_setting}_${_config_type} CACHE)
                 set(${_config_setting}_${_config_type} ${${_config_setting}_${_config_type}_ORIG} CACHE STRING "" FORCE)
                 unset(${_config_setting}_${_config_type}_ORIG)
             endforeach()

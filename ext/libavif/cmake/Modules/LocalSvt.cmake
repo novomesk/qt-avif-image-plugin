@@ -1,4 +1,4 @@
-set(AVIF_LOCAL_SVT_GIT_TAG "v2.1.1")
+set(AVIF_SVT_GIT_TAG "v3.0.0")
 
 set(LIB_FILENAME "${AVIF_SOURCE_DIR}/ext/SVT-AV1/Bin/Release/${AVIF_LIBRARY_PREFIX}SvtAv1Enc${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
@@ -42,7 +42,7 @@ else()
         svt
         GIT_REPOSITORY "https://gitlab.com/AOMediaCodec/SVT-AV1.git"
         BINARY_DIR "${SVT_BINARY_DIR}"
-        GIT_TAG "${AVIF_LOCAL_SVT_GIT_TAG}"
+        GIT_TAG "${AVIF_SVT_GIT_TAG}"
         UPDATE_COMMAND ""
         GIT_SHALLOW ON
     )
@@ -56,6 +56,12 @@ else()
 
     set(CMAKE_OUTPUT_DIRECTORY_ORIG "${CMAKE_OUTPUT_DIRECTORY}")
     set(CMAKE_OUTPUT_DIRECTORY "${SVT_BINARY_DIR}" CACHE INTERNAL "")
+
+    if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(SVT_AV1_LTO ON)
+    else()
+        set(SVT_AV1_LTO OFF)
+    endif()
 
     avif_fetchcontent_populate_cmake(svt)
 

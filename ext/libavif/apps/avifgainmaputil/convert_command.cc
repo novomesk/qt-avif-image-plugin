@@ -31,6 +31,11 @@ ConvertCommand::ConvertCommand()
 }
 
 avifResult ConvertCommand::Run() {
+#if !defined(AVIF_ENABLE_JPEG_GAIN_MAP_CONVERSION)
+  std::cout << "JPEG gainmap conversion unavailable because avifgainmaputil "
+               "was not built with libxml2.\n";
+  return AVIF_RESULT_NOT_IMPLEMENTED;
+#else
   const avifPixelFormat pixel_format =
       static_cast<avifPixelFormat>(arg_image_read_.pixel_format.value());
 
@@ -88,7 +93,7 @@ avifResult ConvertCommand::Run() {
   if (arg_swap_base_) {
     int depth = arg_image_read_.depth;
     if (depth == 0) {
-      depth = image->gainMap->metadata.alternateHdrHeadroomN == 0 ? 8 : 10;
+      depth = image->gainMap->alternateHdrHeadroom.n == 0 ? 8 : 10;
     }
     ImagePtr new_base(avifImageCreateEmpty());
     if (new_base == nullptr) {
@@ -119,6 +124,7 @@ avifResult ConvertCommand::Run() {
   }
 
   return AVIF_RESULT_OK;
+#endif  // !defined(AVIF_ENABLE_JPEG_GAIN_MAP_CONVERSION)
 }
 
 }  // namespace avif

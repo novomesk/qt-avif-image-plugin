@@ -1,7 +1,7 @@
 # To upgrade libpng to > v1.6.40, you need zlib containing f1f503da85d52e56aae11557b4d79a42bcaa2b86
 # hence a version > v1.3.1 .
-set(AVIF_LOCAL_ZLIB_GIT_TAG v1.3.1)
-set(AVIF_LOCAL_LIBPNG_GIT_TAG v1.6.40)
+set(AVIF_ZLIB_GIT_TAG v1.3.1)
+set(AVIF_LIBPNG_GIT_TAG v1.6.40)
 
 if(EXISTS "${AVIF_SOURCE_DIR}/ext/zlib")
     message(STATUS "libavif(AVIF_ZLIBPNG=LOCAL): ext/zlib found; using as FetchContent SOURCE_DIR")
@@ -22,7 +22,7 @@ FetchContent_Declare(
     zlib
     GIT_REPOSITORY "https://github.com/madler/zlib.git"
     SOURCE_DIR "${ZLIB_SOURCE_DIR}" BINARY_DIR "${ZLIB_BINARY_DIR}"
-    GIT_TAG "${AVIF_LOCAL_ZLIB_GIT_TAG}"
+    GIT_TAG "${AVIF_ZLIB_GIT_TAG}"
     GIT_SHALLOW ON
     UPDATE_COMMAND ""
 )
@@ -31,20 +31,13 @@ FetchContent_Declare(
 # cmake policy CMP0102 in cmake 3.17. Remove the CACHE workaround when we require cmake 3.17 or later. See
 # https://gitlab.kitware.com/cmake/cmake/-/issues/21343.
 set(ZLIB_INCLUDE_DIR "${ZLIB_SOURCE_DIR}" CACHE PATH "zlib include dir")
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "")
 # This include_directories() call must be before add_subdirectory(ext/zlib) to work around the
 # zlib/CMakeLists.txt bug fixed by https://github.com/madler/zlib/pull/818.
 include_directories(SYSTEM $<BUILD_INTERFACE:${ZLIB_INCLUDE_DIR}>)
 
 if(NOT zlib_POPULATED)
     avif_fetchcontent_populate_cmake(zlib)
-
-    # Re-enable example and example64 targets, as these are used by tests
-    if(AVIF_BUILD_TESTS)
-        set_property(TARGET example PROPERTY EXCLUDE_FROM_ALL FALSE)
-        if(TARGET example64)
-            set_property(TARGET example64 PROPERTY EXCLUDE_FROM_ALL FALSE)
-        endif()
-    endif()
 endif()
 
 target_include_directories(zlibstatic INTERFACE $<BUILD_INTERFACE:${ZLIB_INCLUDE_DIR}>)
@@ -90,7 +83,7 @@ FetchContent_Declare(
     libpng
     GIT_REPOSITORY "https://github.com/glennrp/libpng.git"
     BINARY_DIR "${LIBPNG_BINARY_DIR}"
-    GIT_TAG "${AVIF_LOCAL_LIBPNG_GIT_TAG}"
+    GIT_TAG "${AVIF_LIBPNG_GIT_TAG}"
     GIT_SHALLOW ON
     UPDATE_COMMAND ""
 )

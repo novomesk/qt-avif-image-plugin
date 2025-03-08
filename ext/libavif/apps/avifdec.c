@@ -30,12 +30,12 @@ static void syntax(void)
     printf("Options:\n");
     printf("    -h,--help         : Show syntax help\n");
     printf("    -V,--version      : Show the version number\n");
-    printf("    -j,--jobs J       : Number of jobs (worker threads). Use \"all\" to potentially use as many cores as possible (default: all)\n");
+    printf("    -j,--jobs J       : Number of jobs (worker threads), or 'all' to potentially use as many cores as possible. (Default: all)\n");
     printf("    -c,--codec C      : Codec to use (choose from versions list below)\n");
-    printf("    -d,--depth D      : Output depth [8,16]. (PNG only; For y4m, depth is retained, and JPEG is always 8bpc)\n");
-    printf("    -q,--quality Q    : Output quality [0-100]. (JPEG only, default: %d)\n", DEFAULT_JPEG_QUALITY);
-    printf("    --png-compress L  : Set PNG compression level (PNG only; 0-9, 0=none, 9=max). Defaults to libpng's builtin default.\n");
-    printf("    -u,--upsampling U : Chroma upsampling (for 420/422). automatic (default), fastest, best, nearest, or bilinear\n");
+    printf("    -d,--depth D      : Output depth, either 8 or 16. (PNG only; For y4m, depth is retained, and JPEG is always 8bpc)\n");
+    printf("    -q,--quality Q    : Output quality in 0..100. (JPEG only, default: %d)\n", DEFAULT_JPEG_QUALITY);
+    printf("    --png-compress L  : PNG compression level in 0..9 (PNG only; 0=none, 9=max). Defaults to libpng's builtin default\n");
+    printf("    -u,--upsampling U : Chroma upsampling (for 420/422). One of 'automatic' (default), 'fastest', 'best', 'nearest', or 'bilinear'\n");
     printf("    -r,--raw-color    : Output raw RGB values instead of multiplying by alpha when saving to opaque formats\n");
     printf("                        (JPEG only; not applicable to y4m)\n");
     printf("    --index I         : When decoding an image sequence or progressive image, specify which frame index to decode (Default: 0)\n");
@@ -45,11 +45,11 @@ static void syntax(void)
     printf("    -i,--info         : Decode all frames and display all image information instead of saving to disk\n");
     printf("    --icc FILENAME    : Provide an ICC profile payload (implies --ignore-icc)\n");
     printf("    --ignore-icc      : If the input file contains an embedded ICC profile, ignore it (no-op if absent)\n");
-    printf("    --size-limit C    : Specifies the image size limit (in total pixels) that should be tolerated.\n");
-    printf("                        Default: %u, set to a smaller value to further restrict.\n", AVIF_DEFAULT_IMAGE_SIZE_LIMIT);
-    printf("  --dimension-limit C : Specifies the image dimension limit (width or height) that should be tolerated.\n");
-    printf("                        Default: %u, set to 0 to ignore.\n", AVIF_DEFAULT_IMAGE_DIMENSION_LIMIT);
-    printf("    --                : Signals the end of options. Everything after this is interpreted as file names.\n");
+    printf("    --size-limit C    : Maximum image size (in total pixels) that should be tolerated. (Default: %u)\n",
+           AVIF_DEFAULT_IMAGE_SIZE_LIMIT);
+    printf("  --dimension-limit C : Maximum image dimension (width or height) that should be tolerated.\n");
+    printf("                        Set to 0 to ignore. (Default: %u)\n", AVIF_DEFAULT_IMAGE_DIMENSION_LIMIT);
+    printf("    --                : Signal the end of options. Everything after this is interpreted as file names.\n");
     printf("\n");
     avifPrintVersions();
 }
@@ -248,11 +248,8 @@ int main(int argc, char * argv[])
         decoder->imageDimensionLimit = imageDimensionLimit;
         decoder->strictFlags = strictFlags;
         decoder->allowProgressive = allowProgressive;
-#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
-        // Decode the gain map (if present) to allow showing its info.
-        decoder->enableParsingGainMapMetadata = AVIF_TRUE;
-        decoder->enableDecodingGainMap = AVIF_TRUE;
-#endif
+        decoder->imageContentToDecode = AVIF_IMAGE_CONTENT_ALL;
+
         avifResult result = avifDecoderSetIOFile(decoder, inputFilename);
         if (result != AVIF_RESULT_OK) {
             fprintf(stderr, "Cannot open file for read: %s\n", inputFilename);
@@ -348,11 +345,19 @@ int main(int argc, char * argv[])
 
     printf("Image decoded: %s\n", inputFilename);
     printf("Image details:\n");
-    avifBool gainMapPresent = AVIF_FALSE;
-#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
-    gainMapPresent = decoder->gainMapPresent;
-#endif
-    avifImageDump(decoder->image, 0, 0, gainMapPresent, decoder->progressiveState);
+    avifImageDump(decoder->image, 0, 0, decoder->progressiveState);
+
+    if (decoder->image->transformFlags & AVIF_TRANSFORM_CLAP) {
+        avifCropRect cropRect;
+        if (!avifCropRectFromCleanApertureBox(&cropRect,
+                                              &decoder->image->clap,
+                                              decoder->image->width,
+                                              decoder->image->height,
+                                              &decoder->diag)) {
+            // Should happen only if AVIF_STRICT_CLAP_VALID is disabled.
+            fprintf(stderr, "Warning: Invalid Clean Aperture values\n");
+        }
+    }
 
     if (ignoreICC && (decoder->image->icc.size > 0)) {
         printf("[--ignore-icc] Discarding ICC profile.\n");
@@ -383,7 +388,7 @@ int main(int argc, char * argv[])
         goto cleanup;
     } else if (outputFormat == AVIF_APP_FILE_FORMAT_Y4M) {
         if (decoder->image->icc.size || decoder->image->exif.size || decoder->image->xmp.size) {
-            printf("Warning: metadata dropped when saving to y4m.\n");
+            fprintf(stderr, "Warning: metadata dropped when saving to y4m.\n");
         }
         if (!y4mWrite(outputFilename, decoder->image)) {
             goto cleanup;

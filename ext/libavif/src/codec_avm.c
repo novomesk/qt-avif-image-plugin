@@ -8,6 +8,7 @@
 #include "aom/aomcx.h"
 #include "aom/aomdx.h"
 
+#include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,7 +54,6 @@ static avifResult avifCheckCodecVersionAVM()
 }
 
 static avifBool avmCodecGetNextImage(struct avifCodec * codec,
-                                     struct avifDecoder * decoder,
                                      const avifDecodeSample * sample,
                                      avifBool alpha,
                                      avifBool * isLimitedRangeAlpha,
@@ -64,7 +64,7 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
 
         aom_codec_dec_cfg_t cfg;
         memset(&cfg, 0, sizeof(aom_codec_dec_cfg_t));
-        cfg.threads = decoder->maxThreads;
+        cfg.threads = codec->maxThreads;
 
         aom_codec_iface_t * decoder_interface = aom_codec_av1_dx();
         if (aom_codec_dec_init(&codec->internal->decoder, decoder_interface, &cfg, 0)) {
@@ -145,6 +145,9 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
                 return AVIF_FALSE;
         }
         if (codec->internal->image->monochrome) {
+            // avm does not handle monochrome as of research-v8.1.0.
+            // https://gitlab.com/AOMediaCodec/avm/-/issues/522
+            // This should not happen.
             yuvFormat = AVIF_PIXEL_FORMAT_YUV400;
         }
 
@@ -519,9 +522,19 @@ static avifBool avifFindAOMScalingMode(const avifFraction * avifMode, AOM_SCALIN
     return AVIF_FALSE;
 }
 
-// Scales from aom's [0:63] to avm's [0:255]. TODO(yguyon): Accept [0:255] directly in avifEncoder.
-static int avmScaleQuantizer(int quantizer)
+// Scales from aom's [0:63] to avm's [M:255], where M=0/-48/-96 for 8/10/12 bit.
+// See --min-qp help in
+// https://gitlab.com/AOMediaCodec/avm/-/blob/main/apps/aomenc.c
+// TODO(yguyon): Accept [M:255] directly in avifEncoder.
+static int avmScaleQuantizer(int quantizer, uint32_t depth)
 {
+    if (depth == 10) {
+        return AVIF_CLAMP((quantizer * (255 + 48) + 31) / 63 - 48, -48, 255);
+    }
+    if (depth == 12) {
+        return AVIF_CLAMP((quantizer * (255 + 96) + 31) / 63 - 96, -96, 255);
+    }
+    assert(depth == 8);
     return AVIF_CLAMP((quantizer * 255 + 31) / 63, 0, 255);
 }
 
@@ -646,7 +659,8 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
             cfg->g_threads = AVIF_MIN(encoder->maxThreads, 64);
         }
 
-        // avm does not handle monochrome as of research-v4.0.0.
+        // avm does not handle monochrome as of research-v8.1.0.
+        // https://gitlab.com/AOMediaCodec/avm/-/issues/522
         // TODO(yguyon): Enable when fixed upstream
         codec->internal->monochromeEnabled = AVIF_FALSE;
 
@@ -664,8 +678,9 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
             maxQuantizer = encoder->maxQuantizer;
         }
         // Scale from aom's [0:63] to avm's [0:255]. TODO(yguyon): Accept [0:255] directly in avifEncoder.
-        minQuantizer = avmScaleQuantizer(minQuantizer);
-        maxQuantizer = avmScaleQuantizer(maxQuantizer);
+        quantizer = avmScaleQuantizer(quantizer, image->depth);
+        minQuantizer = avmScaleQuantizer(minQuantizer, image->depth);
+        maxQuantizer = avmScaleQuantizer(maxQuantizer, image->depth);
         if ((cfg->rc_end_usage == AOM_VBR) || (cfg->rc_end_usage == AOM_CBR)) {
             // cq-level is ignored in these two end-usage modes, so adjust minQuantizer and
             // maxQuantizer to the target quantizer.
@@ -756,16 +771,17 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
             // We are not ready for dimension change for now.
             return AVIF_RESULT_NOT_IMPLEMENTED;
         }
+        quantizer = avmScaleQuantizer(quantizer, image->depth);
         if (alpha) {
             if (encoderChanges & (AVIF_ENCODER_CHANGE_MIN_QUANTIZER_ALPHA | AVIF_ENCODER_CHANGE_MAX_QUANTIZER_ALPHA)) {
-                cfg->rc_min_quantizer = avmScaleQuantizer(encoder->minQuantizerAlpha);
-                cfg->rc_max_quantizer = avmScaleQuantizer(encoder->maxQuantizerAlpha);
+                cfg->rc_min_quantizer = avmScaleQuantizer(encoder->minQuantizerAlpha, image->depth);
+                cfg->rc_max_quantizer = avmScaleQuantizer(encoder->maxQuantizerAlpha, image->depth);
                 quantizerUpdated = AVIF_TRUE;
             }
         } else {
             if (encoderChanges & (AVIF_ENCODER_CHANGE_MIN_QUANTIZER | AVIF_ENCODER_CHANGE_MAX_QUANTIZER)) {
-                cfg->rc_min_quantizer = avmScaleQuantizer(encoder->minQuantizer);
-                cfg->rc_max_quantizer = avmScaleQuantizer(encoder->maxQuantizer);
+                cfg->rc_min_quantizer = avmScaleQuantizer(encoder->minQuantizer, image->depth);
+                cfg->rc_max_quantizer = avmScaleQuantizer(encoder->maxQuantizer, image->depth);
                 quantizerUpdated = AVIF_TRUE;
             }
         }
@@ -787,8 +803,8 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
                         minQuantizer = encoder->minQuantizer;
                         maxQuantizer = encoder->maxQuantizer;
                     }
-                    minQuantizer = avmScaleQuantizer(minQuantizer);
-                    maxQuantizer = avmScaleQuantizer(maxQuantizer);
+                    minQuantizer = avmScaleQuantizer(minQuantizer, image->depth);
+                    maxQuantizer = avmScaleQuantizer(maxQuantizer, image->depth);
                     cfg->rc_min_quantizer = AVIF_MAX(quantizer - 4, minQuantizer);
                     cfg->rc_max_quantizer = AVIF_MIN(quantizer + 4, maxQuantizer);
                 }

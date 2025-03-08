@@ -42,12 +42,7 @@ static void printClapFraction(const char * name, int32_t n, int32_t d)
     }
 }
 
-static void avifImageDumpInternal(const avifImage * avif,
-                                  uint32_t gridCols,
-                                  uint32_t gridRows,
-                                  avifBool alphaPresent,
-                                  avifBool gainMapPresent,
-                                  avifProgressiveState progressiveState)
+static void avifImageDumpInternal(const avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifBool alphaPresent, avifProgressiveState progressiveState)
 {
     uint32_t width = avif->width;
     uint32_t height = avif->height;
@@ -106,14 +101,14 @@ static void avifImageDumpInternal(const avifImage * avif,
             avifCropRect cropRect;
             avifDiagnostics diag;
             avifDiagnosticsClearError(&diag);
-            avifBool validClap =
-                avifCropRectConvertCleanApertureBox(&cropRect, &avif->clap, avif->width, avif->height, avif->yuvFormat, &diag);
+            avifBool validClap = avifCropRectFromCleanApertureBox(&cropRect, &avif->clap, avif->width, avif->height, &diag);
             if (validClap) {
-                printf("      * Valid, derived crop rect: X: %d, Y: %d, W: %d, H: %d\n",
+                printf("      * Valid, derived crop rect: X: %d, Y: %d, W: %d, H: %d%s\n",
                        cropRect.x,
                        cropRect.y,
                        cropRect.width,
-                       cropRect.height);
+                       cropRect.height,
+                       avifCropRectRequiresUpsampling(&cropRect, avif->yuvFormat) ? " (upsample before cropping)" : "");
             } else {
                 printf("      * Invalid: %s\n", diag.error);
             }
@@ -130,7 +125,6 @@ static void avifImageDumpInternal(const avifImage * avif,
         printf(" * CLLI           : %hu, %hu\n", avif->clli.maxCLL, avif->clli.maxPALL);
     }
 
-#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
     printf(" * Gain map       : ");
     avifImage * gainMapImage = avif->gainMap ? avif->gainMap->image : NULL;
     if (gainMapImage != NULL) {
@@ -141,7 +135,7 @@ static void avifImageDumpInternal(const avifImage * avif,
                avifPixelFormatToString(gainMapImage->yuvFormat),
                (gainMapImage->yuvRange == AVIF_RANGE_FULL) ? "Full" : "Limited",
                gainMapImage->matrixCoefficients,
-               (avif->gainMap->metadata.baseHdrHeadroomN == 0) ? "SDR" : "HDR");
+               (avif->gainMap->baseHdrHeadroom.n == 0) ? "SDR" : "HDR");
         printf(" * Alternate image:\n");
         printf("    * Color Primaries: %u\n", avif->gainMap->altColorPrimaries);
         printf("    * Transfer Char. : %u\n", avif->gainMap->altTransferCharacteristics);
@@ -161,29 +155,22 @@ static void avifImageDumpInternal(const avifImage * avif,
             printf("    * CLLI           : %hu, %hu\n", gainMapImage->clli.maxCLL, gainMapImage->clli.maxPALL);
         }
         printf("\n");
-    } else if (gainMapPresent) {
+    } else if (avif->gainMap != NULL) {
         printf("Present (but ignored)\n");
     } else {
         printf("Absent\n");
     }
-#else
-    (void)gainMapPresent;
-#endif // AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP
 }
 
-void avifImageDump(const avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifBool gainMapPresent, avifProgressiveState progressiveState)
+void avifImageDump(const avifImage * avif, uint32_t gridCols, uint32_t gridRows, avifProgressiveState progressiveState)
 {
     const avifBool alphaPresent = avif->alphaPlane && (avif->alphaRowBytes > 0);
-    avifImageDumpInternal(avif, gridCols, gridRows, alphaPresent, gainMapPresent, progressiveState);
+    avifImageDumpInternal(avif, gridCols, gridRows, alphaPresent, progressiveState);
 }
 
 void avifContainerDump(const avifDecoder * decoder)
 {
-    avifBool gainMapPresent = AVIF_FALSE;
-#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
-    gainMapPresent = decoder->gainMapPresent;
-#endif
-    avifImageDumpInternal(decoder->image, 0, 0, decoder->alphaPresent, gainMapPresent, decoder->progressiveState);
+    avifImageDumpInternal(decoder->image, 0, 0, decoder->alphaPresent, decoder->progressiveState);
     if (decoder->imageSequenceTrackPresent) {
         if (decoder->repetitionCount == AVIF_REPETITION_COUNT_INFINITE) {
             printf(" * Repeat Count   : Infinite\n");

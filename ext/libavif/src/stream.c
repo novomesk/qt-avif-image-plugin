@@ -146,21 +146,44 @@ avifBool avifROStreamReadU64(avifROStream * stream, uint64_t * v)
     return AVIF_TRUE;
 }
 
-// Override of avifROStreamReadBits() for convenient uint8_t output.
-avifBool avifROStreamReadBits8(avifROStream * stream, uint8_t * v, size_t bitCount)
+avifBool avifROStreamSkipBits(avifROStream * stream, size_t bitCount)
 {
-    assert(bitCount <= sizeof(*v) * 8);
-    uint32_t v32;
-    if (!avifROStreamReadBits(stream, &v32, bitCount)) {
-        return AVIF_FALSE;
+    if (stream->numUsedBitsInPartialByte != 0) {
+        assert(stream->numUsedBitsInPartialByte < 8);
+        const size_t padding = AVIF_MIN(8 - stream->numUsedBitsInPartialByte, bitCount);
+        stream->numUsedBitsInPartialByte = (stream->numUsedBitsInPartialByte + padding) % 8;
+        bitCount -= padding;
+        if (bitCount == 0) {
+            return AVIF_TRUE;
+        }
     }
-    *v = (uint8_t)v32;
+    const size_t num_bytes = (bitCount + 7) / 8;
+    AVIF_CHECK(avifROStreamSkip(stream, num_bytes));
+    stream->numUsedBitsInPartialByte = bitCount % 8;
     return AVIF_TRUE;
 }
 
-avifBool avifROStreamReadBits(avifROStream * stream, uint32_t * v, size_t bitCount)
+avifBool avifROStreamReadBitsU8(avifROStream * stream, uint8_t * v, size_t bitCount)
 {
-    assert(bitCount <= sizeof(*v) * 8);
+    AVIF_CHECK(bitCount <= sizeof(*v) * 8);
+    uint32_t vU32;
+    AVIF_CHECK(avifROStreamReadBitsU32(stream, &vU32, bitCount));
+    *v = (uint8_t)vU32;
+    return AVIF_TRUE;
+}
+
+avifBool avifROStreamReadBitsU16(avifROStream * stream, uint16_t * v, size_t bitCount)
+{
+    AVIF_CHECK(bitCount <= sizeof(*v) * 8);
+    uint32_t vU32;
+    AVIF_CHECK(avifROStreamReadBitsU32(stream, &vU32, bitCount));
+    *v = (uint16_t)vU32;
+    return AVIF_TRUE;
+}
+
+avifBool avifROStreamReadBitsU32(avifROStream * stream, uint32_t * v, size_t bitCount)
+{
+    AVIF_CHECK(bitCount <= sizeof(*v) * 8);
     *v = 0;
     while (bitCount) {
         if (stream->numUsedBitsInPartialByte == 0) {
@@ -176,7 +199,7 @@ avifBool avifROStreamReadBits(avifROStream * stream, uint32_t * v, size_t bitCou
         // This way, packed bits can be found in the same order in the bit stream.
         const uint32_t bits = (*packedBits >> (8 - stream->numUsedBitsInPartialByte)) & ((1 << numBits) - 1);
         // The value bits are ordered from the most significant bit to the least significant bit.
-        // In the case where avifROStreamReadBits() is used to parse the unsigned integer value *v
+        // In the case where avifROStreamReadBitsU32() is used to parse the unsigned integer value *v
         // over multiple aligned bytes, this order corresponds to big endianness.
         *v |= bits << bitCount;
 
@@ -237,7 +260,9 @@ avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader *
     }
 
     if (!memcmp(header->type, "uuid", 4)) {
-        AVIF_CHECK(avifROStreamSkip(stream, 16)); // unsigned int(8) usertype[16] = extended_type;
+        AVIF_CHECK(avifROStreamRead(stream, header->usertype, 16)); // unsigned int(8) usertype[16] = extended_type;
+    } else {
+        memset(header->usertype, 0, sizeof(header->usertype));
     }
 
     size_t bytesRead = stream->offset - startOffset;
@@ -245,7 +270,7 @@ avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader *
         // Section 4.2.2 of ISO/IEC 14496-12.
         //   if size is 0, then this box shall be in a top-level box (i.e. not contained in another
         //   box), and be the last box in its 'file', and its payload extends to the end of that
-        //   enclosing 'file'. This is normally only used for a MediaDataBox.
+        //   enclosing 'file'. This is normally only used for a MediaDataBox ('mdat').
         if (!topLevel) {
             avifDiagnosticsPrintf(stream->diag, "%s: Non-top-level box with size 0", stream->diagContext);
             return AVIF_FALSE;
@@ -292,10 +317,10 @@ avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * versio
     return AVIF_TRUE;
 }
 
-avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforcedVersion)
+avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforcedVersion, uint32_t * flags)
 {
     uint8_t version;
-    AVIF_CHECK(avifROStreamReadVersionAndFlags(stream, &version, NULL));
+    AVIF_CHECK(avifROStreamReadVersionAndFlags(stream, &version, flags));
     if (version != enforcedVersion) {
         avifDiagnosticsPrintf(stream->diag, "%s: Expecting box version %u, got version %u", stream->diagContext, enforcedVersion, version);
         return AVIF_FALSE;

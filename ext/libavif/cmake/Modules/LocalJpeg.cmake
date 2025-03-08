@@ -1,4 +1,4 @@
-set(AVIF_LOCAL_JPEG_TAG "3.0.3")
+set(AVIF_JPEG_TAG "3.0.4")
 
 add_library(JPEG::JPEG STATIC IMPORTED GLOBAL)
 
@@ -22,11 +22,18 @@ else()
 
     set(JPEG_INSTALL_DIR "${prefix}/libjpeg-install")
 
+    # Set WITH_CRT_DLL to ON to compile libjpeg-turbo with /MD (use the DLL
+    # version of the run-time library) instead of /MT (use the static version
+    # of the run-time library) on Windows. On non-Windows platform, this causes
+    # a CMake warning, which is safe to ignore:
+    #   Manually-specified variables were not used by the project:
+    #
+    #     WITH_CRT_DLL
     ExternalProject_Add(
         libjpeg
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/libjpeg
         GIT_REPOSITORY "https://github.com/libjpeg-turbo/libjpeg-turbo.git"
-        GIT_TAG "${AVIF_LOCAL_JPEG_TAG}"
+        GIT_TAG "${AVIF_JPEG_TAG}"
         LIST_SEPARATOR |
         BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config $<CONFIG> --target jpeg-static
         CMAKE_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -40,6 +47,7 @@ else()
                    -DENABLE_STATIC=ON
                    -DCMAKE_BUILD_TYPE=Release
                    -DWITH_TURBOJPEG=OFF
+                   -DWITH_CRT_DLL=ON
         BUILD_BYPRODUCTS "${LIB_FILENAME}"
         INSTALL_COMMAND ""
     )

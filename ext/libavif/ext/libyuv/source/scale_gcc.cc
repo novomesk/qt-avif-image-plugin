@@ -114,8 +114,8 @@ void ScaleRowDown2_SSSE3(const uint8_t* src_ptr,
       : "+r"(src_ptr),   // %0
         "+r"(dst_ptr),   // %1
         "+r"(dst_width)  // %2
-        ::"memory",
-        "cc", "xmm0", "xmm1");
+      :
+      : "memory", "cc", "xmm0", "xmm1");
 }
 
 void ScaleRowDown2Linear_SSSE3(const uint8_t* src_ptr,
@@ -146,8 +146,8 @@ void ScaleRowDown2Linear_SSSE3(const uint8_t* src_ptr,
       : "+r"(src_ptr),   // %0
         "+r"(dst_ptr),   // %1
         "+r"(dst_width)  // %2
-        ::"memory",
-        "cc", "xmm0", "xmm1", "xmm4", "xmm5");
+      :
+      : "memory", "cc", "xmm0", "xmm1", "xmm4", "xmm5");
 }
 
 void ScaleRowDown2Box_SSSE3(const uint8_t* src_ptr,
@@ -195,7 +195,7 @@ void ScaleRowDown2_AVX2(const uint8_t* src_ptr,
                         uint8_t* dst_ptr,
                         int dst_width) {
   (void)src_stride;
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "vmovdqu     (%0),%%ymm0                   \n"
       "vmovdqu     0x20(%0),%%ymm1               \n"
@@ -209,11 +209,11 @@ void ScaleRowDown2_AVX2(const uint8_t* src_ptr,
       "sub         $0x20,%2                      \n"
       "jg          1b                            \n"
       "vzeroupper                                \n"
-               : "+r"(src_ptr),   // %0
-                 "+r"(dst_ptr),   // %1
-                 "+r"(dst_width)  // %2
-                 ::"memory",
-                 "cc", "xmm0", "xmm1");
+      : "+r"(src_ptr),   // %0
+        "+r"(dst_ptr),   // %1
+        "+r"(dst_width)  // %2
+      :
+      : "memory", "cc", "xmm0", "xmm1");
 }
 
 void ScaleRowDown2Linear_AVX2(const uint8_t* src_ptr,
@@ -246,8 +246,8 @@ void ScaleRowDown2Linear_AVX2(const uint8_t* src_ptr,
       : "+r"(src_ptr),   // %0
         "+r"(dst_ptr),   // %1
         "+r"(dst_width)  // %2
-        ::"memory",
-        "cc", "xmm0", "xmm1", "xmm4", "xmm5");
+      :
+      : "memory", "cc", "xmm0", "xmm1", "xmm4", "xmm5");
 }
 
 void ScaleRowDown2Box_AVX2(const uint8_t* src_ptr,
@@ -319,8 +319,8 @@ void ScaleRowDown4_SSSE3(const uint8_t* src_ptr,
       : "+r"(src_ptr),   // %0
         "+r"(dst_ptr),   // %1
         "+r"(dst_width)  // %2
-        ::"memory",
-        "cc", "xmm0", "xmm1", "xmm5");
+      :
+      : "memory", "cc", "xmm0", "xmm1", "xmm5");
 }
 
 void ScaleRowDown4Box_SSSE3(const uint8_t* src_ptr,
@@ -408,8 +408,8 @@ void ScaleRowDown4_AVX2(const uint8_t* src_ptr,
       : "+r"(src_ptr),   // %0
         "+r"(dst_ptr),   // %1
         "+r"(dst_width)  // %2
-        ::"memory",
-        "cc", "xmm0", "xmm1", "xmm5");
+      :
+      : "memory", "cc", "xmm0", "xmm1", "xmm5");
 }
 
 void ScaleRowDown4Box_AVX2(const uint8_t* src_ptr,
@@ -481,7 +481,7 @@ void ScaleRowDown34_SSSE3(const uint8_t* src_ptr,
         "m"(kShuf1),  // %1
         "m"(kShuf2)   // %2
   );
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm0                   \n"
       "movdqu      0x10(%0),%%xmm2               \n"
@@ -497,11 +497,11 @@ void ScaleRowDown34_SSSE3(const uint8_t* src_ptr,
       "lea         0x18(%1),%1                   \n"
       "sub         $0x18,%2                      \n"
       "jg          1b                            \n"
-               : "+r"(src_ptr),   // %0
-                 "+r"(dst_ptr),   // %1
-                 "+r"(dst_width)  // %2
-                 ::"memory",
-                 "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5");
+      : "+r"(src_ptr),   // %0
+        "+r"(dst_ptr),   // %1
+        "+r"(dst_width)  // %2
+      :
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5");
 }
 
 void ScaleRowDown34_1_Box_SSSE3(const uint8_t* src_ptr,
@@ -526,7 +526,7 @@ void ScaleRowDown34_1_Box_SSSE3(const uint8_t* src_ptr,
         "m"(kMadd11),  // %1
         "m"(kRound34)  // %2
   );
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm6                   \n"
       "movdqu      0x00(%0,%3,1),%%xmm7          \n"
@@ -559,13 +559,13 @@ void ScaleRowDown34_1_Box_SSSE3(const uint8_t* src_ptr,
       "lea         0x18(%1),%1                   \n"
       "sub         $0x18,%2                      \n"
       "jg          1b                            \n"
-               : "+r"(src_ptr),                // %0
-                 "+r"(dst_ptr),                // %1
-                 "+r"(dst_width)               // %2
-               : "r"((intptr_t)(src_stride)),  // %3
-                 "m"(kMadd21)                  // %4
-               : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5",
-                 "xmm6", "xmm7");
+      : "+r"(src_ptr),                // %0
+        "+r"(dst_ptr),                // %1
+        "+r"(dst_width)               // %2
+      : "r"((intptr_t)(src_stride)),  // %3
+        "m"(kMadd21)                  // %4
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6",
+        "xmm7");
 }
 
 void ScaleRowDown34_0_Box_SSSE3(const uint8_t* src_ptr,
@@ -591,7 +591,7 @@ void ScaleRowDown34_0_Box_SSSE3(const uint8_t* src_ptr,
         "m"(kRound34)  // %2
   );
 
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm6                   \n"
       "movdqu      0x00(%0,%3,1),%%xmm7          \n"
@@ -627,13 +627,13 @@ void ScaleRowDown34_0_Box_SSSE3(const uint8_t* src_ptr,
       "lea         0x18(%1),%1                   \n"
       "sub         $0x18,%2                      \n"
       "jg          1b                            \n"
-               : "+r"(src_ptr),                // %0
-                 "+r"(dst_ptr),                // %1
-                 "+r"(dst_width)               // %2
-               : "r"((intptr_t)(src_stride)),  // %3
-                 "m"(kMadd21)                  // %4
-               : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5",
-                 "xmm6", "xmm7");
+      : "+r"(src_ptr),                // %0
+        "+r"(dst_ptr),                // %1
+        "+r"(dst_width)               // %2
+      : "r"((intptr_t)(src_stride)),  // %3
+        "m"(kMadd21)                  // %4
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6",
+        "xmm7");
 }
 
 void ScaleRowDown38_SSSE3(const uint8_t* src_ptr,
@@ -682,7 +682,7 @@ void ScaleRowDown38_2_Box_SSSE3(const uint8_t* src_ptr,
         "m"(kShufAb2),  // %2
         "m"(kScaleAb2)  // %3
   );
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm0                   \n"
       "movdqu      0x00(%0,%3,1),%%xmm1          \n"
@@ -703,12 +703,11 @@ void ScaleRowDown38_2_Box_SSSE3(const uint8_t* src_ptr,
       "lea         0x6(%1),%1                    \n"
       "sub         $0x6,%2                       \n"
       "jg          1b                            \n"
-               : "+r"(src_ptr),               // %0
-                 "+r"(dst_ptr),               // %1
-                 "+r"(dst_width)              // %2
-               : "r"((intptr_t)(src_stride))  // %3
-               : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5",
-                 "xmm6");
+      : "+r"(src_ptr),               // %0
+        "+r"(dst_ptr),               // %1
+        "+r"(dst_width)              // %2
+      : "r"((intptr_t)(src_stride))  // %3
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6");
 }
 
 void ScaleRowDown38_3_Box_SSSE3(const uint8_t* src_ptr,
@@ -725,7 +724,7 @@ void ScaleRowDown38_3_Box_SSSE3(const uint8_t* src_ptr,
         "m"(kShufAc3),   // %1
         "m"(kScaleAc33)  // %2
   );
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm0                   \n"
       "movdqu      0x00(%0,%3,1),%%xmm6          \n"
@@ -765,12 +764,12 @@ void ScaleRowDown38_3_Box_SSSE3(const uint8_t* src_ptr,
       "lea         0x6(%1),%1                    \n"
       "sub         $0x6,%2                       \n"
       "jg          1b                            \n"
-               : "+r"(src_ptr),               // %0
-                 "+r"(dst_ptr),               // %1
-                 "+r"(dst_width)              // %2
-               : "r"((intptr_t)(src_stride))  // %3
-               : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5",
-                 "xmm6", "xmm7");
+      : "+r"(src_ptr),               // %0
+        "+r"(dst_ptr),               // %1
+        "+r"(dst_width)              // %2
+      : "r"((intptr_t)(src_stride))  // %3
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6",
+        "xmm7");
 }
 
 static const uvec8 kLinearShuffleFar = {2,  3,  0, 1, 6,  7,  4,  5,
@@ -840,7 +839,6 @@ void ScaleRowUp2_Bilinear_SSE2(const uint8_t* src_ptr,
                                ptrdiff_t dst_stride,
                                int dst_width) {
   asm volatile(
-      LABELALIGN
       "1:                                        \n"
       "pxor        %%xmm0,%%xmm0                 \n"  // 0
       // above line
@@ -1932,7 +1930,7 @@ void ScaleColsUp2_SSE2(uint8_t* dst_ptr,
                        int dx) {
   (void)x;
   (void)dx;
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%1),%%xmm0                   \n"
       "lea         0x10(%1),%1                   \n"
@@ -1945,11 +1943,11 @@ void ScaleColsUp2_SSE2(uint8_t* dst_ptr,
       "sub         $0x20,%2                      \n"
       "jg          1b                            \n"
 
-               : "+r"(dst_ptr),   // %0
-                 "+r"(src_ptr),   // %1
-                 "+r"(dst_width)  // %2
-                 ::"memory",
-                 "cc", "xmm0", "xmm1");
+      : "+r"(dst_ptr),   // %0
+        "+r"(src_ptr),   // %1
+        "+r"(dst_width)  // %2
+      :
+      : "memory", "cc", "xmm0", "xmm1");
 }
 
 void ScaleARGBRowDown2_SSE2(const uint8_t* src_argb,
@@ -1957,7 +1955,7 @@ void ScaleARGBRowDown2_SSE2(const uint8_t* src_argb,
                             uint8_t* dst_argb,
                             int dst_width) {
   (void)src_stride;
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm0                   \n"
       "movdqu      0x10(%0),%%xmm1               \n"
@@ -1967,11 +1965,11 @@ void ScaleARGBRowDown2_SSE2(const uint8_t* src_argb,
       "lea         0x10(%1),%1                   \n"
       "sub         $0x4,%2                       \n"
       "jg          1b                            \n"
-               : "+r"(src_argb),  // %0
-                 "+r"(dst_argb),  // %1
-                 "+r"(dst_width)  // %2
-                 ::"memory",
-                 "cc", "xmm0", "xmm1");
+      : "+r"(src_argb),  // %0
+        "+r"(dst_argb),  // %1
+        "+r"(dst_width)  // %2
+      :
+      : "memory", "cc", "xmm0", "xmm1");
 }
 
 void ScaleARGBRowDown2Linear_SSE2(const uint8_t* src_argb,
@@ -1979,7 +1977,7 @@ void ScaleARGBRowDown2Linear_SSE2(const uint8_t* src_argb,
                                   uint8_t* dst_argb,
                                   int dst_width) {
   (void)src_stride;
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm0                   \n"
       "movdqu      0x10(%0),%%xmm1               \n"
@@ -1992,18 +1990,18 @@ void ScaleARGBRowDown2Linear_SSE2(const uint8_t* src_argb,
       "lea         0x10(%1),%1                   \n"
       "sub         $0x4,%2                       \n"
       "jg          1b                            \n"
-               : "+r"(src_argb),  // %0
-                 "+r"(dst_argb),  // %1
-                 "+r"(dst_width)  // %2
-                 ::"memory",
-                 "cc", "xmm0", "xmm1");
+      : "+r"(src_argb),  // %0
+        "+r"(dst_argb),  // %1
+        "+r"(dst_width)  // %2
+      :
+      : "memory", "cc", "xmm0", "xmm1");
 }
 
 void ScaleARGBRowDown2Box_SSE2(const uint8_t* src_argb,
                                ptrdiff_t src_stride,
                                uint8_t* dst_argb,
                                int dst_width) {
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%0),%%xmm0                   \n"
       "movdqu      0x10(%0),%%xmm1               \n"
@@ -2020,11 +2018,11 @@ void ScaleARGBRowDown2Box_SSE2(const uint8_t* src_argb,
       "lea         0x10(%1),%1                   \n"
       "sub         $0x4,%2                       \n"
       "jg          1b                            \n"
-               : "+r"(src_argb),              // %0
-                 "+r"(dst_argb),              // %1
-                 "+r"(dst_width)              // %2
-               : "r"((intptr_t)(src_stride))  // %3
-               : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3");
+      : "+r"(src_argb),              // %0
+        "+r"(dst_argb),              // %1
+        "+r"(dst_width)              // %2
+      : "r"((intptr_t)(src_stride))  // %3
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3");
 }
 
 // Reads 4 pixels at a time.
@@ -2060,8 +2058,8 @@ void ScaleARGBRowDownEven_SSE2(const uint8_t* src_argb,
         "+r"(dst_argb),       // %2
         "+r"(dst_width),      // %3
         "=&r"(src_stepx_x12)  // %4
-        ::"memory",
-        "cc", "xmm0", "xmm1", "xmm2", "xmm3");
+      :
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3");
 }
 
 // Blends four 2x2 to 4x1.
@@ -2107,8 +2105,8 @@ void ScaleARGBRowDownEvenBox_SSE2(const uint8_t* src_argb,
         "+rm"(dst_width),      // %3
         "=&r"(src_stepx_x12),  // %4
         "+r"(row1)             // %5
-        ::"memory",
-        "cc", "xmm0", "xmm1", "xmm2", "xmm3");
+      :
+      : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3");
 }
 
 void ScaleARGBCols_SSE2(uint8_t* dst_argb,
@@ -2188,7 +2186,7 @@ void ScaleARGBColsUp2_SSE2(uint8_t* dst_argb,
                            int dx) {
   (void)x;
   (void)dx;
-  asm volatile(LABELALIGN
+  asm volatile(
       "1:                                        \n"
       "movdqu      (%1),%%xmm0                   \n"
       "lea         0x10(%1),%1                   \n"
@@ -2201,11 +2199,11 @@ void ScaleARGBColsUp2_SSE2(uint8_t* dst_argb,
       "sub         $0x8,%2                       \n"
       "jg          1b                            \n"
 
-               : "+r"(dst_argb),  // %0
-                 "+r"(src_argb),  // %1
-                 "+r"(dst_width)  // %2
-                 ::"memory",
-                 "cc", "xmm0", "xmm1");
+      : "+r"(dst_argb),  // %0
+        "+r"(src_argb),  // %1
+        "+r"(dst_width)  // %2
+      :
+      : "memory", "cc", "xmm0", "xmm1");
 }
 
 // Shuffle table for arranging 2 pixels into pairs for pmaddubsw
@@ -2283,8 +2281,7 @@ void ScaleARGBFilterCols_SSSE3(uint8_t* dst_argb,
       "packuswb    %%xmm0,%%xmm0                 \n"
       "movd        %%xmm0,(%0)                   \n"
 
-      LABELALIGN
-      "99:                                       \n"  // clang-format error.
+      LABELALIGN "99:                                       \n"
 
       : "+r"(dst_argb),    // %0
         "+r"(src_argb),    // %1

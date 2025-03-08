@@ -21,12 +21,6 @@ RECLIENT_CQ = {
 # Use LUCI Scheduler BBv2 names and add Scheduler realms configs.
 lucicfg.enable_experiment("crbug.com/1182002")
 
-luci.builder.defaults.experiments.set(
-    {
-        "luci.recipes.use_python3": 100,
-    },
-)
-
 lucicfg.config(
     lint_checks = ["default"],
     config_dir = ".",
@@ -175,6 +169,9 @@ luci.cq_group(
 
 luci.bucket(
     name = "ci",
+    constraints = luci.bucket_constraints(
+        pools = ["luci.flex.ci"],
+    ),
 )
 luci.bucket(
     name = "try",
@@ -184,6 +181,12 @@ luci.bucket(
             "service-account-cq",
         ]),
     ],
+    constraints = luci.bucket_constraints(
+        pools = ["luci.flex.try"],
+        service_accounts = [
+            "libyuv-try-builder@chops-service-accounts.iam.gserviceaccount.com",
+        ],
+    ),
 )
 luci.bucket(
     name = "cron",
@@ -197,7 +200,7 @@ def get_os_dimensions(os):
     elif os == "win":
         return {"os": "Windows-10", "cores": "8", "cpu": "x86-64"}
     elif os == "linux":
-        return {"os": "Ubuntu-18.04", "cores": "8", "cpu": "x86-64"}
+        return {"os": "Ubuntu-22.04", "cores": "8", "cpu": "x86-64"}
     return {}
 
 def libyuv_ci_builder(name, dimensions, properties, triggered_by):
@@ -327,7 +330,8 @@ try_builder("ios_arm64_rel", "ios")
 try_builder("linux", "linux")
 try_builder("linux_asan", "linux")
 try_builder("linux_gcc", "linux", experiment_percentage = 100)
-try_builder("linux_msan", "linux")
+# TODO(libyuv:388428508): Make linux_msan not experimental.
+try_builder("linux_msan", "linux", experiment_percentage = 100)
 try_builder("linux_rel", "linux")
 try_builder("linux_tsan2", "linux")
 try_builder("linux_ubsan", "linux")

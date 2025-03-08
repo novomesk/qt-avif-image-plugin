@@ -139,13 +139,6 @@ AVIF_NODISCARD avifBool avifFractionCD(avifFraction * a, avifFraction * b);
 AVIF_NODISCARD avifBool avifFractionAdd(avifFraction a, avifFraction b, avifFraction * result);
 AVIF_NODISCARD avifBool avifFractionSub(avifFraction a, avifFraction b, avifFraction * result);
 
-// Creates an int32 fraction that is approximately equal to 'v'.
-// Returns AVIF_FALSE if 'v' is NaN or abs(v) is > INT32_MAX.
-AVIF_NODISCARD avifBool avifDoubleToSignedFraction(double v, int32_t * numerator, uint32_t * denominator);
-// Creates a uint32 fraction that is approximately equal to 'v'.
-// Returns AVIF_FALSE if 'v' is < 0 or > UINT32_MAX or NaN.
-AVIF_NODISCARD avifBool avifDoubleToUnsignedFraction(double v, uint32_t * numerator, uint32_t * denominator);
-
 void avifImageSetDefaults(avifImage * image);
 // Copies all fields that do not need to be freed/allocated from srcImage to dstImage.
 void avifImageCopyNoAlloc(avifImage * dstImage, const avifImage * srcImage);
@@ -153,8 +146,20 @@ void avifImageCopyNoAlloc(avifImage * dstImage, const avifImage * srcImage);
 // Copies the samples from srcImage to dstImage. dstImage must be allocated.
 // srcImage and dstImage must have the same width, height, and depth.
 // If the AVIF_PLANES_YUV bit is set in planes, then srcImage and dstImage must have the same yuvFormat.
-// Ignores the gainMap field (which exists only if AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP is defined).
+// Ignores the gainMap field.
 void avifImageCopySamples(avifImage * dstImage, const avifImage * srcImage, avifPlanesFlags planes);
+
+// Appends an opaque image item property.
+AVIF_API avifResult avifImagePushProperty(avifImage * image,
+                                          const uint8_t boxtype[4],
+                                          const uint8_t usertype[16],
+                                          const uint8_t * boxPayload,
+                                          size_t boxPayloadSize);
+
+// Check if the FourCC property value is a known value
+AVIF_NODISCARD avifBool avifIsKnownPropertyType(const uint8_t boxtype[4]);
+// Check if the extended property (UUID) is valid
+AVIF_NODISCARD avifBool avifIsValidUUID(const uint8_t uuid[16]);
 
 // ---------------------------------------------------------------------------
 
@@ -174,28 +179,37 @@ typedef enum avifSampleTransformTokenType
     // Operands.
     AVIF_SAMPLE_TRANSFORM_CONSTANT = 0,
     AVIF_SAMPLE_TRANSFORM_INPUT_IMAGE_ITEM_INDEX = 1,
+    AVIF_SAMPLE_TRANSFORM_FIRST_INPUT_IMAGE_ITEM_INDEX = 1,
+    AVIF_SAMPLE_TRANSFORM_LAST_INPUT_IMAGE_ITEM_INDEX = 32,
 
-    // Operators. L is the left operand. R is the right operand if there are two operands.
-    AVIF_SAMPLE_TRANSFORM_NEGATE = 2,     // S = -L
-    AVIF_SAMPLE_TRANSFORM_ABSOLUTE = 3,   // S = |L|
-    AVIF_SAMPLE_TRANSFORM_SUM = 4,        // S = L + R
-    AVIF_SAMPLE_TRANSFORM_DIFFERENCE = 5, // S = L - R
-    AVIF_SAMPLE_TRANSFORM_PRODUCT = 6,    // S = L * R
-    AVIF_SAMPLE_TRANSFORM_DIVIDE = 7,     // S = R==0 ? L : floor(L / R)
-    AVIF_SAMPLE_TRANSFORM_AND = 8,        // S = L & R
-    AVIF_SAMPLE_TRANSFORM_OR = 9,         // S = L | R
-    AVIF_SAMPLE_TRANSFORM_XOR = 10,       // S = L ^ R
-    AVIF_SAMPLE_TRANSFORM_NOT = 11,       // S = ~L
-    AVIF_SAMPLE_TRANSFORM_MSB = 12,       // S = L<=0 ? 0 : floor(log2(L))
-    AVIF_SAMPLE_TRANSFORM_POW = 13,       // S = L==0 ? 0 : pow(L, R)
-    AVIF_SAMPLE_TRANSFORM_MIN = 14,       // S = L<=R ? L : R
-    AVIF_SAMPLE_TRANSFORM_MAX = 15,       // S = L<=R ? R : L
-    AVIF_SAMPLE_TRANSFORM_RESERVED
+    // Unary operators. L is the operand.
+    AVIF_SAMPLE_TRANSFORM_FIRST_UNARY_OPERATOR = 64,
+    AVIF_SAMPLE_TRANSFORM_NEGATION = 64, // S = -L
+    AVIF_SAMPLE_TRANSFORM_ABSOLUTE = 65, // S = |L|
+    AVIF_SAMPLE_TRANSFORM_NOT = 66,      // S = ~L
+    AVIF_SAMPLE_TRANSFORM_BSR = 67,      // S = L<=0 ? 0 : truncate(log2(L))
+    AVIF_SAMPLE_TRANSFORM_LAST_UNARY_OPERATOR = 67,
+
+    // Binary operators. L is the left operand. R is the right operand.
+    AVIF_SAMPLE_TRANSFORM_FIRST_BINARY_OPERATOR = 128,
+    AVIF_SAMPLE_TRANSFORM_SUM = 128,        // S = L + R
+    AVIF_SAMPLE_TRANSFORM_DIFFERENCE = 129, // S = L - R
+    AVIF_SAMPLE_TRANSFORM_PRODUCT = 130,    // S = L * R
+    AVIF_SAMPLE_TRANSFORM_QUOTIENT = 131,   // S = R==0 ? L : truncate(L / R)
+    AVIF_SAMPLE_TRANSFORM_AND = 132,        // S = L & R
+    AVIF_SAMPLE_TRANSFORM_OR = 133,         // S = L | R
+    AVIF_SAMPLE_TRANSFORM_XOR = 134,        // S = L ^ R
+    AVIF_SAMPLE_TRANSFORM_POW = 135,        // S = L==0 ? 0 : truncate(pow(L, R))
+    AVIF_SAMPLE_TRANSFORM_MIN = 136,        // S = L<=R ? L : R
+    AVIF_SAMPLE_TRANSFORM_MAX = 137,        // S = L<=R ? R : L
+    AVIF_SAMPLE_TRANSFORM_LAST_BINARY_OPERATOR = 137,
+
+    AVIF_SAMPLE_TRANSFORM_RESERVED = 138
 } avifSampleTransformTokenType;
 
 typedef struct avifSampleTransformToken
 {
-    uint8_t type;                // avifSampleTransformTokenType
+    avifSampleTransformTokenType type;
     int32_t constant;            // If type is AVIF_SAMPLE_TRANSFORM_CONSTANT.
                                  // Only 32-bit (bit_depth=2) constants are supported.
     uint8_t inputImageItemIndex; // If type is AVIF_SAMPLE_TRANSFORM_INPUT_IMAGE_ITEM_INDEX. 1-based.
@@ -259,10 +273,8 @@ typedef enum avifReformatMode
     AVIF_REFORMAT_MODE_YUV_COEFFICIENTS = 0, // Normal YUV conversion using coefficients
     AVIF_REFORMAT_MODE_IDENTITY,             // Pack GBR directly into YUV planes (AVIF_MATRIX_COEFFICIENTS_IDENTITY)
     AVIF_REFORMAT_MODE_YCGCO,                // YUV conversion using AVIF_MATRIX_COEFFICIENTS_YCGCO
-#if defined(AVIF_ENABLE_EXPERIMENTAL_YCGCO_R)
-    AVIF_REFORMAT_MODE_YCGCO_RE, // YUV conversion using AVIF_MATRIX_COEFFICIENTS_YCGCO_RE
-    AVIF_REFORMAT_MODE_YCGCO_RO, // YUV conversion using AVIF_MATRIX_COEFFICIENTS_YCGCO_RO
-#endif
+    AVIF_REFORMAT_MODE_YCGCO_RE,             // YUV conversion using AVIF_MATRIX_COEFFICIENTS_YCGCO_RE
+    AVIF_REFORMAT_MODE_YCGCO_RO,             // YUV conversion using AVIF_MATRIX_COEFFICIENTS_YCGCO_RO
 } avifReformatMode;
 
 typedef enum avifAlphaMultiplyMode
@@ -391,9 +403,7 @@ typedef enum avifItemCategory
 {
     AVIF_ITEM_COLOR,
     AVIF_ITEM_ALPHA,
-#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
     AVIF_ITEM_GAIN_MAP,
-#endif
 #if defined(AVIF_ENABLE_EXPERIMENTAL_SAMPLE_TRANSFORM)
     AVIF_ITEM_SAMPLE_TRANSFORM, // Sample Transform derived image item 'sato'.
     // Extra input image items for AVIF_ITEM_SAMPLE_TRANSFORM. "Extra" because AVIF_ITEM_COLOR could be one too.
@@ -408,6 +418,7 @@ typedef enum avifItemCategory
 avifBool avifIsAlpha(avifItemCategory itemCategory);
 
 #if defined(AVIF_ENABLE_EXPERIMENTAL_SAMPLE_TRANSFORM)
+// AVIF allows up to 32 inputs for sample transforms but we only support a smaller number.
 #define AVIF_SAMPLE_TRANSFORM_MAX_NUM_EXTRA_INPUT_IMAGE_ITEMS \
     (AVIF_ITEM_SAMPLE_TRANSFORM_INPUT_0_ALPHA - AVIF_ITEM_SAMPLE_TRANSFORM_INPUT_0_COLOR)
 #define AVIF_SAMPLE_TRANSFORM_MAX_NUM_INPUT_IMAGE_ITEMS \
@@ -417,31 +428,6 @@ avifBool avifIsAlpha(avifItemCategory itemCategory);
 #define AVIF_SAMPLE_TRANSFORM_MAX_CATEGORY \
     (AVIF_ITEM_SAMPLE_TRANSFORM_INPUT_0_ALPHA + AVIF_SAMPLE_TRANSFORM_MAX_NUM_EXTRA_INPUT_IMAGE_ITEMS - 1)
 #endif
-
-// ---------------------------------------------------------------------------
-
-#if defined(AVIF_ENABLE_EXPERIMENTAL_METAV1)
-// HEIF pixel_format field meaning in MetaBox with version 1
-typedef enum avifMetaV1PixelFormat
-{
-    AVIF_METAV1_PIXEL_FORMAT_FLOAT16 = 0, // binary16 as defined by IEEE 754-2008
-    AVIF_METAV1_PIXEL_FORMAT_FLOAT32 = 1, // binary32 as defined by IEEE 754-2008
-    AVIF_METAV1_PIXEL_FORMAT_FLOAT64 = 2, // binary64 as defined by IEEE 754-2008
-    AVIF_METAV1_PIXEL_FORMAT_UINT4 = 3,
-    AVIF_METAV1_PIXEL_FORMAT_UINT5 = 4,
-    AVIF_METAV1_PIXEL_FORMAT_UINT6 = 5,
-    AVIF_METAV1_PIXEL_FORMAT_UINT7 = 6,
-    AVIF_METAV1_PIXEL_FORMAT_UINT8 = 7,
-    AVIF_METAV1_PIXEL_FORMAT_UINT9 = 8,
-    AVIF_METAV1_PIXEL_FORMAT_UINT10 = 9,
-    AVIF_METAV1_PIXEL_FORMAT_UINT11 = 10,
-    AVIF_METAV1_PIXEL_FORMAT_UINT12 = 11,
-    AVIF_METAV1_PIXEL_FORMAT_UINT13 = 12,
-    AVIF_METAV1_PIXEL_FORMAT_UINT14 = 13,
-    AVIF_METAV1_PIXEL_FORMAT_UINT15 = 14,
-    AVIF_METAV1_PIXEL_FORMAT_UINT16 = 15,
-} avifMetaV1PixelFormat;
-#endif // AVIF_ENABLE_EXPERIMENTAL_METAV1
 
 // ---------------------------------------------------------------------------
 // Grid AVIF images
@@ -462,11 +448,11 @@ AVIF_NODISCARD avifBool avifAreGridDimensionsValid(avifPixelFormat yuvFormat,
 // image->imir on success. Returns AVIF_RESULT_INVALID_EXIF_PAYLOAD on failure.
 avifResult avifImageExtractExifOrientationToIrotImir(avifImage * image);
 
-#if defined(AVIF_ENABLE_EXPERIMENTAL_METAV1)
+#if defined(AVIF_ENABLE_EXPERIMENTAL_MINI)
 // Returns the Exif orientation in [1-8] as defined in JEITA CP-3451C section 4.6.4.A Orientation
 // corresponding to image->irot and image->imir.
 uint8_t avifImageIrotImirToExifOrientation(const avifImage * image);
-#endif // AVIF_ENABLE_EXPERIMENTAL_METAV1
+#endif // AVIF_ENABLE_EXPERIMENTAL_MINI
 
 // ---------------------------------------------------------------------------
 // avifCodecDecodeInput
@@ -573,7 +559,6 @@ typedef enum avifEncoderChange
 typedef int avifEncoderChanges;
 
 typedef avifBool (*avifCodecGetNextImageFunc)(struct avifCodec * codec,
-                                              struct avifDecoder * decoder,
                                               const avifDecodeSample * sample,
                                               avifBool alpha,
                                               avifBool * isLimitedRangeAlpha,
@@ -618,9 +603,12 @@ typedef struct avifCodec
     struct avifCodecInternal * internal;  // up to each codec to use how it wants
                                           //
     avifDiagnostics * diag;               // Shallow copy; owned by avifEncoder or avifDecoder
-                                          //
-    uint8_t operatingPoint;               // Operating point, defaults to 0.
-    avifBool allLayers;                   // if true, the underlying codec must decode all layers, not just the best layer
+
+    // Decoder options (for getNextImage):
+    int maxThreads;          // See avifDecoder::maxThreads.
+    uint32_t imageSizeLimit; // See avifDecoder::imageSizeLimit.
+    uint8_t operatingPoint;  // Operating point, defaults to 0.
+    avifBool allLayers;      // if true, the underlying codec must decode all layers, not just the best layer
 
     avifCodecGetNextImageFunc getNextImage;
     avifCodecEncodeImageFunc encodeImage;
@@ -674,6 +662,7 @@ typedef struct avifBoxHeader
     size_t size;
 
     uint8_t type[4];
+    uint8_t usertype[16]; // Unused unless |type| is "uuid".
 } avifBoxHeader;
 
 typedef struct avifROStream
@@ -714,10 +703,12 @@ AVIF_NODISCARD avifBool avifROStreamReadString(avifROStream * stream, char * out
 AVIF_NODISCARD avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header); // This fails if the size reported by the header cannot fit in the stream
 AVIF_NODISCARD avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader * header, avifBool topLevel); // This doesn't require that the full box can fit in the stream
 AVIF_NODISCARD avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * version, uint32_t * flags); // version and flags ptrs are both optional
-AVIF_NODISCARD avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforcedVersion); // currently discards flags
-// The following functions can write non-aligned bits.
-AVIF_NODISCARD avifBool avifROStreamReadBits8(avifROStream * stream, uint8_t * v, size_t bitCount);
-AVIF_NODISCARD avifBool avifROStreamReadBits(avifROStream * stream, uint32_t * v, size_t bitCount);
+AVIF_NODISCARD avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforcedVersion, uint32_t * flags); // flags ptr is optional
+// The following functions can read non-aligned bits.
+AVIF_NODISCARD avifBool avifROStreamSkipBits(avifROStream * stream, size_t bitCount);
+AVIF_NODISCARD avifBool avifROStreamReadBitsU8(avifROStream * stream, uint8_t * v, size_t bitCount);
+AVIF_NODISCARD avifBool avifROStreamReadBitsU16(avifROStream * stream, uint16_t * v, size_t bitCount);
+AVIF_NODISCARD avifBool avifROStreamReadBitsU32(avifROStream * stream, uint32_t * v, size_t bitCount);
 
 typedef struct avifRWStream
 {
@@ -796,10 +787,25 @@ typedef struct avifSequenceHeader
 
 AVIF_NODISCARD avifBool avifSequenceHeaderParse(avifSequenceHeader * header, const avifROData * sample, avifCodecType codecType);
 
+#if defined(AVIF_ENABLE_EXPERIMENTAL_EXTENDED_PIXI)
+// Subsampling type as defined in ISO/IEC 23008-12:2024/CDAM 2:2025 section 6.5.6.3.
+typedef enum avifPixiSubsamplingType
+{
+    AVIF_PIXI_444 = 0,
+    AVIF_PIXI_422 = 1,
+    AVIF_PIXI_420 = 2,
+    AVIF_PIXI_411 = 3,
+    AVIF_PIXI_440 = 4,
+    AVIF_PIXI_SUBSAMPLING_RESERVED = 5,
+} avifPixiSubsamplingType;
+
+// Mapping from subsampling_x, subsampling_y as defined in AV1 specification Section 6.4.2
+// to PixelInformationBox subsampling_type as defined in ISO/IEC 23008-12:2024/CDAM 2:2025 section 6.5.6.3.
+uint8_t avifCodecConfigurationBoxGetSubsamplingType(const avifCodecConfigurationBox * av1C, uint8_t channelIndex);
+#endif
+
 // ---------------------------------------------------------------------------
 // gain maps
-
-#if defined(AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP)
 
 // Finds the approximate min/max values from the given gain map values, excluding outliers.
 // Uses a histogram, with outliers defined as having at least one empty bucket between them
@@ -807,7 +813,7 @@ AVIF_NODISCARD avifBool avifSequenceHeaderParse(avifSequenceHeader * header, con
 // Removing outliers helps with accuracy/compression.
 avifResult avifFindMinMaxWithoutOutliers(const float * gainMapF, int numPixels, float * rangeMin, float * rangeMax);
 
-#endif // AVIF_ENABLE_EXPERIMENTAL_GAIN_MAP
+avifResult avifGainMapValidateMetadata(const avifGainMap * gainMap, avifDiagnostics * diag);
 
 #define AVIF_INDEFINITE_DURATION64 UINT64_MAX
 #define AVIF_INDEFINITE_DURATION32 UINT32_MAX
