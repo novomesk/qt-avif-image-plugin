@@ -8,6 +8,21 @@ The changes are relative to the previous release, unless the baseline is specifi
 
 ## [Unreleased]
 
+## [1.2.1] - 2025-03-17
+
+### Added since 1.2.0
+
+* Add support for outputting all frames of an image sequence in `avifdec`. 
+  `avifdec --index all sequence.avif out.png` creates files named
+  `out-xxxxxxxxxx.png` where xxxxxxxxxx are the zero-padded frame indices.
+
+### Changed since 1.2.0
+
+* Fix local libargparse dependency patch step on macOS 10.15 and earlier.
+* Patch local libyuv dependency for compatibility with gcc 10.
+* Use stricter C99 syntax to avoid related compilation issues.
+* Update svt.cmd/svt.sh/LocalSvt.cmake to v3.0.1.
+
 ## [1.2.0] - 2025-02-25
 
 ### Added since 1.1.1
@@ -1212,7 +1227,8 @@ code.
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/AOMediaCodec/libavif/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/AOMediaCodec/libavif/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/AOMediaCodec/libavif/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/AOMediaCodec/libavif/compare/v1.0.0...v1.1.0
