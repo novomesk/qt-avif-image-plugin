@@ -1,4 +1,4 @@
-set(AVIF_LIBYUV_TAG "ccdf870348764e4b77fa3b56accb2a896a901bad")
+set(AVIF_LIBYUV_TAG "4db2af62dab48895226be6b52737247e898ebe36")
 
 set(AVIF_LIBYUV_BUILD_DIR "${AVIF_SOURCE_DIR}/ext/libyuv/build")
 # If ${ANDROID_ABI} is set, look for the library under that subdirectory.
@@ -40,8 +40,6 @@ else()
         GIT_REPOSITORY "https://chromium.googlesource.com/libyuv/libyuv"
         BINARY_DIR "${LIBYUV_BINARY_DIR}"
         GIT_TAG "${AVIF_LIBYUV_TAG}"
-        # TODO: https://libyuv.issues.chromium.org/issues/399856238 - Remove when fixed upstream
-        PATCH_COMMAND git apply --ignore-whitespace "${AVIF_SOURCE_DIR}/ext/libyuv.patch"
         UPDATE_COMMAND ""
     )
 

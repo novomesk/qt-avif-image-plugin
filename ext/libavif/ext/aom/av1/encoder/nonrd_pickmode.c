@@ -322,10 +322,10 @@ static int search_new_mv(AV1_COMP *cpi, MACROBLOCK *x,
 
     int me_search_size_col = block_size_wide[bsize] >> 1;
     int me_search_size_row = block_size_high[bsize] >> 1;
+    MV ref_mv = av1_get_ref_mv(x, 0).as_mv;
     tmp_sad = av1_int_pro_motion_estimation(
-        cpi, x, bsize, mi_row, mi_col,
-        &x->mbmi_ext.ref_mv_stack[ref_frame][0].this_mv.as_mv, &y_sad_zero,
-        me_search_size_col, me_search_size_row);
+        cpi, x, bsize, mi_row, mi_col, &ref_mv, &y_sad_zero, me_search_size_col,
+        me_search_size_row);
 
     if (tmp_sad > x->pred_mv_sad[LAST_FRAME]) return -1;
 
@@ -333,7 +333,6 @@ static int search_new_mv(AV1_COMP *cpi, MACROBLOCK *x,
     int_mv best_mv = mi->mv[0];
     best_mv.as_mv.row >>= 3;
     best_mv.as_mv.col >>= 3;
-    MV ref_mv = av1_get_ref_mv(x, 0).as_mv;
     this_ref_frm_newmv->as_mv.row >>= 3;
     this_ref_frm_newmv->as_mv.col >>= 3;
 

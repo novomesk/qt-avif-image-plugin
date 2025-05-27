@@ -230,7 +230,7 @@ static void syntaxLong(void)
     printf("                                        Use 2 for any you wish to leave unspecified\n");
     printf("    -r,--range RANGE                  : YUV range, one of 'limited' or 'l', 'full' or 'f'. (JPEG/PNG only, default: full; For y4m or stdin, range is retained)\n");
     printf("    --target-size S                   : Set target file size in bytes (up to 7 times slower)\n");
-    printf("    --progressive                     : EXPERIMENTAL: Auto set parameters to encode a simple layered image supporting progressive rendering from a single input frame.\n");
+    printf("    --progressive                     : EXPERIMENTAL: Automatically set parameters to encode a simple layered image supporting progressive rendering from a single input frame.\n");
     printf("    --layered                         : EXPERIMENTAL: Encode a layered AVIF. Each input is encoded as one layer and at most %d layers can be encoded.\n",
            AVIF_MAX_AV1_LAYER_COUNT);
     printf("    -g,--grid MxN                     : Encode a single-image grid AVIF with M cols & N rows. Either supply MxN identical W/H/D images, or a single\n");
@@ -279,8 +279,12 @@ static void syntaxLong(void)
            AVIF_QUALITY_LOSSLESS);
 #endif
     printf("    --tilerowslog2 R                  : log2 of number of tile rows in 0..6. (Default: 0)\n");
+    printf("                                        If specified, switch to manual tiling.\n");
     printf("    --tilecolslog2 C                  : log2 of number of tile columns 0..6. (Default: 0)\n");
+    printf("                                        If specified, switch to manual tiling.\n");
     printf("    --autotiling                      : Set --tilerowslog2 and --tilecolslog2 automatically\n");
+    printf("                                        If specified, switch to automatic tiling.\n");
+    printf("                                        avifenc starts in automatic tiling mode.\n");
     printf("    --min QP                          : Deprecated, use -q 0..100 instead\n");
     printf("    --max QP                          : Deprecated, use -q 0..100 instead\n");
     printf("    --minalpha QP                     : Deprecated, use --qalpha 0..100 instead\n");
@@ -850,7 +854,7 @@ static avifBool avifImageSplitGrid(const avifImage * gridSplitImage, uint32_t gr
 #define INVALID_QUALITY (-1)
 #define DEFAULT_QUALITY 60 // Maps to a quantizer (QP) of 25.
 #define DEFAULT_QUALITY_GAIN_MAP DEFAULT_QUALITY
-#define PROGRESSIVE_WORST_QUALITY 10 // Not doing auto automatic layered encoding below this quality
+#define PROGRESSIVE_WORST_QUALITY 10 // Not doing automatic layered encoding below this quality
 #define PROGRESSIVE_START_QUALITY 2  // First layer use this quality
 
 static avifBool avifEncodeUpdateEncoderSettings(avifEncoder * encoder, const avifInputFileSettings * settings)
@@ -1005,7 +1009,10 @@ static avifBool avifEncodeRestOfImageSequence(avifEncoder * encoder,
             goto cleanup;
         }
 
-        printf(" * Encoding frame %d [%" PRIu64 "/%" PRIu64 " ts] color quality [%d (%s)], alpha quality [%d (%s)]: %s\n",
+        char manualTilingStr[128];
+        snprintf(manualTilingStr, sizeof(manualTilingStr), "tileRowsLog2 [%d], tileColsLog2 [%d]", encoder->tileRowsLog2, encoder->tileColsLog2);
+
+        printf(" * Encoding frame %d [%" PRIu64 "/%" PRIu64 " ts] color quality [%d (%s)], alpha quality [%d (%s)], %s: %s\n",
                imageIndex,
                nextDurationInTimescales,
                settings->outputTiming.timescale,
@@ -1013,6 +1020,7 @@ static avifBool avifEncodeRestOfImageSequence(avifEncoder * encoder,
                qualityString(encoder->quality),
                encoder->qualityAlpha,
                qualityString(encoder->qualityAlpha),
+               encoder->autoTiling ? "automatic tiling" : manualTilingStr,
                avifPrettyFilename(nextFile->filename));
 
         const avifResult nextImageResult = avifEncoderAddImage(encoder, nextImage, nextDurationInTimescales, AVIF_ADD_IMAGE_FLAG_NONE);
@@ -1153,13 +1161,6 @@ static avifBool avifEncodeImagesFixedQuality(const avifSettings * settings,
         goto cleanup;
     }
 
-    char manualTilingStr[128];
-    snprintf(manualTilingStr,
-             sizeof(manualTilingStr),
-             "tileRowsLog2 [%d], tileColsLog2 [%d]",
-             firstFile->settings.tileRowsLog2.value,
-             firstFile->settings.tileColsLog2.value);
-
     encoder->maxThreads = settings->jobs;
     encoder->codecChoice = settings->codecChoice;
     encoder->speed = settings->speed;
@@ -1198,6 +1199,9 @@ static avifBool avifEncodeImagesFixedQuality(const avifSettings * settings,
     }
 #endif
 
+    char manualTilingStr[128];
+    snprintf(manualTilingStr, sizeof(manualTilingStr), "tileRowsLog2 [%d], tileColsLog2 [%d]", encoder->tileRowsLog2, encoder->tileColsLog2);
+
     printf("Encoding with initial settings: codec '%s' speed [%s], color quality [%d (%s)], alpha quality [%d (%s)]%s, %s, %d worker thread(s), please wait...\n",
            codecName ? codecName : "none",
            speedStr,
@@ -1209,8 +1213,9 @@ static avifBool avifEncodeImagesFixedQuality(const avifSettings * settings,
            encoder->autoTiling ? "automatic tiling" : manualTilingStr,
            settings->jobs);
     if (settings->progressive) {
-        // If the color quality is less than 10, the main() function overrides
-        // --progressive and sets settings->autoProgressive to false.
+        // If --progressive is specified and the color quality is less than
+        // PROGRESSIVE_WORST_QUALITY, the main() function returns an error and
+        // we should not reach here.
         assert(encoder->quality >= PROGRESSIVE_WORST_QUALITY);
         // Encode the base layer with a very low quality to ensure a small encoded size.
         encoder->quality = 2;
@@ -1243,7 +1248,13 @@ static avifBool avifEncodeImagesFixedQuality(const avifSettings * settings,
 
         uint64_t firstDurationInTimescales = firstFile->duration ? firstFile->duration : settings->outputTiming.duration;
         if (firstFile->filename == AVIF_FILENAME_STDIN || (settings->layers == 1 && input->filesCount > 1)) {
-            printf(" * Encoding frame %d [%" PRIu64 "/%" PRIu64 " ts] color quality [%d (%s)], alpha quality [%d (%s)]: %s\n",
+            snprintf(manualTilingStr,
+                     sizeof(manualTilingStr),
+                     "tileRowsLog2 [%d], tileColsLog2 [%d]",
+                     encoder->tileRowsLog2,
+                     encoder->tileColsLog2);
+
+            printf(" * Encoding frame %d [%" PRIu64 "/%" PRIu64 " ts] color quality [%d (%s)], alpha quality [%d (%s)], %s: %s\n",
                    0,
                    firstDurationInTimescales,
                    settings->outputTiming.timescale,
@@ -1251,6 +1262,7 @@ static avifBool avifEncodeImagesFixedQuality(const avifSettings * settings,
                    qualityString(encoder->quality),
                    encoder->qualityAlpha,
                    qualityString(encoder->qualityAlpha),
+                   encoder->autoTiling ? "automatic tiling" : manualTilingStr,
                    avifPrettyFilename(firstFile->filename));
         }
         const avifResult addImageResult = avifEncoderAddImage(encoder, firstImage, firstDurationInTimescales, addImageFlags);
@@ -2121,23 +2133,23 @@ int main(int argc, char * argv[])
         avifInputFileSettings * fileSettings = &file->settings;
 
         // Check tiling parameters.
-        // Auto tiling (autoTiling) and manual tiling (tileRowsLog2, tileColsLog2) are mutually exclusive, which means:
-        // - At each input, only one of the two shall be set.
-        // - At some input, specify one disables the other.
+        // Automatic tiling (autoTiling) and manual tiling (tileRowsLog2, tileColsLog2) are mutually exclusive, which means:
+        // - At each input, only one of the two may be set.
+        // - At some input, specifying one disables the other.
         if (fileSettings->autoTiling.set) {
             if (fileSettings->tileRowsLog2.set || fileSettings->tileColsLog2.set) {
                 fprintf(stderr, "ERROR: --autotiling is specified but --tilerowslog2 or --tilecolslog2 is also specified for current input.\n");
                 goto cleanup;
             }
             // At this point, autoTiling of this input file can only be set by command line.
-            // (auto generation of setting entries happens below)
+            // (automatic generation of setting entries happens below)
             // Since it's a boolean flag, its value must be AVIF_TRUE.
             assert(fileSettings->autoTiling.value);
-            // Therefore disables manual tiling at this input (in case it was enabled at previous input).
+            // Therefore disable manual tiling at this input (in case it was enabled at previous input).
             fileSettings->tileRowsLog2 = intSettingsEntryOf(0);
             fileSettings->tileColsLog2 = intSettingsEntryOf(0);
         } else if (fileSettings->tileColsLog2.set || fileSettings->tileRowsLog2.set) {
-            // If this file has manual tile config set, disable autotiling, for the same reason as above.
+            // If this file has manual tile config set, disable automatic tiling, for the same reason as above.
             fileSettings->autoTiling = boolSettingsEntryOf(AVIF_FALSE);
         }
 
@@ -2202,7 +2214,7 @@ int main(int argc, char * argv[])
             }
 
             if (!fileSettings->autoTiling.set) {
-                fileSettings->autoTiling = boolSettingsEntryOf(AVIF_FALSE);
+                fileSettings->autoTiling = boolSettingsEntryOf(AVIF_TRUE);
             }
             if (!fileSettings->tileRowsLog2.set) {
                 fileSettings->tileRowsLog2 = intSettingsEntryOf(0);

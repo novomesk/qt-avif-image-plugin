@@ -8,6 +8,11 @@ if(POLICY CMP0092)
     cmake_policy(SET CMP0092 NEW)
 endif()
 
+# New in CMake version 3.19. Support the Xcode "new build system" for ExternalProject_Add().
+if(POLICY CMP0114)
+    cmake_policy(SET CMP0114 NEW)
+endif()
+
 # Prevent warnings in CMake>=3.24 for ExternalProject_Add()
 # see https://cmake.org/cmake/help/latest/policy/CMP0135.html
 if(POLICY CMP0135)
@@ -20,7 +25,7 @@ if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
 endif()
 
-project(libavif LANGUAGES C VERSION 1.2.1)
+project(libavif LANGUAGES C VERSION 1.3.0)
 
 # The root directory of the avif source
 set(AVIF_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -55,8 +60,8 @@ endif()
 #   If the source code was changed, but there were no interface changes:
 #     Increment PATCH.
 set(LIBRARY_VERSION_MAJOR 16)
-set(LIBRARY_VERSION_MINOR 2)
-set(LIBRARY_VERSION_PATCH 1)
+set(LIBRARY_VERSION_MINOR 3)
+set(LIBRARY_VERSION_PATCH 0)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
 set(LIBRARY_SOVERSION ${LIBRARY_VERSION_MAJOR})
 
@@ -300,7 +305,10 @@ if(MSVC)
     endif()
 elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
     message(STATUS "libavif: Enabling warnings for Clang")
-    target_compile_options(avif_enable_warnings INTERFACE -Wall -Wextra -Wshorten-64-to-32)
+    target_compile_options(
+        avif_enable_warnings INTERFACE -Wall -Wextra -Wgnu-empty-initializer -Wshorten-64-to-32 -Wstrict-prototypes
+                                       -Wzero-as-null-pointer-constant
+    )
 elseif(CMAKE_C_COMPILER_ID MATCHES "GNU")
     message(STATUS "libavif: Enabling warnings for GCC")
     target_compile_options(avif_enable_warnings INTERFACE -Wall -Wextra)

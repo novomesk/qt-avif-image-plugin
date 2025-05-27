@@ -179,7 +179,8 @@ static avifBool avifJPEGReadCopy(avifImage * avif, uint32_t sizeLimit, struct jp
         if ((cinfo->comp_info[0].h_samp_factor == cinfo->max_h_samp_factor &&
              cinfo->comp_info[0].v_samp_factor == cinfo->max_v_samp_factor)) {
             // Import to YUV/Grayscale: must use compatible matrixCoefficients.
-            if (avifJPEGHasCompatibleMatrixCoefficients(avif->matrixCoefficients)) {
+            if (avifJPEGHasCompatibleMatrixCoefficients(avif->matrixCoefficients) ||
+                avif->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_UNSPECIFIED) {
                 // Grayscale->Grayscale: direct copy.
                 if ((avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) || (avif->yuvFormat == AVIF_PIXEL_FORMAT_NONE)) {
                     avif->yuvFormat = AVIF_PIXEL_FORMAT_YUV400;
@@ -309,7 +310,7 @@ static uint16_t avifJPEGReadUint16LittleEndian(const uint8_t * src)
 // Reads 'numBytes' at 'offset', stores them in 'bytes' and increases 'offset'.
 static avifBool avifJPEGReadBytes(const avifROData * data, uint8_t * bytes, uint32_t * offset, uint32_t numBytes)
 {
-    if (data->size < (*offset + numBytes)) {
+    if ((UINT32_MAX - *offset) < numBytes || data->size < (*offset + numBytes)) {
         return AVIF_FALSE;
     }
     memcpy(bytes, &data->data[*offset], numBytes);
@@ -352,6 +353,9 @@ static avifBool avifJPEGReadInternal(FILE * f,
 static avifBool avifJPEGFindMpfSegmentOffset(FILE * f, uint32_t * mpfOffset)
 {
     const long oldOffset = ftell(f);
+    if (oldOffset < 0) {
+        return AVIF_FALSE;
+    }
 
     uint32_t offset = 2; // Skip the 2 byte SOI (Start Of Image) marker.
     if (fseek(f, offset, SEEK_SET) != 0) {
@@ -714,6 +718,9 @@ static avifBool avifJPEGExtractGainMapImageFromMpf(FILE * f,
     for (int mpTagIdx = 0; mpTagIdx < mpTagCount; ++mpTagIdx) {
         uint16_t tagId;
         AVIF_CHECK(avifJPEGReadU16(segmentData, &tagId, &offset, isBigEndian));
+        if (UINT32_MAX - offset < 2 + 4) {
+            return AVIF_FALSE;
+        }
         offset += 2; // Skip data format.
         offset += 4; // Skip num components.
         uint8_t valueBytes[4];
@@ -748,12 +755,18 @@ static avifBool avifJPEGExtractGainMapImageFromMpf(FILE * f,
     AVIF_CHECK(avifJPEGFindMpfSegmentOffset(f, &mpfSegmentOffset));
 
     for (uint32_t imageIdx = 0; imageIdx < numImages; ++imageIdx) {
+        if (UINT32_MAX - offset < 4) {
+            return AVIF_FALSE;
+        }
         offset += 4; // Skip "Individual Image Attribute"
         uint32_t imageSize;
         AVIF_CHECK(avifJPEGReadU32(segmentData, &imageSize, &offset, isBigEndian));
         uint32_t imageDataOffset;
         AVIF_CHECK(avifJPEGReadU32(segmentData, &imageDataOffset, &offset, isBigEndian));
 
+        if (UINT32_MAX - offset < 4) {
+            return AVIF_FALSE;
+        }
         offset += 4; // Skip "Dependent image Entry Number" (2 + 2 bytes)
         if (imageDataOffset == 0) {
             // 0 is a special value which indicates the first image.
@@ -909,6 +922,19 @@ static avifBool avifJPEGReadInternal(FILE * f,
         unsigned int iccDataLen;
         if (read_icc_profile(&cinfo, &iccDataTmp, &iccDataLen)) {
             iccData = iccDataTmp;
+            const avifBool isGray = (cinfo.jpeg_color_space == JCS_GRAYSCALE);
+            if (!isGray && (requestedFormat == AVIF_PIXEL_FORMAT_YUV400)) {
+                fprintf(stderr,
+                        "The image contains a color ICC profile which is incompatible with the requested output "
+                        "format YUV400 (grayscale). Pass --ignore-icc to discard the ICC profile.\n");
+                goto cleanup;
+            }
+            if (isGray && requestedFormat != AVIF_PIXEL_FORMAT_YUV400) {
+                fprintf(stderr,
+                        "The image contains a gray ICC profile which is incompatible with the requested output "
+                        "format YUV (color). Pass --ignore-icc to discard the ICC profile.\n");
+                goto cleanup;
+            }
             if (avifImageSetProfileICC(avif, iccDataTmp, (size_t)iccDataLen) != AVIF_RESULT_OK) {
                 fprintf(stderr, "Setting ICC profile failed: %s (out of memory)\n", inputFilename);
                 goto cleanup;
@@ -1050,7 +1076,8 @@ static avifBool avifJPEGReadInternal(FILE * f,
                 for (size_t c = 0; c < AVIF_JPEG_EXTENDED_XMP_GUID_LENGTH; ++c) {
                     // According to Adobe XMP Specification Part 3 section 1.1.3.1:
                     //   "128-bit GUID stored as a 32-byte ASCII hex string, capital A-F, no null termination"
-                    if (((guid[c] < '0') || (guid[c] > '9')) && ((guid[c] < 'A') || (guid[c] > 'F'))) {
+                    // Also allow lowercase since some cameras use lowercase. https://github.com/AOMediaCodec/libavif/issues/2755
+                    if (!isxdigit(guid[c])) {
                         fprintf(stderr, "XMP extraction failed: invalid XMP segment GUID\n");
                         goto cleanup;
                     }
@@ -1256,7 +1283,7 @@ avifBool avifJPEGWrite(const char * outputFilename, const avifImage * avif, int 
 
     avifRGBImage rgb;
     avifRGBImageSetDefaults(&rgb, avif);
-    rgb.format = AVIF_RGB_FORMAT_RGB;
+    rgb.format = avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400 ? AVIF_RGB_FORMAT_GRAY : AVIF_RGB_FORMAT_RGB;
     rgb.chromaUpsampling = chromaUpsampling;
     rgb.depth = 8;
     if (avifRGBImageAllocatePixels(&rgb) != AVIF_RESULT_OK) {
@@ -1277,8 +1304,9 @@ avifBool avifJPEGWrite(const char * outputFilename, const avifImage * avif, int 
     jpeg_stdio_dest(&cinfo, f);
     cinfo.image_width = avif->width;
     cinfo.image_height = avif->height;
-    cinfo.input_components = 3;
-    cinfo.in_color_space = JCS_RGB;
+    const avifBool isGray = avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400;
+    cinfo.input_components = isGray ? 1 : 3;
+    cinfo.in_color_space = isGray ? JCS_GRAYSCALE : JCS_RGB;
     jpeg_set_defaults(&cinfo);
     jpeg_set_quality(&cinfo, jpegQuality, TRUE);
     jpeg_start_compress(&cinfo, TRUE);

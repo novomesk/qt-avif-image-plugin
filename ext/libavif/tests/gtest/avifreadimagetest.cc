@@ -4,6 +4,8 @@
 #include <string>
 
 #include "avif/avif.h"
+#include "avifjpeg.h"
+#include "avifpng.h"
 #include "aviftest_helpers.h"
 #include "avifutil.h"
 #include "gtest/gtest.h"
@@ -287,6 +289,167 @@ TEST(ICCTest, GeneratedICCHash) {
   EXPECT_EQ(memcmp(icc.data + kChecksumOffset, expectedChecksumGray,
                    sizeof(expectedChecksumGray)),
             0);
+}
+
+// Simpler function to read an image.
+static avifAppFileFormat avifReadImageForRGB2Gray2RGB(const std::string& path,
+                                                      avifPixelFormat format,
+                                                      bool ignore_icc,
+                                                      ImagePtr& image) {
+  return avifReadImage(
+      path.c_str(), format, /*requestedDepth=*/0,
+      /*chromaDownsampling=*/AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC,
+      /*ignoreColorProfile=*/ignore_icc, /*ignoreExif=*/false,
+      /*ignoreXMP=*/false, /*allowChangingCicp=*/true,
+      /*ignoreGainMap=*/true, AVIF_DEFAULT_IMAGE_SIZE_LIMIT, image.get(),
+      /*outDepth=*/nullptr, /*sourceTiming=*/nullptr,
+      /*frameIter=*/nullptr);
+}
+
+// Verify the invalidity of keeping the ICC profile for a gray/color image read
+// from a color/gray image.
+TEST(ICCTest, RGB2Gray2RGB) {
+  constexpr char file_name[] = "paris_icc_exif_xmp.png";
+  const std::string file_path = std::string(data_path) + file_name;
+
+  for (auto format : {AVIF_PIXEL_FORMAT_YUV400, AVIF_PIXEL_FORMAT_YUV444}) {
+    // Read the ground truth image in the appropriate format.
+    ImagePtr image(avifImageCreateEmpty());
+    ASSERT_NE(image, nullptr);
+    ASSERT_NE(avifReadImageForRGB2Gray2RGB(file_path, format,
+                                           /*ignore_icc=*/true, image),
+              AVIF_APP_FILE_FORMAT_UNKNOWN);
+
+    // Add an ICC profile.
+    float primariesCoords[8];
+    avifColorPrimariesGetValues(AVIF_COLOR_PRIMARIES_BT709, primariesCoords);
+
+    testutil::AvifRwData icc;
+    if (format == AVIF_PIXEL_FORMAT_YUV400) {
+      EXPECT_EQ(avifGenerateGrayICC(&icc, 2.2f, primariesCoords), AVIF_TRUE);
+    } else {
+      EXPECT_EQ(avifGenerateRGBICC(&icc, 2.2f, primariesCoords), AVIF_TRUE);
+    }
+    ASSERT_EQ(avifImageSetProfileICC(image.get(), icc.data, icc.size),
+              AVIF_RESULT_OK);
+
+    for (const std::string ext : {"jpg", "png"}) {
+      // Write the image with the appropriate codec.
+      const std::string new_path =
+          testing::TempDir() + "tmp_RGB2Gray2RGB." + ext;
+      if (ext == "jpg") {
+        ASSERT_EQ(
+            avifJPEGWrite(new_path.c_str(), image.get(), /*jpegQuality=*/75,
+                          AVIF_CHROMA_UPSAMPLING_BEST_QUALITY),
+            AVIF_TRUE);
+      } else {
+        ASSERT_EQ(
+            avifPNGWrite(new_path.c_str(), image.get(), /*requestedDepth=*/0,
+                         AVIF_CHROMA_UPSAMPLING_BEST_QUALITY,
+                         /*compressionLevel=*/0),
+            AVIF_TRUE);
+      }
+
+      for (bool ignore_icc : {false, true}) {
+        for (auto new_format :
+             {AVIF_PIXEL_FORMAT_YUV400, AVIF_PIXEL_FORMAT_YUV444}) {
+          ImagePtr new_image(avifImageCreateEmpty());
+          ASSERT_NE(new_image, nullptr);
+          const avifAppFileFormat new_file_format =
+              avifReadImageForRGB2Gray2RGB(new_path, new_format, ignore_icc,
+                                           new_image);
+          if (format == new_format || ignore_icc) {
+            ASSERT_NE(new_file_format, AVIF_APP_FILE_FORMAT_UNKNOWN);
+          } else {
+            // When formats are different, the ICC cannot be kept.
+            ASSERT_EQ(new_file_format, AVIF_APP_FILE_FORMAT_UNKNOWN);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(GrayTest, Roundtrip) {
+  constexpr char file_name[] = "paris_icc_exif_xmp.png";
+  const std::string file_path = std::string(data_path) + file_name;
+
+  // Read the ground truth image as gray.
+  ImagePtr image(avifImageCreateEmpty());
+  ASSERT_NE(image, nullptr);
+  ASSERT_NE(avifReadImageForRGB2Gray2RGB(file_path, AVIF_PIXEL_FORMAT_YUV400,
+                                         /*ignore_icc=*/true, image),
+            AVIF_APP_FILE_FORMAT_UNKNOWN);
+  for (const std::string ext : {"jpg", "png"}) {
+    // Write the image with the appropriate codec.
+    const std::string new_path = testing::TempDir() + std::string(file_name) +
+                                 "_tmp_GrayTestRoundtrip." + ext;
+    if (ext == "png") {
+      ASSERT_EQ(
+          avifPNGWrite(new_path.c_str(), image.get(), /*requestedDepth=*/0,
+                       AVIF_CHROMA_UPSAMPLING_BEST_QUALITY,
+                       /*compressionLevel=*/0),
+          AVIF_TRUE);
+    } else {
+      ASSERT_EQ(avifJPEGWrite(new_path.c_str(), image.get(), /*jpegQuality=*/99,
+                              AVIF_CHROMA_UPSAMPLING_BEST_QUALITY),
+                AVIF_TRUE);
+    }
+
+    // Read the image back without specifying the color space.
+    ImagePtr rt_image(avifImageCreateEmpty());
+    ASSERT_NE(rt_image, nullptr);
+    const avifAppFileFormat new_file_format = avifReadImageForRGB2Gray2RGB(
+        new_path, AVIF_PIXEL_FORMAT_NONE, /*ignore_icc=*/true, rt_image);
+    ASSERT_NE(new_file_format, AVIF_APP_FILE_FORMAT_UNKNOWN);
+    ASSERT_EQ(rt_image->yuvFormat, AVIF_PIXEL_FORMAT_YUV400);
+    if (ext == "png") {
+      ASSERT_TRUE(testutil::AreImagesEqual(*image, *rt_image));
+    } else {
+      ASSERT_GT(testutil::GetPsnr(*image, *rt_image, /*ignore_alpha=*/false),
+                60);
+    }
+  }
+}
+
+TEST(GrayAlphaTest, Roundtrip) {
+  constexpr char file_name[] = "paris_icc_exif_xmp.png";
+  const std::string file_path = std::string(data_path) + file_name;
+
+  for (bool use_alpha : {false, true}) {
+    // Read the ground truth image as gray.
+    ImagePtr image(avifImageCreateEmpty());
+    ASSERT_NE(image, nullptr);
+    ASSERT_NE(avifReadImageForRGB2Gray2RGB(file_path, AVIF_PIXEL_FORMAT_YUV400,
+                                           /*ignore_icc=*/true, image),
+              AVIF_APP_FILE_FORMAT_UNKNOWN);
+    if (use_alpha) {
+      // Have alpha point to the Y plane, just to get some data.
+      image->alphaRowBytes = image->yuvRowBytes[AVIF_CHAN_Y];
+      const size_t size = image->height * image->alphaRowBytes;
+      image->alphaPlane = (uint8_t*)avifAlloc(size);
+      ASSERT_NE(image->alphaPlane, nullptr);
+      image->imageOwnsAlphaPlane = AVIF_TRUE;
+      for (size_t i = 0; i < size; ++i) image->alphaPlane[i] = i % 256;
+    }
+
+    // Write the image.
+    const std::string new_path =
+        testing::TempDir() + "tmp_GrayTestRoundtrip.png";
+    ASSERT_EQ(avifPNGWrite(new_path.c_str(), image.get(), /*requestedDepth=*/0,
+                           AVIF_CHROMA_UPSAMPLING_BEST_QUALITY,
+                           /*compressionLevel=*/0),
+              AVIF_TRUE);
+
+    // Read the image back with the default color space.
+    ImagePtr rt_image(avifImageCreateEmpty());
+    ASSERT_NE(rt_image, nullptr);
+    const avifAppFileFormat new_file_format = avifReadImageForRGB2Gray2RGB(
+        new_path, AVIF_PIXEL_FORMAT_NONE, /*ignore_icc=*/true, rt_image);
+    ASSERT_NE(new_file_format, AVIF_APP_FILE_FORMAT_UNKNOWN);
+    ASSERT_EQ(rt_image->yuvFormat, AVIF_PIXEL_FORMAT_YUV400);
+    ASSERT_TRUE(testutil::AreImagesEqual(*image, *rt_image));
+  }
 }
 
 //------------------------------------------------------------------------------

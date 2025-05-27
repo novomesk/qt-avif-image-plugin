@@ -287,12 +287,13 @@ typedef enum avifAlphaMultiplyMode
 // Information about an RGB color space.
 typedef struct avifRGBColorSpaceInfo
 {
-    uint32_t channelBytes; // Number of bytes per channel.
-    uint32_t pixelBytes;   // Number of bytes per pixel (= channelBytes * num channels).
-    uint32_t offsetBytesR; // Offset in bytes of the red channel in a pixel.
-    uint32_t offsetBytesG; // Offset in bytes of the green channel in a pixel.
-    uint32_t offsetBytesB; // Offset in bytes of the blue channel in a pixel.
-    uint32_t offsetBytesA; // Offset in bytes of the alpha channel in a pixel.
+    uint32_t channelBytes;    // Number of bytes per channel.
+    uint32_t pixelBytes;      // Number of bytes per pixel (= channelBytes * num channels).
+    uint32_t offsetBytesR;    // Offset in bytes of the red channel in a pixel.
+    uint32_t offsetBytesG;    // Offset in bytes of the green channel in a pixel.
+    uint32_t offsetBytesB;    // Offset in bytes of the blue channel in a pixel.
+    uint32_t offsetBytesA;    // Offset in bytes of the alpha channel in a pixel.
+    uint32_t offsetBytesGray; // Offset in bytes of the gray channel in a pixel.
 
     int maxChannel;    // Maximum value for a channel (e.g. 255 for 8 bit).
     float maxChannelF; // Same as maxChannel but as a float.
@@ -814,6 +815,10 @@ uint8_t avifCodecConfigurationBoxGetSubsamplingType(const avifCodecConfiguration
 avifResult avifFindMinMaxWithoutOutliers(const float * gainMapF, int numPixels, float * rangeMin, float * rangeMax);
 
 avifResult avifGainMapValidateMetadata(const avifGainMap * gainMap, avifDiagnostics * diag);
+
+// Returns true if both gain maps have the same metadata. Pixels are not checked.
+avifBool avifSameGainMapMetadata(const avifGainMap * a, const avifGainMap * b);
+avifBool avifSameGainMapAltMetadata(const avifGainMap * a, const avifGainMap * b);
 
 #define AVIF_INDEFINITE_DURATION64 UINT64_MAX
 #define AVIF_INDEFINITE_DURATION32 UINT32_MAX

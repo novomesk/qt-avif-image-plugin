@@ -271,32 +271,6 @@ static aom_img_fmt_t avifImageCalcAOMFmt(const avifImage * image, avifBool alpha
     return fmt;
 }
 
-static avifBool aomOptionParseInt(const char * str, int * val)
-{
-    char * endptr;
-    const long rawval = strtol(str, &endptr, 10);
-
-    if (str[0] != '\0' && endptr[0] == '\0' && rawval >= INT_MIN && rawval <= INT_MAX) {
-        *val = (int)rawval;
-        return AVIF_TRUE;
-    }
-
-    return AVIF_FALSE;
-}
-
-static avifBool aomOptionParseUInt(const char * str, unsigned int * val)
-{
-    char * endptr;
-    const unsigned long rawval = strtoul(str, &endptr, 10);
-
-    if (str[0] != '\0' && endptr[0] == '\0' && rawval <= UINT_MAX) {
-        *val = (unsigned int)rawval;
-        return AVIF_TRUE;
-    }
-
-    return AVIF_FALSE;
-}
-
 struct aomOptionEnumList
 {
     const char * name;
@@ -367,50 +341,6 @@ static avifBool avifProcessAOMOptionsPreInit(avifCodec * codec, avifBool alpha, 
     return AVIF_TRUE;
 }
 
-typedef enum
-{
-    AVIF_AOM_OPTION_NUL = 0,
-    AVIF_AOM_OPTION_STR,
-    AVIF_AOM_OPTION_INT,
-    AVIF_AOM_OPTION_UINT,
-    AVIF_AOM_OPTION_ENUM,
-} aomOptionType;
-
-struct aomOptionDef
-{
-    const char * name;
-    int controlId;
-    aomOptionType type;
-    // If type is AVIF_AOM_OPTION_ENUM, this must be set. Otherwise should be NULL.
-    const struct aomOptionEnumList * enums;
-};
-
-static const struct aomOptionEnumList tuningEnum[] = { //
-    { "psnr", AOM_TUNE_PSNR },                         //
-    { "ssim", AOM_TUNE_SSIM },                         //
-    { NULL, 0 }
-};
-
-static const struct aomOptionDef aomOptionDefs[] = {
-    // Adaptive quantization mode
-    { "aq-mode", AV1E_SET_AQ_MODE, AVIF_AOM_OPTION_UINT, NULL },
-    // Constant/Constrained Quality level
-    { "qp-level", AOME_SET_QP, AVIF_AOM_OPTION_UINT, NULL },
-    // Enable delta quantization in chroma planes
-    { "enable-chroma-deltaq", AV1E_SET_ENABLE_CHROMA_DELTAQ, AVIF_AOM_OPTION_INT, NULL },
-    // Bias towards block sharpness in rate-distortion optimization of transform coefficients
-    { "sharpness", AOME_SET_SHARPNESS, AVIF_AOM_OPTION_UINT, NULL },
-    // Tune distortion metric
-    { "tune", AOME_SET_TUNING, AVIF_AOM_OPTION_ENUM, tuningEnum },
-    // Film grain test vector
-    { "film-grain-test", AV1E_SET_FILM_GRAIN_TEST_VECTOR, AVIF_AOM_OPTION_INT, NULL },
-    // Film grain table file
-    { "film-grain-table", AV1E_SET_FILM_GRAIN_TABLE, AVIF_AOM_OPTION_STR, NULL },
-
-    // Sentinel
-    { NULL, 0, AVIF_AOM_OPTION_NUL, NULL }
-};
-
 static avifBool avifProcessAOMOptionsPostInit(avifCodec * codec, avifBool alpha)
 {
     for (uint32_t i = 0; i < codec->csOptions->count; ++i) {
@@ -450,46 +380,6 @@ static avifBool avifProcessAOMOptionsPostInit(avifCodec * codec, avifBool alpha)
         }
         if (!strcmp(key, "tune")) {
             codec->internal->tuningSet = AVIF_TRUE;
-        }
-
-        avifBool match = AVIF_FALSE;
-        for (int j = 0; aomOptionDefs[j].name; ++j) {
-            if (avifKeyEqualsName(entry->key, aomOptionDefs[j].name, alpha)) {
-                match = AVIF_TRUE;
-                avifBool success = AVIF_FALSE;
-                int valInt;
-                unsigned int valUInt;
-                switch (aomOptionDefs[j].type) {
-                    case AVIF_AOM_OPTION_NUL:
-                        success = AVIF_FALSE;
-                        break;
-                    case AVIF_AOM_OPTION_STR:
-                        success = aom_codec_control(&codec->internal->encoder, aomOptionDefs[j].controlId, entry->value) == AOM_CODEC_OK;
-                        break;
-                    case AVIF_AOM_OPTION_INT:
-                        success = aomOptionParseInt(entry->value, &valInt) &&
-                                  aom_codec_control(&codec->internal->encoder, aomOptionDefs[j].controlId, valInt) == AOM_CODEC_OK;
-                        break;
-                    case AVIF_AOM_OPTION_UINT:
-                        success = aomOptionParseUInt(entry->value, &valUInt) &&
-                                  aom_codec_control(&codec->internal->encoder, aomOptionDefs[j].controlId, valUInt) == AOM_CODEC_OK;
-                        break;
-                    case AVIF_AOM_OPTION_ENUM:
-                        success = aomOptionParseEnum(entry->value, aomOptionDefs[j].enums, &valInt) &&
-                                  aom_codec_control(&codec->internal->encoder, aomOptionDefs[j].controlId, valInt) == AOM_CODEC_OK;
-                        break;
-                }
-                if (!success) {
-                    return AVIF_FALSE;
-                }
-                if (aomOptionDefs[j].controlId == AOME_SET_TUNING) {
-                    codec->internal->tuningSet = AVIF_TRUE;
-                }
-                break;
-            }
-        }
-        if (!match) {
-            return AVIF_FALSE;
         }
     }
     return AVIF_TRUE;
@@ -735,26 +625,41 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
 
         // Set color_config() in the sequence header OBU.
         if (alpha) {
+            // AV1-AVIF specification, Section 4 "Auxiliary Image Items and Sequences":
+            //   The color_range field in the Sequence Header OBU shall be set to 1.
             aom_codec_control(&codec->internal->encoder, AV1E_SET_COLOR_RANGE, AOM_CR_FULL_RANGE);
+
+            // Keep the default AOM_CSP_UNKNOWN value.
+
+            // CICP (CP/TC/MC) does not apply to the alpha auxiliary image.
+            // Keep default Unspecified (2) colour primaries, transfer characteristics,
+            // and matrix coefficients.
         } else {
-            // libavm's defaults are AOM_CICP_CP_UNSPECIFIED, AOM_CICP_TC_UNSPECIFIED,
-            // AOM_CICP_MC_UNSPECIFIED, AOM_CSP_UNKNOWN, and 0 (studio/limited range). Call
-            // aom_codec_control() only if the values are not the defaults.
-            if (image->colorPrimaries != AVIF_COLOR_PRIMARIES_UNSPECIFIED) {
-                aom_codec_control(&codec->internal->encoder, AV1E_SET_COLOR_PRIMARIES, (int)image->colorPrimaries);
-            }
-            if (image->transferCharacteristics != AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED) {
-                aom_codec_control(&codec->internal->encoder, AV1E_SET_TRANSFER_CHARACTERISTICS, (int)image->transferCharacteristics);
-            }
-            if (image->matrixCoefficients != AVIF_MATRIX_COEFFICIENTS_UNSPECIFIED) {
-                aom_codec_control(&codec->internal->encoder, AV1E_SET_MATRIX_COEFFICIENTS, (int)image->matrixCoefficients);
-            }
+            // libaom's defaults are AOM_CSP_UNKNOWN and 0 (studio/limited range).
+            // Call aom_codec_control() only if the values are not the defaults.
+
+            // AV1-AVIF specification, Section 2.2.1. "AV1 Item Configuration Property":
+            //   The values of the fields in the AV1CodecConfigurationBox shall match those
+            //   of the Sequence Header OBU in the AV1 Image Item Data.
             if (image->yuvChromaSamplePosition != AVIF_CHROMA_SAMPLE_POSITION_UNKNOWN) {
                 aom_codec_control(&codec->internal->encoder, AV1E_SET_CHROMA_SAMPLE_POSITION, (int)image->yuvChromaSamplePosition);
             }
+
+            // AV1-ISOBMFF specification, Section 2.3.4:
+            //   The value of full_range_flag in the 'colr' box SHALL match the color_range
+            //   flag in the Sequence Header OBU.
             if (image->yuvRange != AVIF_RANGE_LIMITED) {
                 aom_codec_control(&codec->internal->encoder, AV1E_SET_COLOR_RANGE, (int)image->yuvRange);
             }
+
+            // Section 2.3.4 of AV1-ISOBMFF says 'colr' with 'nclx' should be present and shall match CICP
+            // values in the Sequence Header OBU, unless the latter has 2/2/2 (Unspecified).
+            // So set CICP values to 2/2/2 (Unspecified) in the Sequence Header OBU for simplicity.
+            // It may also save 3 bytes since the AV1 encoder can set color_description_present_flag to 0
+            // (see Section 5.5.2 "Color config syntax" of the AV1 specification).
+            // libaom's defaults are AOM_CICP_CP_UNSPECIFIED, AOM_CICP_TC_UNSPECIFIED, and
+            // AOM_CICP_MC_UNSPECIFIED. No need to call aom_codec_control().
+            // aom_image_t::cp, aom_image_t::tc and aom_image_t::mc are ignored by aom_codec_encode().
         }
 
         if (!avifProcessAOMOptionsPostInit(codec, alpha)) {
@@ -920,7 +825,13 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
     avifBool monochromeRequested = AVIF_FALSE;
 
     if (alpha) {
+        // AV1-AVIF specification, Section 4 "Auxiliary Image Items and Sequences":
+        //   The color_range field in the Sequence Header OBU shall be set to 1.
         aomImage.range = AOM_CR_FULL_RANGE;
+
+        // AV1-AVIF specification, Section 4 "Auxiliary Image Items and Sequences":
+        //   The mono_chrome field in the Sequence Header OBU shall be set to 1.
+        // Some encoders do not support 4:0:0 and encode alpha as 4:2:0 so it is not always respected.
         monochromeRequested = AVIF_TRUE;
         if (aomImageAllocated) {
             const uint32_t bytesPerRow = ((image->depth > 8) ? 2 : 1) * image->width;
@@ -934,7 +845,7 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
             aomImage.stride[0] = image->alphaRowBytes;
         }
 
-        // Ignore UV planes when monochrome
+        // Ignore UV planes when monochrome. Keep the default AOM_CSP_UNKNOWN value.
     } else {
         int yuvPlaneCount = 3;
         if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
@@ -961,10 +872,14 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
             }
         }
 
-        aomImage.cp = (aom_color_primaries_t)image->colorPrimaries;
-        aomImage.tc = (aom_transfer_characteristics_t)image->transferCharacteristics;
-        aomImage.mc = (aom_matrix_coefficients_t)image->matrixCoefficients;
+        // AV1-AVIF specification, Section 2.2.1. "AV1 Item Configuration Property":
+        //   The values of the fields in the AV1CodecConfigurationBox shall match those
+        //   of the Sequence Header OBU in the AV1 Image Item Data.
         aomImage.csp = (aom_chroma_sample_position_t)image->yuvChromaSamplePosition;
+
+        // AV1-ISOBMFF specification, Section 2.3.4:
+        //   The value of full_range_flag in the 'colr' box SHALL match the color_range
+        //   flag in the Sequence Header OBU.
         aomImage.range = (aom_color_range_t)image->yuvRange;
     }
 

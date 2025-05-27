@@ -8,11 +8,54 @@ The changes are relative to the previous release, unless the baseline is specifi
 
 ## [Unreleased]
 
+## [1.3.0] - 2025-05-09
+
+### Added since 1.2.1
+
+* Add grayscale conversions in avifImageRGBToYUV and avifImageYUVToRGB.
+* Add avifRGBFormatIsGray to check whether an avifRGBFormat is gray.
+
+### Changed since 1.2.1
+
+* Reject the conversion in avifenc from non-monochrome/monochrome to
+  monochrome/non-monochrome when an ICC profile is present and not explicitly
+  discarded.
+* Forbid encoding with AVIF_MATRIX_COEFFICIENTS_IDENTITY and
+  AVIF_PIXEL_FORMAT_YUV400 to be AV1 spec compatible.
+* Do not go through RGB when reading/writing a grayscale PNG/JPG images in
+  avifenc/avifdec
+* Ignore tmap items not present in `grpl` box
+* Assume any id is present in only one altr group as per spec.
+* avifpng.c: support ImageMagick app1 exif text data
+* avifjpeg.c: check for uint32_t overflow before add
+* Update googletest.cmd/LocalGTest.cmake: v1.16.0
+* Update libjpeg.cmd/LocalJpeg.cmake: 3.1.0
+* Update libsharpyuv: v1.5.0
+* Update libxml2.cmd/LocalLibXml2.cmake: v2.14.0
+* Update libyuv.cmd/LocalLibyuv.cmake: 4db2af62d (1909)
+* Update LocalRav1e.cmake: cargo-c v0.10.12
+* Update zlibpng.cmd: libpng 1.6.47
+* Fix wrong Exif orientation set in JPEG or PNG output by avifdec when the input
+  AVIF file has an ImageRotation property with angle set to 1 or 3, has no
+  ImageMirror property, and carries an Exif chunk. Note that Exif orientation is
+  usually ignored in PNG files, so this mainly impacts JPEG files.
+* Encoder: fix ispe property for tmap with grid.
+* Decoder: check the ispe property of tmap items.
+* Allow lowercase GUIDs in XMP when reading JPEG files.
+* Update aom.cmd/LocalAom.cmake: v3.12.1
+* Change avifenc to start in automatic tiling mode.
+* Always forward Unspecified (2) CICP color primaries, transfer characteristics,
+  and matrix coefficients to the AV1 encoder. Rely on the 'colr' box instead.
+* Declare *RowBytes as size_t in avifImageRGBToYUV()
+* Check ftell returned value in avifjpeg.c
+* Add integer overflow checks to makeRoom.
+* LocalJpeg.cmake: Support multi-config generators.
+
 ## [1.2.1] - 2025-03-17
 
 ### Added since 1.2.0
 
-* Add support for outputting all frames of an image sequence in `avifdec`. 
+* Add support for outputting all frames of an image sequence in `avifdec`.
   `avifdec --index all sequence.avif out.png` creates files named
   `out-xxxxxxxxxx.png` where xxxxxxxxxx are the zero-padded frame indices.
 
@@ -1227,7 +1270,8 @@ code.
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/AOMediaCodec/libavif/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/AOMediaCodec/libavif/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/AOMediaCodec/libavif/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/AOMediaCodec/libavif/compare/v1.1.0...v1.1.1

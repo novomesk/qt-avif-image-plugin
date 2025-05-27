@@ -1,6 +1,6 @@
 % AVIFENC(1) | General Commands Manual
 %
-% 2022-04-30
+% 2025-04-11
 
 <!--
 This man page is written in pandoc's Markdown.
@@ -87,7 +87,7 @@ Input format can be either JPEG, PNG or YUV4MPEG2 (Y4M).
 :   Set target file size in bytes (up to 7 times slower)
 
 **\--progressive**
-:   EXPERIMENTAL: Auto set parameters to encode a simple layered image supporting progressive rendering from a single input frame.
+:   EXPERIMENTAL: Automatically set parameters to encode a simple layered image supporting progressive rendering from a single input frame.
 
 **\--layered**
 :   EXPERIMENTAL: Encode a layered AVIF. Each input is encoded as one layer and at most 4 layers can be encoded.
@@ -180,12 +180,16 @@ The following options can optionally have a **:u** (or **:update**) suffix like 
 
 **\--tilerowslog2** _R_
 :   log2 of number of tile rows in 0..6. (Default: 0).
+    If specified, switch to manual tiling.
 
 **\--tilecolslog2** _C_
 :   log2 of number of tile columns in 0..6. (Default: 0).
+    If specified, switch to manual tiling.
 
 **\--autotiling**
 :   Set \--tilerowslog2 and \--tilecolslog2 automatically.
+    If specified, switch to automatic tiling.
+    avifenc starts in automatic tiling mode.
 
 **\--scaling-mode** _N_[/_D_]
 :   EXPERIMENTAL: Set frame (layer) scaling mode as given fraction. If omitted, the denominator defaults to 1. (Default: 1/1).

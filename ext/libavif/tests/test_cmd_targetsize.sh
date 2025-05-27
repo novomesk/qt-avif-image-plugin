@@ -16,10 +16,7 @@
 #
 # tests for command lines (--target-size)
 
-source $(dirname "$0")/cmd_test_common.sh
-
-AVIFENC="${BINARY_DIR}/avifenc"
-AVIFDEC="${BINARY_DIR}/avifdec"
+source $(dirname "$0")/cmd_test_common.sh || exit
 
 # Input file paths.
 INPUT_Y4M="${TESTDATA_DIR}/kodim03_yuv420_8bpc.y4m"

@@ -137,7 +137,7 @@ the `avif_coverage` target, e.g. `make avif_coverage -j`. It requires
 compiling with clang (`-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`)
 and LLVM must be installed on the system.
 
-### Build Command Lines {#build-command-lines}
+### Build Command Lines
 
 The following instructions can be used to build the libavif library and the
 `avifenc` and `avifdec` tools.
@@ -150,7 +150,7 @@ libraries (recommended):
 ```sh
 git clone -b v1.2.1 https://github.com/AOMediaCodec/libavif.git
 cmake -S libavif -B libavif/build -DAVIF_CODEC_AOM=SYSTEM -DAVIF_BUILD_APPS=ON
-cmake --build libavif/build --parallel
+cmake --build libavif/build --config Release --parallel
 ```
 
 #### Build everything from scratch
@@ -160,7 +160,7 @@ For development and debugging purposes:
 ```sh
 git clone -b v1.2.1 https://github.com/AOMediaCodec/libavif.git
 cmake -S libavif -B libavif/build -DCMAKE_BUILD_TYPE=Debug -DBUILD_SHARED_LIBS=OFF -DAVIF_CODEC_AOM=LOCAL -DAVIF_LIBYUV=LOCAL -DAVIF_LIBSHARPYUV=LOCAL -DAVIF_JPEG=LOCAL -DAVIF_ZLIBPNG=LOCAL -DAVIF_BUILD_APPS=ON
-cmake --build libavif/build --parallel
+cmake --build libavif/build --config Debug --parallel
 ```
 
 ## Prebuilt Binaries (Windows)
