@@ -539,12 +539,21 @@ bool QAVIFHandler::decode_one_frame()
 #else
         switch (m_decoder->image->imir.axis) {
 #endif
+#if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
         case 0: // top-to-bottom
             result = result.mirrored(false, true);
             break;
         case 1: // left-to-right
             result = result.mirrored(true, false);
             break;
+#else
+        case 0: // top-to-bottom
+            result.flip(Qt::Vertical);
+            break;
+        case 1: // left-to-right
+            result.flip(Qt::Horizontal);
+            break;
+#endif
         }
     }
 
