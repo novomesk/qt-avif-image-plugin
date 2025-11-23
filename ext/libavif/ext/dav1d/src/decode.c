@@ -739,7 +739,7 @@ static int decode_b(Dav1dTaskContext *const t,
             if (IS_INTER_OR_SWITCH(f->frame_hdr) /* not intrabc */ &&
                 b->comp_type == COMP_INTER_NONE && b->motion_mode == MM_WARP)
             {
-                if (b->matrix[0] == SHRT_MIN) {
+                if (b->matrix[0] == INT16_MIN) {
                     t->warpmv.type = DAV1D_WM_TYPE_IDENTITY;
                 } else {
                     t->warpmv.type = DAV1D_WM_TYPE_AFFINE;
@@ -958,9 +958,7 @@ static int decode_b(Dav1dTaskContext *const t,
     }
 
     // delta-q/lf
-    if (!(t->bx & (31 >> !f->seq_hdr->sb128)) &&
-        !(t->by & (31 >> !f->seq_hdr->sb128)))
-    {
+    if (!((t->bx | t->by) & (31 >> !f->seq_hdr->sb128))) {
         const int prev_qidx = ts->last_qidx;
         const int have_delta_q = f->frame_hdr->delta.q.present &&
             (bs != (f->seq_hdr->sb128 ? BS_128x128 : BS_64x64) || !b->skip);
@@ -1821,7 +1819,7 @@ static int decode_b(Dav1dTaskContext *const t,
                             b->matrix[2] = t->warpmv.matrix[4];
                             b->matrix[3] = t->warpmv.matrix[5] - 0x10000;
                         } else {
-                            b->matrix[0] = SHRT_MIN;
+                            b->matrix[0] = INT16_MIN;
                         }
                     }
                 }

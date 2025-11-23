@@ -1,3 +1,15 @@
+Changes for 1.5.2 'Sonic':
+--------------------------
+
+1.5.2 is a minor release of dav1d, focused on maintenance:
+ - minor speed improvement in recon
+ - improvements on loongarch symboles visibility and asm
+ - mark C globals with small code model
+ - reduce the code size of the frame header parsing (OBU)
+ - minor fixes on tools and CI
+ - fix compilation with nasm 3.00
+
+
 Changes for 1.5.1 'Sonic':
 --------------------------
 
