@@ -49,6 +49,7 @@ static const struct arg_enum_list tuning_enum[] = {
   { "butteraugli", AOM_TUNE_BUTTERAUGLI },
   { "vmaf_saliency_map", AOM_TUNE_VMAF_SALIENCY_MAP },
   { "iq", AOM_TUNE_IQ },
+  { "ssimulacra2", AOM_TUNE_SSIMULACRA2 },
   { NULL, 0 }
 };
 
@@ -286,6 +287,9 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "Bias towards block sharpness in rate-distortion optimization of "
               "transform coefficients and (in all intra mode only) reduce "
               "block edge filtering for better sharpness (0..7), default is 0"),
+  .enable_adaptive_sharpness =
+      ARG_DEF(NULL, "enable-adaptive-sharpness", 1,
+              "Enable adaptive sharpness (0: disabled (default), 1: enabled)"),
   .static_thresh =
       ARG_DEF(NULL, "static-thresh", 1, "Motion detection threshold"),
   .auto_altref =
@@ -305,7 +309,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "max-intra-rate", 1, "Max I-frame bitrate (pct)"),
 #if CONFIG_AV1_ENCODER
   .cpu_used_av1 = ARG_DEF(NULL, "cpu-used", 1,
-                          "Speed setting (0..6 in good mode, 5..11 in realtime "
+                          "Speed setting (0..6 in good mode, 5..12 in realtime "
                           "mode, 0..9 in all intra mode)"),
   .rowmtarg =
       ARG_DEF(NULL, "row-mt", 1,
@@ -556,7 +560,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "Variance Boost all intra); requires --enable-tpl-model=1"),
   .deltaq_strength = ARG_DEF(NULL, "deltaq-strength", 1,
                              "Deltaq strength for"
-                             " --deltaq-mode=4 (%)"),
+                             " --deltaq-mode=4 and --deltaq-mode=6 (%)"),
   .deltalf_mode = ARG_DEF(NULL, "delta-lf-mode", 1,
                           "Enable delta-lf-mode (0: off (default), 1: on)"),
   .frame_periodic_boost =
@@ -705,5 +709,12 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "sb-qp-sweep", 1,
               "When set to 1, enable the superblock level qp sweep for a "
               "given lambda to minimize the rdcost."),
+  .enable_low_complexity_decode =
+      ARG_DEF(NULL, "enable-low-complexity-decode", 1,
+              "Enable low complexity decode (0: false (default), 1: true)"),
+  .screen_detection_mode =
+      ARG_DEF(NULL, "screen-detection-mode", 1,
+              "Screen content detection mode (1: standard (default), "
+              "2: anti-aliased text and graphics aware)"),
 #endif  // CONFIG_AV1_ENCODER
 };
