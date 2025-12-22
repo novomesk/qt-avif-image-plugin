@@ -287,9 +287,18 @@ bool QAVIFHandler::decode_one_frame()
         }
     }
 
+    uint32_t resultdepth = m_decoder->image->depth;
+    if (m_decoder->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) {
+        if (m_decoder->image->matrixCoefficients == 16) { /* AVIF_MATRIX_COEFFICIENTS_YCGCO_RE */
+            resultdepth = resultdepth - 2;
+        } else if (m_decoder->image->matrixCoefficients == 17) { /* AVIF_MATRIX_COEFFICIENTS_YCGCO_RO */
+            resultdepth = resultdepth - 1;
+        }
+    }
+
     QImage::Format resultformat;
 
-    if (m_decoder->image->depth > 8) {
+    if (resultdepth > 8) {
         if (loadalpha) {
             resultformat = QImage::Format_RGBA64;
         } else {
@@ -438,7 +447,7 @@ bool QAVIFHandler::decode_one_frame()
     rgb.maxThreads = m_decoder->maxThreads;
 #endif
 
-    if (m_decoder->image->depth > 8) {
+    if (resultdepth > 8) {
         rgb.depth = 16;
         rgb.format = AVIF_RGB_FORMAT_RGBA;
 
