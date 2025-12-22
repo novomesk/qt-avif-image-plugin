@@ -9,6 +9,9 @@ AVIFS (AVIF image sequence): ready only
 Software requirements:
 yasm – needed to build optimized libaom
 cmake – needed to build libaom and libavif
+perl – needed to build libaom
+nasm – needed to build optimized dav1d
+meson – build system used by dav1d
 qmake (or qt5-qmake) – to build the QT plugin
 QT5 development packages (for example qtbase5-dev on Ubuntu)
 qt5-image-formats-plugins (or qt5-imageformats, dev-qt/qtimageformats, …)
