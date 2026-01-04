@@ -421,6 +421,11 @@ bool QAVIFHandler::decode_one_frame()
                 case 2: /* AVIF_COLOR_PRIMARIES_UNSPECIFIED */
                     colorspace = QColorSpace(QColorSpace::Primaries::SRgb, q_trc, q_trc_gamma);
                     break;
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+                case 9:
+                    colorspace = QColorSpace(QColorSpace::Primaries::Bt2020, q_trc, q_trc_gamma);
+                    break;
+#endif
                 /* AVIF_COLOR_PRIMARIES_SMPTE432 */
                 case 12:
                     colorspace = QColorSpace(QColorSpace::Primaries::DciP3D65, q_trc, q_trc_gamma);
@@ -754,6 +759,15 @@ bool QAVIFHandler::write(const QImage &image)
                 /* AVIF_TRANSFER_CHARACTERISTICS_LINEAR */
                 avif->transferCharacteristics = (avifTransferCharacteristics)8;
                 break;
+            case QColorSpace::TransferFunction::Gamma:
+                if (qAbs(tmpgrayimage.colorSpace().gamma() - 2.2f) < 0.1f) {
+                    /* AVIF_TRANSFER_CHARACTERISTICS_BT470M */
+                    avif->transferCharacteristics = (avifTransferCharacteristics)4;
+                } else if (qAbs(tmpgrayimage.colorSpace().gamma() - 2.8f) < 0.1f) {
+                    /* AVIF_TRANSFER_CHARACTERISTICS_BT470BG */
+                    avif->transferCharacteristics = (avifTransferCharacteristics)5;
+                }
+                break;
             case QColorSpace::TransferFunction::SRgb:
                 /* AVIF_TRANSFER_CHARACTERISTICS_SRGB */
                 avif->transferCharacteristics = (avifTransferCharacteristics)13;
@@ -770,6 +784,44 @@ bool QAVIFHandler::write(const QImage &image)
                 /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
                 break;
             }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+            if (avif->transferCharacteristics == 2) { // in case TransferFunction was not identified yet
+                if (tmpgrayimage.colorSpace().colorModel() == QColorSpace::ColorModel::Gray && lossless) {
+                    avif->colorPrimaries = (avifColorPrimaries)2;
+                    avif->matrixCoefficients = (avifMatrixCoefficients)6;
+
+                    QByteArray iccprofile_gray = tmpgrayimage.colorSpace().iccProfile();
+
+                    if (iccprofile_gray.size() > 0) {
+#if AVIF_VERSION >= 1000000
+                        res = avifImageSetProfileICC(avif, reinterpret_cast<const uint8_t *>(iccprofile_gray.constData()), iccprofile_gray.size());
+                        if (res != AVIF_RESULT_OK) {
+                            qWarning("ERROR in avifImageSetProfileICC: %s", avifResultToString(res));
+                            return false;
+                        }
+#else
+                        avifImageSetProfileICC(avif, reinterpret_cast<const uint8_t *>(iccprofile_gray.constData()), iccprofile_gray.size());
+#endif
+                    }
+                } else { // convert to grayscale with SRgb
+                    tmpgrayimage.convertToColorSpace(QColorSpace(QPointF(0.3127f, 0.329f), QColorSpace::TransferFunction::SRgb), QImage::Format_Grayscale16);
+                    switch (tmpgrayimage.format()) {
+                    case QImage::Format_Grayscale8:
+                        save_depth = 8;
+                        break;
+                    case QImage::Format_Grayscale16:
+                        save_depth = 10;
+                        avif->transferCharacteristics = (avifTransferCharacteristics)13;
+                        break;
+                    default:
+                        qWarning("Error saving Gray image");
+                        return false;
+                        break;
+                    }
+                }
+            }
+#endif
         }
 #endif
 
@@ -861,6 +913,12 @@ bool QAVIFHandler::write(const QImage &image)
                 /* AVIF_MATRIX_COEFFICIENTS_CHROMA_DERIVED_NCL */
                 matrix_to_save = (avifMatrixCoefficients)12;
                 break;
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 8, 0))
+            case QColorSpace::Primaries::Bt2020:
+                primaries_to_save = (avifColorPrimaries)9;
+                matrix_to_save = (avifMatrixCoefficients)12;
+                break;
+#endif
             default:
                 /* AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED */
                 primaries_to_save = (avifColorPrimaries)2;
