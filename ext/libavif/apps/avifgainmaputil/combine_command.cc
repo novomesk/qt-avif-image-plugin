@@ -12,8 +12,8 @@ namespace avif {
 
 CombineCommand::CombineCommand()
     : ProgramCommand("combine",
-                     "Creates an avif image with a gain map from a base image "
-                     "and an alternate image.") {
+                     "Create an AVIF image with a gain map from a base image "
+                     "and an alternate image") {
   argparse_.add_argument(arg_base_filename_, "base_image")
       .help(
           "The base image, that will be shown by viewers that don't support "
@@ -37,19 +37,42 @@ CombineCommand::CombineCommand()
       .choices({"444", "422", "420", "400"})
       .help("Output format for the gain map")
       .default_value("444");
+  argparse_.add_argument(arg_max_headroom_, "--max-headroom")
+      .help(
+          "Maximum value for the base image HDR headroom and alternate "
+          "image HDR headroom. Overrides the default headroom values computed "
+          "from the image's content if they are larger than this maximum. Use "
+          "0 for no maximum. "
+          "E.g. assuming one of the two images is SDR and the "
+          "other is HDR, the full HDR image (i.e. without tone mapping to SDR "
+          "using the gain map) will be shown for displays with at least this "
+          "amount of HDR headroom.")
+      .default_value("4.0");
   argparse_
       .add_argument<CicpValues, CicpConverter>(arg_base_cicp_, "--cicp-base")
       .help(
-          "Set or override the cicp values for the base image, expressed as "
+          "Set or override the CICP values for the base image, expressed as "
           "P/T/M where P = color primaries, T = transfer characteristics, "
           "M = matrix coefficients.");
   argparse_
       .add_argument<CicpValues, CicpConverter>(arg_alternate_cicp_,
                                                "--cicp-alternate")
       .help(
-          "Set or override the cicp values for the alternate image, expressed "
+          "Set or override the CICP values for the alternate image, expressed "
           "as P/T/M  where P = color primaries, T = transfer characteristics, "
           "M = matrix coefficients.");
+  argparse_
+      .add_argument<avifContentLightLevelInformationBox, ClliConverter>(
+          arg_base_clli_, "--clli-base")
+      .help(
+          "Override content light level information of the base image, "
+          "expressed as:  MaxCLL,MaxPALL.");
+  argparse_
+      .add_argument<avifContentLightLevelInformationBox, ClliConverter>(
+          arg_alternate_clli_, "--clli-alternate")
+      .help(
+          "Override content light level information of the alternate image, "
+          "expressed as:  MaxCLL,MaxPALL.");
   arg_image_encode_.Init(argparse_, /*can_have_alpha=*/true);
   arg_image_read_.Init(argparse_);
 }
@@ -122,6 +145,37 @@ avifResult CombineCommand::Run() {
     return result;
   }
 
+  if (arg_max_headroom_.value() > 0) {
+    if (arg_max_headroom_.value() * base_image->gainMap->baseHdrHeadroom.d <
+        base_image->gainMap->baseHdrHeadroom.n) {
+      if (!avifDoubleToUnsignedFraction(
+              arg_max_headroom_.value(),
+              &base_image->gainMap->baseHdrHeadroom)) {
+        std::cout << "Unable to express " << arg_max_headroom_.value()
+                  << " as a fraction";
+        return AVIF_RESULT_INVALID_ARGUMENT;
+      }
+    }
+    if (arg_max_headroom_.value() *
+            base_image->gainMap->alternateHdrHeadroom.d <
+        base_image->gainMap->alternateHdrHeadroom.n) {
+      if (!avifDoubleToUnsignedFraction(
+              arg_max_headroom_.value(),
+              &base_image->gainMap->alternateHdrHeadroom)) {
+        std::cout << "Unable to express " << arg_max_headroom_.value()
+                  << " as a fraction";
+        return AVIF_RESULT_INVALID_ARGUMENT;
+      }
+    }
+  }
+
+  if (arg_base_clli_.provenance() == argparse::Provenance::SPECIFIED) {
+    base_image->clli = arg_base_clli_.value();
+  }
+  if (arg_alternate_clli_.provenance() == argparse::Provenance::SPECIFIED) {
+    base_image->gainMap->altCLLI = arg_alternate_clli_.value();
+  }
+
   EncoderPtr encoder(avifEncoderCreate());
   if (encoder == nullptr) {
     return AVIF_RESULT_OUT_OF_MEMORY;
@@ -130,7 +184,10 @@ avifResult CombineCommand::Run() {
   encoder->qualityAlpha = arg_image_encode_.quality_alpha;
   encoder->qualityGainMap = arg_gain_map_quality_;
   encoder->speed = arg_image_encode_.speed;
-  result = WriteAvif(base_image.get(), encoder.get(), arg_output_filename_);
+  result =
+      WriteAvifGrid(base_image.get(), arg_image_encode_.grid.value().grid_cols,
+                    arg_image_encode_.grid.value().grid_rows, encoder.get(),
+                    arg_output_filename_);
   if (result != AVIF_RESULT_OK) {
     std::cout << "Failed to encode image: " << avifResultToString(result)
               << " (" << encoder->diag.error << ")\n";

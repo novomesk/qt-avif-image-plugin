@@ -13,11 +13,15 @@
 using avif::ImagePtr;
 
 int main(int argc, char** argv) {
-  if (argc != 4 && argc != 5) {
+  if (argc != 4 && argc != 5 && argc != 6) {
     std::cerr << "Wrong argument: " << argv[0]
-              << " file1 file2 ignore_alpha_flag [psnr_threshold]" << std::endl;
+              << " file1 file2 ignore_alpha_flag [psnr_threshold] "
+                 "[ignore_gain_map_flag]"
+              << std::endl;
     return 2;
   }
+  const bool ignore_gain_map = argc > 5 && std::stoi(argv[5]) != 0;
+
   ImagePtr decoded[2] = {ImagePtr(avifImageCreateEmpty()),
                          ImagePtr(avifImageCreateEmpty())};
   if (!decoded[0] || !decoded[1]) {
@@ -31,16 +35,15 @@ int main(int argc, char** argv) {
   for (int i : {0, 1}) {
     // Make sure no color conversion happens.
     decoded[i]->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_IDENTITY;
-    if (avifReadImage(argv[i + 1], requestedFormat, kRequestedDepth,
-                      AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC,
-                      /*ignoreColorProfile==*/AVIF_FALSE,
-                      /*ignoreExif=*/AVIF_FALSE,
-                      /*ignoreXMP=*/AVIF_FALSE, /*allowChangingCicp=*/AVIF_TRUE,
-                      // TODO(maryla): also compare gain maps.
-                      /*ignoreGainMap=*/AVIF_TRUE,
-                      /*imageSizeLimit=*/std::numeric_limits<uint32_t>::max(),
-                      decoded[i].get(), &depth[i], nullptr,
-                      nullptr) == AVIF_APP_FILE_FORMAT_UNKNOWN) {
+    if (avifReadImage(
+            argv[i + 1], AVIF_APP_FILE_FORMAT_UNKNOWN /* guess format */,
+            requestedFormat, kRequestedDepth,
+            AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC,
+            /*ignoreColorProfile==*/AVIF_FALSE, /*ignoreExif=*/AVIF_FALSE,
+            /*ignoreXMP=*/AVIF_FALSE, ignore_gain_map,
+            /*imageSizeLimit=*/std::numeric_limits<uint32_t>::max(),
+            decoded[i].get(), &depth[i], nullptr,
+            nullptr) == AVIF_APP_FILE_FORMAT_UNKNOWN) {
       std::cerr << "Image " << argv[i + 1] << " cannot be read." << std::endl;
       return 2;
     }
@@ -57,8 +60,10 @@ int main(int argc, char** argv) {
   if (argc == 4) {
     if (!avif::testutil::AreImagesEqual(*decoded[0], *decoded[1],
                                         ignore_alpha)) {
+      auto psnr =
+          avif::testutil::GetPsnr(*decoded[0], *decoded[1], ignore_alpha);
       std::cerr << "Images " << argv[1] << " and " << argv[2]
-                << " are different." << std::endl;
+                << " are different (PSNR: " << psnr << ")." << std::endl;
       return 1;
     }
     std::cout << "Images " << argv[1] << " and " << argv[2] << " are identical."
@@ -67,7 +72,8 @@ int main(int argc, char** argv) {
     auto psnr = avif::testutil::GetPsnr(*decoded[0], *decoded[1], ignore_alpha);
     if (psnr < std::stod(argv[4])) {
       std::cerr << "PSNR: " << psnr << ", images " << argv[1] << " and "
-                << argv[2] << " are not similar." << std::endl;
+                << argv[2] << " are not similar enough (threshold: " << argv[4]
+                << ")." << std::endl;
       return 1;
     }
     std::cout << "PSNR: " << psnr << ", images " << argv[1] << " and "

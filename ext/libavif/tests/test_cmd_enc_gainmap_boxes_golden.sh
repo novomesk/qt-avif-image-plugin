@@ -24,9 +24,13 @@ encode_test_files() {
     # Image with a gain map.
     for f in "paris_exif_xmp_gainmap_bigendian.jpg" \
         "paris_exif_xmp_icc_gainmap_bigendian.jpg" \
-        "paris_exif_xmp_gainmap_littleendian.jpg"; do
+        "paris_exif_xmp_gainmap_littleendian.jpg" \
+        "apple_gainmap_old.jpg" \
+        "apple_gainmap_new.jpg"; do
         "${AVIFENC}" -s 9 "${TESTDATA_DIR}/$f" -o "$f.avif"
     done
+
+    "${AVIFENC}" -s 9 --yuv 444 --grid 2x2 "${TESTDATA_DIR}/paris_exif_xmp_gainmap_bigendian.jpg" -o "paris_exif_xmp_gainmap_bigendian_grid.avif"
 
     # Ignore gain map.
     "${AVIFENC}" -s 9 --ignore-gain-map "${TESTDATA_DIR}/paris_exif_xmp_gainmap_bigendian.jpg" \

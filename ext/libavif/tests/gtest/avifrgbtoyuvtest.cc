@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <tuple>
 
@@ -462,6 +463,61 @@ TEST(RGBToYUVTest, HighBitDepthGrayToYUV420) {
     EXPECT_EQ(u_plane[0], half[i]);
     EXPECT_EQ(v_plane[0], half[i]);
   }
+}
+
+TEST(RGBToYUVTest, 8BitGrayRoundTripWithLift) {
+  for (avifRange range : {AVIF_RANGE_LIMITED, AVIF_RANGE_FULL}) {
+    // 2x2 12-bit temporary image.
+    ImagePtr image(avifImageCreate(2, 2, 12, AVIF_PIXEL_FORMAT_YUV400));
+    ASSERT_NE(image, nullptr);
+    image->yuvRange = range;
+    // 2x2 8-bit original image.
+    static constexpr uint8_t gray[4] = {5, 3, 2, 1};
+    avifRGBImage rgb;
+    avifRGBImageSetDefaults(&rgb, image.get());
+    rgb.format = AVIF_RGB_FORMAT_GRAY;
+    rgb.avoidLibYUV = AVIF_TRUE;
+    rgb.depth = 8;
+    rgb.pixels = const_cast<uint8_t*>(gray);
+    rgb.rowBytes = 2 * sizeof(uint8_t);
+    // Convert to 12 bits.
+    ASSERT_EQ(avifImageRGBToYUV(image.get(), &rgb), AVIF_RESULT_OK);
+    // Convert back to 8 bits.
+    avifRGBImage rgb_final;
+    avifRGBImageSetDefaults(&rgb_final, image.get());
+    rgb_final.format = AVIF_RGB_FORMAT_GRAY;
+    rgb_final.avoidLibYUV = AVIF_TRUE;
+    rgb_final.depth = 8;
+    ASSERT_EQ(avifRGBImageAllocatePixels(&rgb_final), AVIF_RESULT_OK);
+    ASSERT_EQ(avifImageYUVToRGB(image.get(), &rgb_final), AVIF_RESULT_OK);
+    // Compare to the original 8-bit image.
+    const uint8_t* gray_plane = rgb_final.pixels;
+    EXPECT_EQ(gray_plane[0], gray[0]);
+    EXPECT_EQ(gray_plane[1], gray[1]);
+    EXPECT_EQ(gray_plane[2], gray[2]);
+    EXPECT_EQ(gray_plane[3], gray[3]);
+    avifRGBImageFreePixels(&rgb_final);
+  }
+}
+
+TEST(RGBToYUVTest, ZeroWidthOrHeight) {
+  avifRGBImage rgb;
+  memset(&rgb, 0, sizeof(rgb));
+  rgb.depth = 8;
+  rgb.format = AVIF_RGB_FORMAT_RGB;
+
+  rgb.width = 0;
+  rgb.height = 1;
+  EXPECT_EQ(avifRGBImageAllocatePixels(&rgb), AVIF_RESULT_INVALID_ARGUMENT);
+
+  rgb.width = 1;
+  rgb.height = 0;
+  EXPECT_EQ(avifRGBImageAllocatePixels(&rgb), AVIF_RESULT_INVALID_ARGUMENT);
+
+  rgb.width = 1;
+  rgb.height = 1;
+  EXPECT_EQ(avifRGBImageAllocatePixels(&rgb), AVIF_RESULT_OK);
+  avifRGBImageFreePixels(&rgb);
 }
 
 //------------------------------------------------------------------------------

@@ -10,7 +10,7 @@ namespace avif {
 
 ExtractGainMapCommand::ExtractGainMapCommand()
     : ProgramCommand("extractgainmap",
-                     "Saves the gain map of an avif file as an image") {
+                     "Save the gain map of an AVIF file as an image") {
   argparse_.add_argument(arg_input_filename_, "input_filename");
   argparse_.add_argument(arg_output_filename_, "output_filename");
   arg_image_encode_.Init(argparse_, /*can_have_alpha=*/false);
@@ -36,8 +36,10 @@ avifResult ExtractGainMapCommand::Run() {
     return AVIF_RESULT_INVALID_ARGUMENT;
   }
 
-  return WriteImage(decoder->image->gainMap->image, arg_output_filename_,
-                    arg_image_encode_.quality, arg_image_encode_.speed);
+  return WriteImage(
+      decoder->image->gainMap->image, arg_image_encode_.grid.value().grid_cols,
+      arg_image_encode_.grid.value().grid_rows, arg_output_filename_,
+      arg_image_encode_.quality, arg_image_encode_.speed);
 }
 
 }  // namespace avif

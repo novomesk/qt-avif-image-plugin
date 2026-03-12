@@ -20,10 +20,13 @@ class CombineCommand : public ProgramCommand {
   argparse::ArgValue<std::string> arg_output_filename_;
   argparse::ArgValue<CicpValues> arg_base_cicp_;
   argparse::ArgValue<CicpValues> arg_alternate_cicp_;
+  argparse::ArgValue<avifContentLightLevelInformationBox> arg_base_clli_;
+  argparse::ArgValue<avifContentLightLevelInformationBox> arg_alternate_clli_;
   argparse::ArgValue<int> arg_downscaling_;
   argparse::ArgValue<int> arg_gain_map_quality_;
   argparse::ArgValue<int> arg_gain_map_depth_;
   argparse::ArgValue<int> arg_gain_map_pixel_format_;
+  argparse::ArgValue<float> arg_max_headroom_;
   BasicImageEncodeArgs arg_image_encode_;
   ImageReadArgs arg_image_read_;
 };

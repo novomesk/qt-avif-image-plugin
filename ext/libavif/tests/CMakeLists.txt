@@ -75,17 +75,14 @@ if(AVIF_GTEST)
 endif()
 
 if(AVIF_GTEST)
-    if(AVIF_ENABLE_EXPERIMENTAL_SAMPLE_TRANSFORM)
-        add_avif_gtest_with_data(avif16bittest)
-        add_avif_gtest(avifsampletransformtest)
-    endif()
-
+    add_avif_gtest_with_data(avif16bittest)
     add_avif_gtest(avifallocationtest)
     add_avif_gtest_with_data(avifalphanoispetest)
     add_avif_gtest(avifalphapremtest)
+    add_avif_gtest_with_data(avifaltrtest)
     add_avif_gtest_with_data(avifanimationtest)
     add_avif_gtest(avifbasictest)
-    add_avif_gtest(avifchangesettingtest)
+    add_avif_gtest_with_data(avifchangesettingtest)
     add_avif_gtest(avifcicptest)
     add_avif_gtest(avifclaptest)
     add_avif_gtest(avifcllitest)
@@ -131,6 +128,7 @@ if(AVIF_GTEST)
     add_avif_gtest(avifrgbtest)
     add_avif_gtest(avifrgbtoyuvtest)
     add_avif_gtest(avifrgbtoyuvthreadingtest)
+    add_avif_gtest(avifsampletransformtest)
     add_avif_gtest_with_data(avifscaletest)
     add_avif_gtest_with_data(avifsize0test)
     add_avif_gtest(avifstreamtest)
@@ -141,16 +139,27 @@ if(AVIF_GTEST)
 
     add_avif_gtest(aviftilingtest)
     add_avif_gtest_with_data(aviftransformtest)
+    add_avif_gtest_with_data(aviftunetest)
     add_avif_gtest(avifutilstest)
     add_avif_gtest(avify4mtest)
 
     if(NOT AVIF_CODEC_AOM OR NOT AVIF_CODEC_AOM_ENCODE)
-        # These tests are supported with aom being the encoder. If the aom encoder is unavailable,
-        # these tests are disabled because other codecs may not implement all the necessary features.
-        # For example, SVT-AV1 requires 4:2:0 images with even dimensions of at least 64x64 px.
         set_tests_properties(
-            avifallocationtest avifgridapitest avifincrtest aviflosslesstest avifmetadatatest avifpixitest PROPERTIES DISABLED
-                                                                                                                      True
+            # These tests are supported with aom being the encoder. If the aom encoder is unavailable,
+            # these tests are disabled because other codecs may not implement all the necessary features.
+            # For example, SVT-AV1 requires 4:2:0 images with even dimensions of at least 64x64 px.
+            avifallocationtest
+            avifgridapitest
+            avifincrtest
+            aviflosslesstest
+            avifmetadatatest
+            avifpixitest
+            aviftunetest
+            # rav1e and svt do not support encoder changes (potentially different bit depth between
+            # primary item and bit depth extension).
+            avif16bittest
+            avifaltrtest
+            PROPERTIES DISABLED True
         )
 
         message(STATUS "Some tests are disabled because aom is unavailable for encoding.")
@@ -249,6 +258,7 @@ if(AVIF_BUILD_APPS)
     target_link_libraries(are_images_equal aviftest_helpers avif_enable_warnings)
     add_cmd_test(test_cmd ${CMAKE_CURRENT_SOURCE_DIR}/data)
     add_cmd_test(test_cmd_animation ${CMAKE_CURRENT_SOURCE_DIR}/data)
+    add_cmd_test(test_cmd_depth_extension ${CMAKE_CURRENT_SOURCE_DIR}/data)
     add_cmd_test(test_cmd_grid ${CMAKE_CURRENT_SOURCE_DIR}/data)
     add_cmd_test(test_cmd_icc_profile ${CMAKE_CURRENT_SOURCE_DIR}/data)
     add_cmd_test(test_cmd_lossless ${CMAKE_CURRENT_SOURCE_DIR}/data)
@@ -256,9 +266,12 @@ if(AVIF_BUILD_APPS)
     add_cmd_test(test_cmd_progressive ${CMAKE_CURRENT_SOURCE_DIR}/data)
     add_cmd_test(test_cmd_stdin ${CMAKE_CURRENT_SOURCE_DIR}/data)
     add_cmd_test(test_cmd_targetsize ${CMAKE_CURRENT_SOURCE_DIR}/data)
+    add_cmd_test(test_cmd_transform ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
     if(AVIF_ENABLE_JPEG_GAIN_MAP_CONVERSION)
         add_cmd_test(test_cmd_avifgainmaputil ${CMAKE_CURRENT_SOURCE_DIR}/data)
+    else()
+        set_tests_properties(test_cmd_stdin PROPERTIES DISABLED True)
     endif()
 
     if(AVIF_ENABLE_GOLDEN_TESTS AND AVIF_CODEC_AOM_ENCODE)
@@ -285,6 +298,7 @@ if(AVIF_BUILD_APPS)
     if(NOT AVIF_CODEC_AOM_ENABLED OR NOT AVIF_CODEC_AOM_ENCODE)
         # Only aom encoder supports AV1 lossless encoding.
         set_property(TEST test_cmd_animation PROPERTY DISABLED True)
+        set_property(TEST test_cmd_depth_extension PROPERTY DISABLED True)
         set_property(TEST test_cmd_icc_profile PROPERTY DISABLED True)
         set_property(TEST test_cmd_lossless PROPERTY DISABLED True)
 
@@ -327,7 +341,9 @@ if(AVIF_CODEC_AVM_ENABLED)
         set_tests_properties(aviftest PROPERTIES DISABLED True)
         if(AVIF_GTEST)
             set_tests_properties(
+                avif16bittest
                 avifallocationtest
+                avifaltrtest
                 avifbasictest
                 avifchangesettingtest
                 avifcllitest
@@ -343,6 +359,7 @@ if(AVIF_CODEC_AVM_ENABLED)
                 avifprogressivetest
                 avifpropertytest
                 avifrangetest
+                aviftunetest
                 avify4mtest
                 PROPERTIES DISABLED True
             )
@@ -354,15 +371,13 @@ if(AVIF_CODEC_AVM_ENABLED)
             if(AVIF_ENABLE_JPEG_GAIN_MAP_CONVERSION)
                 set_tests_properties(avifjpeggainmaptest PROPERTIES DISABLED True)
             endif()
-            if(AVIF_ENABLE_EXPERIMENTAL_SAMPLE_TRANSFORM)
-                set_tests_properties(avif16bittest PROPERTIES DISABLED True)
-            endif()
         endif()
 
         if(AVIF_BUILD_APPS)
             # Disable all tests that use avifenc without explicitly setting --codec=avm.
             set_tests_properties(
-                test_cmd test_cmd_animation test_cmd_grid test_cmd_stdin test_cmd_targetsize PROPERTIES DISABLED True
+                test_cmd test_cmd_animation test_cmd_grid test_cmd_stdin test_cmd_targetsize test_cmd_transform
+                PROPERTIES DISABLED True
             )
         endif()
     endif()

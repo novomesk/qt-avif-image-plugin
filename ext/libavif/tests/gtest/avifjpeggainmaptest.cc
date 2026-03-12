@@ -77,7 +77,7 @@ TEST(JpegTest, ReadJpegWithGainMap) {
         testutil::ReadImage(data_path, filename, AVIF_PIXEL_FORMAT_YUV444, 8,
                             AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC,
                             /*ignore_icc=*/false, /*ignore_exif=*/false,
-                            /*ignore_xmp=*/true, /*allow_changing_cicp=*/true,
+                            /*ignore_xmp=*/true,
                             /*ignore_gain_map=*/false);
     ASSERT_NE(image, nullptr);
     ASSERT_NE(image->gainMap, nullptr);
@@ -99,12 +99,45 @@ TEST(JpegTest, ReadJpegWithGainMap) {
   }
 }
 
+TEST(JpegTest, ReadAppleJpegWithGainMap) {
+  for (const std::string filename :
+       {"apple_gainmap_old.jpg", "apple_gainmap_new.jpg"}) {
+    SCOPED_TRACE(filename);
+
+    const ImagePtr image = testutil::ReadImage(
+        data_path, filename.c_str(), AVIF_PIXEL_FORMAT_YUV444, 8,
+        AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC,
+        /*ignore_icc=*/false, /*ignore_exif=*/false,
+        /*ignore_xmp=*/true,
+        /*ignore_gain_map=*/false);
+    ASSERT_NE(image, nullptr);
+    ASSERT_NE(image->gainMap, nullptr);
+    ASSERT_NE(image->gainMap->image, nullptr);
+    EXPECT_EQ(image->gainMap->image->width, 192u);
+    EXPECT_EQ(image->gainMap->image->height, 256u);
+    // Since ignore_xmp is true, there should be no XMP, even if it had to
+    // be read to parse the gain map.
+    EXPECT_EQ(image->xmp.size, 0u);
+
+    const double headroom =
+        filename == "apple_gainmap_old.jpg" ? 3.0 : log2(4.532783);
+    CheckGainMapMetadata(*image->gainMap,
+                         /*gain_map_min=*/{0.0, 0.0, 0.0},
+                         /*gain_map_max=*/{headroom, headroom, headroom},
+                         /*gain_map_gamma=*/{1.0, 1.0, 1.0},
+                         /*base_offset=*/{0.0, 0.0, 0.0},
+                         /*alternate_offset=*/{0.0, 0.0, 0.0},
+                         /*base_hdr_headroom=*/0.0,
+                         /*alternate_hdr_headroom=*/headroom);
+  }
+}
+
 TEST(JpegTest, IgnoreGainMap) {
   const ImagePtr image = testutil::ReadImage(
       data_path, "paris_exif_xmp_gainmap_littleendian.jpg",
       AVIF_PIXEL_FORMAT_YUV444, 8, AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC,
       /*ignore_icc=*/false, /*ignore_exif=*/false,
-      /*ignore_xmp=*/false, /*allow_changing_cicp=*/true,
+      /*ignore_xmp=*/false,
       /*ignore_gain_map=*/true);
   ASSERT_NE(image, nullptr);
   ASSERT_EQ(image->gainMap, nullptr);
@@ -156,11 +189,12 @@ TEST(JpegTest, ParseXMP) {
 </x:xmpmeta>
 <?xpacket end="w"?>
   )";
-  GainMapPtr gainMap(avifGainMapCreate());
+  GainMapPtr gain_map(avifGainMapCreate());
+  avifBool is_avif_gain_map;
   ASSERT_TRUE(avifJPEGParseGainMapXMP((const uint8_t*)xmp.data(), xmp.size(),
-                                      gainMap.get()));
+                                      gain_map.get(), &is_avif_gain_map));
 
-  CheckGainMapMetadata(*gainMap,
+  CheckGainMapMetadata(*gain_map,
                        /*gain_map_min=*/{0.025869, 0.075191, 0.142298},
                        /*gain_map_max=*/{3.527605, 2.830234, 1.537243},
                        /*gain_map_gamma=*/{0.506828, 0.590032, 1.517708},
@@ -181,12 +215,13 @@ TEST(JpegTest, ParseXMPAllDefaultValues) {
 </x:xmpmeta>
 <?xpacket end="w"?>
   )";
-  GainMapPtr gainMap(avifGainMapCreate());
+  GainMapPtr gain_map(avifGainMapCreate());
+  avifBool is_avif_gain_map;
   ASSERT_TRUE(avifJPEGParseGainMapXMP((const uint8_t*)xmp.data(), xmp.size(),
-                                      gainMap.get()));
+                                      gain_map.get(), &is_avif_gain_map));
 
   CheckGainMapMetadata(
-      *gainMap,
+      *gain_map,
       /*gain_map_min=*/{0.0, 0.0, 0.0},
       /*gain_map_max=*/{1.0, 1.0, 1.0},
       /*gain_map_gamma=*/{1.0, 1.0, 1.0},
@@ -201,6 +236,10 @@ TEST(JpegTest, ExtendedXmp) {
 <?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about="stuff" xmlns:xmpNote="http://ns.adobe.com/xmp/note/"
+        xmpNote:HasExtendedXMP="F280A6636D6DC3D306B925078C2924D3">
+      <stuff></stuff>
+    </rdf:Description>
     <rdf:Description rdf:about="stuff"
       xmlns:hdrgm="http://ns.adobe.com/hdr-gain-map/1.0/" hdrgm:Version="1.0"
       hdrgm:BaseRenditionIsHDR="False"
@@ -209,26 +248,17 @@ TEST(JpegTest, ExtendedXmp) {
     </rdf:Description>
   </rdf:RDF>
 </x:xmpmeta>
-<?xpacket end="w"?>
-
-<x:xmpmeta xmlns:x="adobe:ns:meta/">
-  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-    <!-- Imagine this is some extended xmp that avifenc concatenated to
-      the main XMP. As a result we have invalid XMP but should still be
-      able to parse it. -->
-    <stuff></stuff>
-  </rdf:RDF>
-</x:xmpmeta>
   )";
-  GainMapPtr gainMap(avifGainMapCreate());
+  GainMapPtr gain_map(avifGainMapCreate());
+  avifBool is_avif_gain_map;
   ASSERT_TRUE(avifJPEGParseGainMapXMP((const uint8_t*)xmp.data(), xmp.size(),
-                                      gainMap.get()));
+                                      gain_map.get(), &is_avif_gain_map));
 
   // Note that this test passes because the gain map metadata is in the primary
   // XMP. If it was in the extended part, we wouldn't detect it (but probably
   // should).
   CheckGainMapMetadata(
-      *gainMap,
+      *gain_map,
       /*gain_map_min=*/{0.0, 0.0, 0.0},
       /*gain_map_max=*/{1.0, 1.0, 1.0},
       /*gain_map_gamma=*/{1.0, 1.0, 1.0},
@@ -258,9 +288,10 @@ TEST(JpegTest, InvalidNumberOfValues) {
   </rdf:RDF>
 </x:xmpmeta>
   )";
-  GainMapPtr gainMap(avifGainMapCreate());
+  GainMapPtr gain_map(avifGainMapCreate());
+  avifBool is_avif_gain_map;
   EXPECT_FALSE(avifJPEGParseGainMapXMP((const uint8_t*)xmp.data(), xmp.size(),
-                                       gainMap.get()));
+                                       gain_map.get(), &is_avif_gain_map));
 }
 
 TEST(JpegTest, WrongVersion) {
@@ -273,9 +304,10 @@ TEST(JpegTest, WrongVersion) {
   </rdf:RDF>
 </x:xmpmeta>
   )";
-  GainMapPtr gainMap(avifGainMapCreate());
+  GainMapPtr gain_map(avifGainMapCreate());
+  avifBool is_avif_gain_map;
   EXPECT_FALSE(avifJPEGParseGainMapXMP((const uint8_t*)xmp.data(), xmp.size(),
-                                       gainMap.get()));
+                                       gain_map.get(), &is_avif_gain_map));
 }
 
 TEST(JpegTest, InvalidXMP) {
@@ -287,16 +319,18 @@ TEST(JpegTest, InvalidXMP) {
   </rdf:RDF>
 </x:xmpmeta>
   )";
-  GainMapPtr gainMap(avifGainMapCreate());
+  GainMapPtr gain_map(avifGainMapCreate());
+  avifBool is_avif_gain_map;
   EXPECT_FALSE(avifJPEGParseGainMapXMP((const uint8_t*)xmp.data(), xmp.size(),
-                                       gainMap.get()));
+                                       gain_map.get(), &is_avif_gain_map));
 }
 
 TEST(JpegTest, EmptyXMP) {
   const std::string xmp = "";
-  GainMapPtr gainMap(avifGainMapCreate());
+  GainMapPtr gain_map(avifGainMapCreate());
+  avifBool is_avif_gain_map;
   EXPECT_FALSE(avifJPEGParseGainMapXMP((const uint8_t*)xmp.data(), xmp.size(),
-                                       gainMap.get()));
+                                       gain_map.get(), &is_avif_gain_map));
 }
 
 //------------------------------------------------------------------------------

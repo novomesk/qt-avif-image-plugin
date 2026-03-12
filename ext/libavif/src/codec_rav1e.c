@@ -49,13 +49,21 @@ static avifBool rav1eSupports400(void)
     return minorVersion >= 4;
 }
 
+// rav1e's QP range is [0,255]
+static int rav1eQualityToQuantizer(int quality)
+{
+    const int quantizer = ((100 - quality) * 255 + 50) / 100;
+
+    return quantizer;
+}
+
 static avifResult rav1eCodecEncodeImage(avifCodec * codec,
                                         avifEncoder * encoder,
                                         const avifImage * image,
                                         avifBool alpha,
                                         int tileRowsLog2,
                                         int tileColsLog2,
-                                        int quantizer,
+                                        int quality,
                                         avifEncoderChanges encoderChanges,
                                         avifBool disableLaggedOutput,
                                         uint32_t addImageFlags,
@@ -164,7 +172,7 @@ static avifResult rav1eCodecEncodeImage(avifCodec * codec,
             minQuantizer = AVIF_CLAMP(encoder->minQuantizerAlpha, 0, 63);
         }
         minQuantizer = (minQuantizer * 255) / 63; // Rescale quantizer values as rav1e's QP range is [0,255]
-        quantizer = (quantizer * 255) / 63;
+        const int quantizer = rav1eQualityToQuantizer(quality);
         if (rav1e_config_parse_int(rav1eConfig, "min_quantizer", minQuantizer) == -1) {
             goto cleanup;
         }
@@ -194,7 +202,7 @@ static avifResult rav1eCodecEncodeImage(avifCodec * codec,
             }
         }
         for (uint32_t i = 0; i < codec->csOptions->count; ++i) {
-            avifCodecSpecificOption * entry = &codec->csOptions->entries[i];
+            const avifCodecSpecificOption * entry = &codec->csOptions->entries[i];
             if (rav1e_config_parse(rav1eConfig, entry->key, entry->value) < 0) {
                 avifDiagnosticsPrintf(codec->diag, "Invalid value for %s: %s.", entry->key, entry->value);
                 result = AVIF_RESULT_INVALID_CODEC_SPECIFIC_OPTION;
@@ -202,15 +210,16 @@ static avifResult rav1eCodecEncodeImage(avifCodec * codec,
             }
         }
 
-        // Section 2.3.4 of AV1-ISOBMFF says 'colr' with 'nclx' should be present and shall match CICP
-        // values in the Sequence Header OBU, unless the latter has 2/2/2 (Unspecified).
-        // So set CICP values to 2/2/2 (Unspecified) in the Sequence Header OBU for simplicity.
-        // It may also save 3 bytes since the AV1 encoder may set color_description_present_flag to 0
-        // (see Section 5.5.2 "Color config syntax" of the AV1 specification).
+        // AVIF specification, Section 2.2.1. "AV1 Item Configuration Property":
+        //   The values of the fields in the AV1CodecConfigurationBox shall match those
+        //   of the Sequence Header OBU in the AV1 Image Item Data.
+        // CICP values could be set to 2/2/2 (Unspecified) in the Sequence Header OBU for
+        // simplicity and to save 3 bytes, but some decoders ignore the colr box and rely
+        // on the OBU contents instead. See #2850.
         rav1e_config_set_color_description(rav1eConfig,
-                                           RA_MATRIX_COEFFICIENTS_UNSPECIFIED,
-                                           RA_COLOR_PRIMARIES_UNSPECIFIED,
-                                           RA_TRANSFER_CHARACTERISTICS_UNSPECIFIED);
+                                           (RaMatrixCoefficients)image->matrixCoefficients,
+                                           (RaColorPrimaries)image->colorPrimaries,
+                                           (RaTransferCharacteristics)image->transferCharacteristics);
 
         codec->internal->rav1eContext = rav1e_context_new(rav1eConfig);
         if (!codec->internal->rav1eContext) {

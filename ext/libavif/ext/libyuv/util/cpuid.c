@@ -24,16 +24,16 @@ using namespace libyuv;
 #endif
 
 #ifdef __linux__
-static void KernelVersion(int *version) {
+static void KernelVersion(int* version) {
   struct utsname buffer;
   int i = 0;
 
   version[0] = version[1] = 0;
   if (uname(&buffer) == 0) {
-    char *v = buffer.release;
+    char* v = buffer.release;
     for (i = 0; *v && i < 2; ++v) {
       if (isdigit(*v)) {
-        version[i++] = (int) strtol(v, &v, 10);
+        version[i++] = (int)strtol(v, &v, 10);
       }
     }
   }
@@ -60,6 +60,7 @@ int main(int argc, const char* argv[]) {
     int has_neon_i8mm = TestCpuFlag(kCpuHasNeonI8MM);
     int has_sve = TestCpuFlag(kCpuHasSVE);
     int has_sve2 = TestCpuFlag(kCpuHasSVE2);
+    int has_sve_f32mm = TestCpuFlag(kCpuHasSVEF32MM);
     int has_sme = TestCpuFlag(kCpuHasSME);
     int has_sme2 = TestCpuFlag(kCpuHasSME2);
     printf("Has Arm 0x%x\n", has_arm);
@@ -68,6 +69,7 @@ int main(int argc, const char* argv[]) {
     printf("Has Neon I8MM 0x%x\n", has_neon_i8mm);
     printf("Has SVE 0x%x\n", has_sve);
     printf("Has SVE2 0x%x\n", has_sve2);
+    printf("Has SVE F32MM 0x%x\n", has_sve_f32mm);
     printf("Has SME 0x%x\n", has_sme);
     printf("Has SME2 0x%x\n", has_sme2);
 
@@ -75,7 +77,8 @@ int main(int argc, const char* argv[]) {
     // Read and print the SVE and SME vector lengths.
     if (has_sve) {
       int sve_vl;
-      __asm__(".inst 0x04bf5020    \n"  // rdvl x0, #1
+      __asm__(
+          ".inst 0x04bf5020    \n"  // rdvl x0, #1
           "mov %w[sve_vl], w0  \n"
           : [sve_vl] "=r"(sve_vl)  // %[sve_vl]
           :
@@ -84,7 +87,8 @@ int main(int argc, const char* argv[]) {
     }
     if (has_sme) {
       int sme_vl;
-      __asm__(".inst 0x04bf5820    \n"  // rdsvl x0, #1
+      __asm__(
+          ".inst 0x04bf5820    \n"  // rdsvl x0, #1
           "mov %w[sme_vl], w0  \n"
           : [sme_vl] "=r"(sme_vl)  // %[sme_vl]
           :
@@ -104,26 +108,17 @@ int main(int argc, const char* argv[]) {
 
     // Read and print the RVV vector length.
     if (has_rvv) {
-      register uint32_t vlenb __asm__ ("t0");
-      __asm__(".word 0xC22022F3"  /* CSRR t0, vlenb */ : "=r" (vlenb));
+      register uint32_t vlenb __asm__("t0");
+      __asm__(".word 0xC22022F3" /* CSRR t0, vlenb */ : "=r"(vlenb));
       printf("RVV vector length: %d bytes\n", vlenb);
     }
   }
 #endif  // defined(__riscv)
 
-#if defined(__mips__)
-  int has_mips = TestCpuFlag(kCpuHasMIPS);
-  if (has_mips) {
-    int has_msa = TestCpuFlag(kCpuHasMSA);
-    printf("Has MIPS 0x%x\n", has_mips);
-    printf("Has MSA 0x%x\n", has_msa);
-  }
-#endif  // defined(__mips__)
-
 #if defined(__loongarch__)
   int has_loongarch = TestCpuFlag(kCpuHasLOONGARCH);
   if (has_loongarch) {
-    int has_lsx  = TestCpuFlag(kCpuHasLSX);
+    int has_lsx = TestCpuFlag(kCpuHasLSX);
     int has_lasx = TestCpuFlag(kCpuHasLASX);
     printf("Has LOONGARCH 0x%x\n", has_loongarch);
     printf("Has LSX 0x%x\n", has_lsx);
@@ -131,8 +126,8 @@ int main(int argc, const char* argv[]) {
   }
 #endif  // defined(__loongarch__)
 
-#if defined(__i386__) || defined(__x86_64__) || \
-    defined(_M_IX86) || defined(_M_X64)
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || \
+    defined(_M_X64)
   int has_x86 = TestCpuFlag(kCpuHasX86);
   if (has_x86) {
     int family, model, cpu_info[4];
@@ -163,8 +158,8 @@ int main(int argc, const char* argv[]) {
     CpuId(1, 0, &cpu_info[0]);
     family = ((cpu_info[0] >> 8) & 0x0f) | ((cpu_info[0] >> 16) & 0xff0);
     model = ((cpu_info[0] >> 4) & 0x0f) | ((cpu_info[0] >> 12) & 0xf0);
-    printf("Cpu Family %d (0x%x), Model %d (0x%x)\n", family, family,
-           model, model);
+    printf("Cpu Family %d (0x%x), Model %d (0x%x)\n", family, family, model,
+           model);
 
     int has_sse2 = TestCpuFlag(kCpuHasSSE2);
     int has_ssse3 = TestCpuFlag(kCpuHasSSSE3);
@@ -210,7 +205,7 @@ int main(int argc, const char* argv[]) {
     printf("Has AVXVNNIINT8 0x%x\n", has_avxvnniint8);
     printf("Has AMXINT8 0x%x\n", has_amxint8);
   }
-#endif  // defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
+#endif  // defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) ||
+        // defined(_M_X64)
   return 0;
 }
-

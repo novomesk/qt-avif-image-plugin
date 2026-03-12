@@ -137,6 +137,10 @@ bool AreImagesEqual(const avifImage& image1, const avifImage& image2,
 // Returns true if both images have the same features and pixel values.
 bool AreImagesEqual(const avifRGBImage& image1, const avifRGBImage& image2);
 
+// Returns true if both images have the same features and close pixel values.
+bool AreImagesSimilar(const avifImage& image1, const avifImage& image2,
+                      double min_psnr = 30, bool ignore_alpha = false);
+
 // Returns the Peak Signal-to-Noise Ratio of image1 compared to image2.
 // A value of 99dB means all samples are exactly the same.
 // A negative value means that the input images cannot be compared.
@@ -167,7 +171,6 @@ ImagePtr ReadImage(const char* folder_path, const char* file_name,
                        AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC,
                    avifBool ignore_icc = false, avifBool ignore_exif = false,
                    avifBool ignore_xmp = false,
-                   avifBool allow_changing_cicp = true,
                    avifBool ignore_gain_map = false);
 // Convenient wrapper around avifPNGWrite() for debugging purposes.
 // Do not remove.

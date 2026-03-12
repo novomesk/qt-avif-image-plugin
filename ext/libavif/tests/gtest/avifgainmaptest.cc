@@ -67,6 +67,8 @@ ImagePtr CreateTestImageWithGainMap(bool base_rendition_is_hdr) {
   if (image == nullptr) {
     return nullptr;
   }
+  image->colorPrimaries = AVIF_COLOR_PRIMARIES_BT2020;
+  image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT601;
   image->transferCharacteristics =
       (avifTransferCharacteristics)(base_rendition_is_hdr
                                         ? AVIF_TRANSFER_CHARACTERISTICS_PQ
@@ -78,6 +80,9 @@ ImagePtr CreateTestImageWithGainMap(bool base_rendition_is_hdr) {
   if (gain_map == nullptr) {
     return nullptr;
   }
+  gain_map->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
+  gain_map->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT709;
+  gain_map->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
   testutil::FillImageGradient(gain_map.get());
   image->gainMap = avifGainMapCreate();
   if (image->gainMap == nullptr) {
@@ -152,6 +157,13 @@ TEST(GainMapTest, EncodeDecodeBaseImageSdr) {
   EXPECT_EQ(decoded->gainMap->image->width, image->gainMap->image->width);
   EXPECT_EQ(decoded->gainMap->image->height, image->gainMap->image->height);
   EXPECT_EQ(decoded->gainMap->image->depth, image->gainMap->image->depth);
+  EXPECT_EQ(decoded->gainMap->image->colorPrimaries,
+            image->gainMap->image->colorPrimaries);
+  EXPECT_EQ(decoded->gainMap->image->transferCharacteristics,
+            image->gainMap->image->transferCharacteristics);
+  EXPECT_EQ(decoded->gainMap->image->matrixCoefficients,
+            image->gainMap->image->matrixCoefficients);
+  EXPECT_EQ(decoded->gainMap->image->yuvRange, image->gainMap->image->yuvRange);
   CheckGainMapMetadataMatches(*decoded->gainMap, *image->gainMap);
 
   // Decode the image.
@@ -1085,7 +1097,7 @@ INSTANTIATE_TEST_SUITE_P(
             /*out_depth=*/8,
             /*out_transfer=*/AVIF_TRANSFER_CHARACTERISTICS_SRGB,
             /*out_rgb_format=*/AVIF_RGB_FORMAT_RGB,
-            /*reference=*/"seine_sdr_gainmap_srgb.avif", /*min_psnr=*/60.0f,
+            /*reference=*/"seine_sdr_gainmap_srgb.avif", /*min_psnr=*/53.5f,
             /*max_psnr=*/80.0f),
 
         // Same as above, outputting to RGBA.
@@ -1209,7 +1221,7 @@ TEST(ToneMapTest, ToneMapImageSameHeadroom) {
         /*out_depth=*/image->depth,
         /*out_transfer_characteristics=*/image->transferCharacteristics,
         AVIF_RGB_FORMAT_RGB, /*reference_image=*/image.get(),
-        /*min_psnr=*/60, /*max_psnr=*/100);
+        /*min_psnr=*/53.5, /*max_psnr=*/100);
   }
 }
 
@@ -1398,7 +1410,7 @@ INSTANTIATE_TEST_SUITE_P(
                         /*image2_name=*/"seine_hdr_gainmap_srgb.avif",
                         /*downscaling=*/1, /*gain_map_depth=*/10,
                         /*gain_map_format=*/AVIF_PIXEL_FORMAT_YUV444,
-                        /*min_psnr=*/55.0f, /*max_psnr=*/80.0f),
+                        /*min_psnr=*/53.25f, /*max_psnr=*/80.0f),
         // 8 bit gain map, expect a slightly lower PSNR.
         std::make_tuple(/*image1_name=*/"seine_sdr_gainmap_srgb.avif",
                         /*image2_name=*/"seine_hdr_gainmap_srgb.avif",
@@ -1447,7 +1459,7 @@ INSTANTIATE_TEST_SUITE_P(
                         /*image2_name=*/"colors_hdr_rec2020.avif",
                         /*downscaling=*/1, /*gain_map_depth=*/10,
                         /*gain_map_format=*/AVIF_PIXEL_FORMAT_YUV444,
-                        /*min_psnr=*/55.0f, /*max_psnr=*/100.0f),
+                        /*min_psnr=*/52.5f, /*max_psnr=*/100.0f),
         // The PSNR is very high because there are essentially the same image,
         // simply expresed in different colorspaces.
         std::make_tuple(/*image1_name=*/"colors_hdr_rec2020.avif",
@@ -1460,7 +1472,7 @@ INSTANTIATE_TEST_SUITE_P(
                         /*image2_name=*/"colors_wcg_hdr_rec2020.avif",
                         /*downscaling=*/1, /*gain_map_depth=*/10,
                         /*gain_map_format=*/AVIF_PIXEL_FORMAT_YUV444,
-                        /*min_psnr=*/55.0f, /*max_psnr=*/80.0f)));
+                        /*min_psnr=*/52.5f, /*max_psnr=*/80.0f)));
 
 TEST(GainMapTest, CreateGainMapConstantFactor) {
   // Used only to initialize rgb images.

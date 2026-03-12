@@ -26,6 +26,10 @@ namespace {
 
 std::string FileFormatToString(avifAppFileFormat file_format) {
   switch (file_format) {
+    case AVIF_APP_FILE_FORMAT_UNKNOWN:
+      return "unknown";
+    case AVIF_APP_FILE_FORMAT_AVIF:
+      return "AVIF";
     case AVIF_APP_FILE_FORMAT_PNG:
       return "PNG";
     case AVIF_APP_FILE_FORMAT_JPEG:
@@ -42,7 +46,7 @@ void ReadImageFile(const std::string& arbitrary_bytes,
                    avifPixelFormat requested_format, int requested_depth,
                    avifChromaDownsampling chroma_downsampling,
                    bool ignore_color_profile, bool ignore_exif, bool ignore_xmp,
-                   bool allow_changing_cicp, bool ignore_gain_map,
+                   bool ignore_gain_map,
                    avifMatrixCoefficients matrix_coefficients) {
   ASSERT_FALSE(GetSeedDataDirs().empty());  // Make sure seeds are available.
 
@@ -74,9 +78,10 @@ void ReadImageFile(const std::string& arbitrary_bytes,
           : kImageSizeLimit;
 
   const avifAppFileFormat file_format = avifReadImage(
-      file_path.c_str(), requested_format, requested_depth, chroma_downsampling,
-      ignore_color_profile, ignore_exif, ignore_xmp, allow_changing_cicp,
-      ignore_gain_map, imageSizeLimit, avif_image.get(), &out_depth, &timing,
+      file_path.c_str(), AVIF_APP_FILE_FORMAT_UNKNOWN /* guess format */,
+      requested_format, requested_depth, chroma_downsampling,
+      ignore_color_profile, ignore_exif, ignore_xmp, ignore_gain_map,
+      imageSizeLimit, avif_image.get(), &out_depth, &timing,
       /*frameIter=*/nullptr);
 
   if (file_format != AVIF_APP_FILE_FORMAT_UNKNOWN) {
@@ -117,7 +122,6 @@ FUZZ_TEST(ReadImageFuzzTest, ReadImageFile)
                  /*ignore_color_profile=*/Arbitrary<bool>(),
                  /*ignore_exif=*/Arbitrary<bool>(),
                  /*ignore_xmp=*/Arbitrary<bool>(),
-                 /*allow_changing_cicp=*/Arbitrary<bool>(),
                  /*ignore_gain_map=*/Arbitrary<bool>(),
                  ElementOf({AVIF_MATRIX_COEFFICIENTS_IDENTITY,
                             AVIF_MATRIX_COEFFICIENTS_BT709,

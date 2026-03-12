@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 float avifRoundf(float v)
@@ -89,6 +90,11 @@ avifBool avifArrayCreate(void * arrayStruct, uint32_t elementSize, uint32_t init
     arr->elementSize = elementSize ? elementSize : 1;
     arr->count = 0;
     arr->capacity = initialCapacity;
+    if (arr->capacity > SIZE_MAX / arr->elementSize) {
+        arr->ptr = NULL;
+        arr->capacity = 0;
+        return AVIF_FALSE;
+    }
     size_t byteCount = (size_t)arr->elementSize * arr->capacity;
     arr->ptr = (uint8_t *)avifAlloc(byteCount);
     if (!arr->ptr) {
@@ -105,10 +111,15 @@ void * avifArrayPush(void * arrayStruct)
     if (arr->count == arr->capacity) {
         uint8_t * oldPtr = arr->ptr;
         size_t oldByteCount = (size_t)arr->elementSize * arr->capacity;
-        arr->ptr = (uint8_t *)avifAlloc(oldByteCount * 2);
-        if (arr->ptr == NULL) {
+        if (oldByteCount > SIZE_MAX / 2 || arr->capacity > UINT32_MAX / 2) {
             return NULL;
         }
+        size_t newByteCount = oldByteCount * 2;
+        uint8_t * newPtr = (uint8_t *)avifAlloc(newByteCount);
+        if (newPtr == NULL) {
+            return NULL;
+        }
+        arr->ptr = newPtr;
         memset(arr->ptr + oldByteCount, 0, oldByteCount);
         memcpy(arr->ptr, oldPtr, oldByteCount);
         arr->capacity *= 2;

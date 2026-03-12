@@ -246,11 +246,21 @@ TEST(MetadataTest, ExifOrientation) {
       testutil::ReadImage(data_path, "paris_exif_orientation_5.jpg");
   ASSERT_NE(image, nullptr);
   // The Exif metadata contains orientation information: 5.
+  // When reading the JPEG file, the Exif orientation is set to 1.
   EXPECT_GT(image->exif.size, 0u);
   EXPECT_EQ(image->transformFlags & (AVIF_TRANSFORM_IROT | AVIF_TRANSFORM_IMIR),
             avifTransformFlags{AVIF_TRANSFORM_IROT | AVIF_TRANSFORM_IMIR});
   EXPECT_EQ(image->irot.angle, 1u);
   EXPECT_EQ(image->imir.axis, 0u);
+  testutil::AvifRwData originalReadExif;
+  ASSERT_EQ(
+      avifRWDataSet(&originalReadExif, image->exif.data, image->exif.size),
+      AVIF_RESULT_OK);
+  // For testing purposes, set back the orientation.
+  ASSERT_EQ(avifSetExifOrientation(&image->exif, 5), AVIF_RESULT_OK);
+  // The two Exifs are different, showing that the Orientation was indeed
+  // modified when reading.
+  EXPECT_FALSE(testutil::AreByteSequencesEqual(originalReadExif, image->exif));
 
   const testutil::AvifRwData encoded =
       testutil::Encode(image.get(), AVIF_SPEED_FASTEST);
@@ -265,25 +275,26 @@ TEST(MetadataTest, ExifOrientation) {
   EXPECT_EQ(decoded->irot.angle, 1u);
   EXPECT_EQ(decoded->imir.axis, 0u);
 
-  // Exif orientation is kept in JPEG export.
+  // JPEG: Exif orientation should be applied when saving and removed from Exif.
   ImagePtr temp_image =
       WriteAndReadImage(*image, "paris_exif_orientation_5.jpg");
   ASSERT_NE(temp_image, nullptr);
-  EXPECT_TRUE(testutil::AreByteSequencesEqual(image->exif, temp_image->exif));
-  EXPECT_EQ(image->transformFlags, temp_image->transformFlags);
-  EXPECT_EQ(image->irot.angle, temp_image->irot.angle);
-  EXPECT_EQ(image->imir.axis, temp_image->imir.axis);
-  EXPECT_EQ(image->width, temp_image->width);  // Samples are left untouched.
+  EXPECT_FALSE(testutil::AreByteSequencesEqual(image->exif, temp_image->exif));
+  EXPECT_EQ(temp_image->transformFlags, AVIF_TRANSFORM_NONE);
+  // Samples have been rotated.
+  EXPECT_EQ(image->width, temp_image->height);
+  EXPECT_EQ(image->height, temp_image->width);
 
-  // Exif orientation in PNG export should be ignored or discarded.
+  // PNG: Exif orientation should be applied when saving and removed from Exif.
   temp_image = WriteAndReadImage(*image, "paris_exif_orientation_5.png");
   ASSERT_NE(temp_image, nullptr);
   EXPECT_FALSE(testutil::AreByteSequencesEqual(image->exif, temp_image->exif));
   EXPECT_EQ(
       temp_image->transformFlags & (AVIF_TRANSFORM_IROT | AVIF_TRANSFORM_IMIR),
       avifTransformFlags{0});
-  // TODO(yguyon): Fix orientation not being applied to PNG samples.
-  EXPECT_EQ(image->width, temp_image->width /* should be height here */);
+  // Samples have been rotated.
+  EXPECT_EQ(image->width, temp_image->height);
+  EXPECT_EQ(image->height, temp_image->width);
 }
 
 TEST(MetadataTest, AllExifOrientations) {
@@ -312,6 +323,15 @@ TEST(MetadataTest, ExifOrientationAndForcedImir) {
   EXPECT_GT(image->exif.size, 0u);
   image->transformFlags = AVIF_TRANSFORM_IMIR;
   image->imir.axis = 1;
+  testutil::AvifRwData originalReadExif;
+  ASSERT_EQ(
+      avifRWDataSet(&originalReadExif, image->exif.data, image->exif.size),
+      AVIF_RESULT_OK);
+  // For testing purposes, set back the orientation.
+  ASSERT_EQ(avifSetExifOrientation(&image->exif, 5), AVIF_RESULT_OK);
+  // The two Exifs are different, showing that the Orientation was indeed
+  // modified when reading.
+  EXPECT_FALSE(testutil::AreByteSequencesEqual(originalReadExif, image->exif));
 
   const testutil::AvifRwData encoded =
       testutil::Encode(image.get(), AVIF_SPEED_FASTEST);
@@ -324,15 +344,16 @@ TEST(MetadataTest, ExifOrientationAndForcedImir) {
   EXPECT_EQ(decoded->irot.angle, 0u);
   EXPECT_EQ(decoded->imir.axis, image->imir.axis);
 
-  // Exif orientation is set equivalent to irot/imir in JPEG export.
-  // Existing Exif orientation is overwritten.
+  // Exif orientation is discarded (set to 1) and samples are rotated/mirrored
+  // according to irot/imir in JPEG export.
   const ImagePtr temp_image =
       WriteAndReadImage(*image, "paris_exif_orientation_2.jpg");
   ASSERT_NE(temp_image, nullptr);
   EXPECT_FALSE(testutil::AreByteSequencesEqual(image->exif, temp_image->exif));
-  EXPECT_EQ(image->transformFlags, temp_image->transformFlags);
-  EXPECT_EQ(image->imir.axis, temp_image->imir.axis);
-  EXPECT_EQ(image->width, temp_image->width);  // Samples are left untouched.
+  EXPECT_EQ(temp_image->transformFlags, AVIF_TRANSFORM_NONE);
+  // Samples have been mirrored but you can't really tell from the dimensions.
+  EXPECT_EQ(image->width, temp_image->width);
+  EXPECT_EQ(image->height, temp_image->height);
 }
 
 TEST(MetadataTest, RotatedJpegBecauseOfIrotImir) {
@@ -355,8 +376,9 @@ TEST(MetadataTest, RotatedJpegBecauseOfIrotImir) {
   EXPECT_EQ(
       temp_image->transformFlags & (AVIF_TRANSFORM_IROT | AVIF_TRANSFORM_IMIR),
       avifTransformFlags{0});
-  // TODO(yguyon): Fix orientation not being applied to JPEG samples.
-  EXPECT_EQ(image->width, temp_image->width /* should be height here */);
+  // Samples have been rotated.
+  EXPECT_EQ(image->width, temp_image->height);
+  EXPECT_EQ(image->height, temp_image->width);
 }
 
 TEST(MetadataTest, ExifIfdOffsetLoopingTo8) {

@@ -8,6 +8,75 @@ The changes are relative to the previous release, unless the baseline is specifi
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-03-04
+
+### Added since 1.3.0
+
+* Allow avifenc to read png or jpeg files through stdin using --stdin-format.
+* Support some Sample Transform schemes as defined in the version 1.2 of the
+  AVIF specification.
+* Add an optional argument to the --depth flag of avifenc used to enable a bit
+  depth extension scheme in the encoded file.
+* Add support for converting jpeg files with Apple style gain maps.
+* Add support for PNG cICP chunk when decoding PNG files. If a PNG file contains
+  a cICP chunk and other color information chunks, such as iCCP (ICC profile),
+  the other chunks are ignored as per the PNG Specification Third Edition
+  Section 4.3.
+* Support reading Sample-Transform-based 16-bit AVIF files when
+  avifDecoder::imageContentToDecode & AVIF_IMAGE_CONTENT_SAMPLE_TRANSFORMS is
+  not zero.
+* Support Sample Transform derived image items with grid input image items.
+* Add --sato flag to avifdec to enable Sample Transforms support at decoding.
+* Add --grid option to avifgainmaputil.
+* Apply clean aperture crop, rotation and mirror when decoding to PNG or JPEG.
+  Remove orientation information from Exif if present.
+* Add avif::RGBImageCleanup to the C++ API.
+
+### Changed since 1.3.0
+
+* Set avifDecoder::image->depth to the same value after avifDecoderParse() as
+  after avifDecoderNextImage() when the file to decode contains a 'sato' derived
+  image item.
+* avifdec only enables Sample Transform decoding when --depth is set to 16.
+* Update dav1d.cmd/dav1d_android.sh/LocalDav1d.cmake: 1.5.3
+* Update googletest.cmd/LocalGTest.cmake: v1.17.0
+* Update libgav1.cmd: v0.20.0
+* Update libjpeg.cmd/LocalJpeg.cmake: 3.1.3
+* Update libyuv.cmd/LocalLibyuv.cmake: deeb764bb (1922)
+* Update libsharpyuv.cmd/LocalLibsharpyuv.cmake: v1.6.0
+* Update libxml2.cmd/LocalLibXml2.cmake: v2.15.1
+* Update aom.cmd/LocalAom.cmake: v3.13.1
+* Update LocalAvm.cmake: research-v13.0.0
+* Update rav1e.cmd/LocalRav1e.cmake: cargo-c v0.10.20, corrosion v0.6.1,
+  rav1e v0.8.1
+* Update svt.cmd/svt.sh/LocalSvt.cmake: v4.0.1
+* Update zlibpng.cmd/LocalZlibpng.cmake: libpng 1.6.55, zlib 1.3.2
+* Fix grayscale conversion when changing the bit depth.
+* Bump cmake_minimum_required from 3.13 to 3.22
+* Associate transformative properties with alpha auxiliary image items.
+* Always forward the CICP color primaries, transfer characteristics,
+  and matrix coefficients to the AV1 encoder, which writes them in the Sequence
+  Header OBU, for compatibility with libraries that wrongly ignore the colr box.
+* Use a "quality to quantizer (QP)" mapping formula designed for AOM_TUNE_IQ.
+* Set tuning before applying the user-provided specific aom codec options.
+* Use AOM_TUNE_PSNR by default when encoding alpha with libaom because
+  AOM_TUNE_SSIM causes ringing for alpha.
+* Use AOM_TUNE_IQ by default when encoding still non-RGB color samples with
+  libaom v3.13.0 or later.
+* Converting an image containing a gain map using avifenc with the --grid flag
+  now also splits the gain map into a grid.
+* In avifenc, set Exif orientation to 1 (no transformation) when converting
+  JPEGs to AVIF.
+* Use all-intra encoding for a layered image if the total number of layers is 2
+  and the quality of the first layer is very low (q <= 10).
+
+### Removed since 1.3.0
+
+* Remove ext/avm.cmd.
+* Remove the AVIF_ENABLE_EXPERIMENTAL_SAMPLE_TRANSFORM CMake flag.
+* Remove support for libaom versions up to 2.0.0 inclusive.
+* Un-export the private function avifImagePushProperty().
+
 ## [1.3.0] - 2025-05-09
 
 ### Added since 1.2.1
@@ -1270,7 +1339,8 @@ code.
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/AOMediaCodec/libavif/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/AOMediaCodec/libavif/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/AOMediaCodec/libavif/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/AOMediaCodec/libavif/compare/v1.1.1...v1.2.0

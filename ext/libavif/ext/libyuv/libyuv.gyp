@@ -26,19 +26,12 @@
     'clang%': 0,
     # Link-Time Optimizations.
     'use_lto%': 0,
-    'mips_msa%': 0,  # Default to msa off.
     'build_neon': 0,
-    'build_msa': 0,
     'conditions': [
        ['(target_arch == "armv7" or target_arch == "armv7s" or \
        (target_arch == "arm" and arm_version >= 7) or target_arch == "arm64")\
        and (arm_neon == 1 or arm_neon_optional == 1)', {
          'build_neon': 1,
-       }],
-       ['(target_arch == "mipsel" or target_arch == "mips64el")\
-       and (mips_msa == 1)',
-       {
-         'build_msa': 1,
        }],
     ],
   },
@@ -87,11 +80,6 @@
             }],
           ],
         }],
-        ['build_msa != 0', {
-          'defines': [
-            'LIBYUV_MSA',
-          ],
-        }],
         ['OS != "ios" and libyuv_disable_jpeg != 1', {
           'defines': [
             'HAVE_JPEG'
@@ -121,7 +109,6 @@
         # Enable the following 3 macros to turn off assembly for specified CPU.
         # 'LIBYUV_DISABLE_X86',
         # 'LIBYUV_DISABLE_NEON',
-        # 'LIBYUV_DISABLE_DSPR2',
         # Enable the following macro to build libyuv as a shared library (dll).
         # 'LIBYUV_USING_SHARED_LIBRARY',
         # TODO(fbarchard): Make these into gyp defines.

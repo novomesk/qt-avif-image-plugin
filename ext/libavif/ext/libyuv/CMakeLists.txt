@@ -23,7 +23,6 @@ set ( ly_common_source_files
   ${ly_src_dir}/compare.cc
   ${ly_src_dir}/compare_common.cc
   ${ly_src_dir}/compare_gcc.cc
-  ${ly_src_dir}/compare_msa.cc
   ${ly_src_dir}/compare_win.cc
   ${ly_src_dir}/convert_argb.cc
   ${ly_src_dir}/convert.cc
@@ -42,14 +41,12 @@ set ( ly_common_source_files
   ${ly_src_dir}/rotate_common.cc
   ${ly_src_dir}/rotate_gcc.cc
   ${ly_src_dir}/rotate_lsx.cc
-  ${ly_src_dir}/rotate_msa.cc
   ${ly_src_dir}/rotate_win.cc
   ${ly_src_dir}/row_any.cc
   ${ly_src_dir}/row_common.cc
   ${ly_src_dir}/row_gcc.cc
   ${ly_src_dir}/row_lasx.cc
   ${ly_src_dir}/row_lsx.cc
-  ${ly_src_dir}/row_msa.cc
   ${ly_src_dir}/row_rvv.cc
   ${ly_src_dir}/row_win.cc
   ${ly_src_dir}/scale_any.cc
@@ -58,7 +55,6 @@ set ( ly_common_source_files
   ${ly_src_dir}/scale_common.cc
   ${ly_src_dir}/scale_gcc.cc
   ${ly_src_dir}/scale_lsx.cc
-  ${ly_src_dir}/scale_msa.cc
   ${ly_src_dir}/scale_rgb.cc
   ${ly_src_dir}/scale_rvv.cc
   ${ly_src_dir}/scale_uv.cc
@@ -123,7 +119,7 @@ if(NOT MSVC)
 
     set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
     set(OLD_CMAKE_TRY_COMPILE_TARGET_TYPE ${CMAKE_TRY_COMPILE_TARGET_TYPE})
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -march=armv9-a+sme")
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -march=armv9-a+i8mm+sme")
     set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
     # Check whether the compiler can compile SME functions; this fails
     # with Clang for Windows.
@@ -140,7 +136,7 @@ int main(void) { return 0; }
         ${ly_src_dir}/rotate_sme.cc
         ${ly_src_dir}/row_sme.cc
         ${ly_src_dir}/scale_sme.cc)
-      target_compile_options(${ly_lib_name}_sme PRIVATE -march=armv9-a+sme)
+      target_compile_options(${ly_lib_name}_sme PRIVATE -march=armv9-a+i8mm+sme)
       list(APPEND ly_lib_parts $<TARGET_OBJECTS:${ly_lib_name}_sme>)
     else()
       add_definitions(-DLIBYUV_DISABLE_SME)

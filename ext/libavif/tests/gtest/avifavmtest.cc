@@ -44,7 +44,7 @@ TEST_P(AvmTest, EncodeDecode) {
             AVIF_RESULT_OK);
 
   // Verify that the input and decoded images are close.
-  EXPECT_GT(testutil::GetPsnr(*image, *decoded), 39.0);
+  EXPECT_GT(testutil::GetPsnr(*image, *decoded), 36.4);
 
   // Forcing an AV1 decoding codec should fail.
   for (avifCodecChoice av1_codec :
@@ -71,13 +71,29 @@ INSTANTIATE_TEST_SUITE_P(Basic, AvmTest,
 
 INSTANTIATE_TEST_SUITE_P(Tiny, AvmTest,
                          Combine(/*width=*/Values(1), /*height=*/Values(1),
-                                 /*depth=*/Values(8, 10, 12),
+                                 /*depth=*/Values(8, 10),
+                                 Values(AVIF_PIXEL_FORMAT_YUV444),
+                                 /*alpha=*/Values(false)));
+
+// avm does not support 12-bit as of today.
+INSTANTIATE_TEST_SUITE_P(DISABLED_Tiny12bit, AvmTest,
+                         Combine(/*width=*/Values(1), /*height=*/Values(1),
+                                 /*depth=*/Values(12),
                                  Values(AVIF_PIXEL_FORMAT_YUV444),
                                  /*alpha=*/Values(false)));
 
 INSTANTIATE_TEST_SUITE_P(HighBitDepthAndEvenDimensions, AvmTest,
-                         Combine(/*width=*/Values(2), /*height=*/Values(34),
-                                 /*depth=*/Values(10, 12),
+                         Combine(/*width=*/Values(5), /*height=*/Values(34),
+                                 /*depth=*/Values(10),
+                                 Values(AVIF_PIXEL_FORMAT_YUV400,
+                                        AVIF_PIXEL_FORMAT_YUV420,
+                                        AVIF_PIXEL_FORMAT_YUV444),
+                                 /*alpha=*/Values(true)));
+
+// avm does not support 12-bit as of today.
+INSTANTIATE_TEST_SUITE_P(DISABLED_HighBitDepthAndEvenDimensions12bit, AvmTest,
+                         Combine(/*width=*/Values(5), /*height=*/Values(34),
+                                 /*depth=*/Values(12),
                                  Values(AVIF_PIXEL_FORMAT_YUV400,
                                         AVIF_PIXEL_FORMAT_YUV420,
                                         AVIF_PIXEL_FORMAT_YUV444),

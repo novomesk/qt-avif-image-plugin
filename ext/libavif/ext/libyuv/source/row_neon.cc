@@ -271,7 +271,7 @@ void I422ToRGBARow_NEON(const uint8_t* src_y,
       "subs        %[width], %[width], #8        \n"  //
       YUVTORGB                                        //
           RGBTORGB8                                   //
-      STORERGBA                                       //
+              STORERGBA                               //
       "bgt         1b                            \n"
       : [src_y] "+r"(src_y),                               // %[src_y]
         [src_u] "+r"(src_u),                               // %[src_u]
@@ -3963,7 +3963,7 @@ void Convert16To8Row_NEON(const uint16_t* src_y,
                           uint8_t* dst_y,
                           int scale,
                           int width) {
-  int shift = 15 - __builtin_clz((int32_t)scale);  // Negative shl is shr
+  const int shift = 15 - __builtin_clz((int32_t)scale);  // Negative shl is shr
   asm volatile(
       "vdup.16     q2, %3                        \n"
       "1:          \n"

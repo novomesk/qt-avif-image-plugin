@@ -19,8 +19,10 @@ class ProgramCommand {
  public:
   // 'name' is the command that should be used to invoke the command on the
   // command line.
-  // 'description' should be a one line description of what the command does.
-  ProgramCommand(const std::string& name, const std::string& description);
+  // 'short_description' should be a one line description of what the command
+  // does.
+  ProgramCommand(const std::string& name, const std::string& short_description,
+                 const std::string& long_description = "");
 
   virtual ~ProgramCommand() = default;
 
@@ -31,7 +33,7 @@ class ProgramCommand {
   virtual avifResult Run() = 0;
 
   std::string name() const { return name_; }
-  std::string description() const { return description_; }
+  std::string short_description() const { return short_description_; }
 
   // Prints this command's help on stdout.
   void PrintUsage();
@@ -41,7 +43,7 @@ class ProgramCommand {
 
  private:
   std::string name_;
-  std::string description_;
+  std::string short_description_;
 };
 
 //------------------------------------------------------------------------------
@@ -62,10 +64,31 @@ struct CicpValues {
   avifMatrixCoefficients matrix_coefficients;
 };
 
-// CicpValues converter for use with argparse.
+// CicpValues converter for use with argparse. Parses the format 'P/T/M'.
 struct CicpConverter {
   // Methods expected by argparse.
   argparse::ConvertedValue<CicpValues> from_str(const std::string& str);
+  std::vector<std::string> default_choices();
+};
+
+// avifContentLightLevelInformationBox converter for use with argparse.
+// Parses the format 'maxCLL,maxPALL'.
+struct ClliConverter {
+  // Methods expected by argparse.
+  argparse::ConvertedValue<avifContentLightLevelInformationBox> from_str(
+      const std::string& str);
+  std::vector<std::string> default_choices();
+};
+
+struct GridOptions {
+  int grid_cols = 0;
+  int grid_rows = 0;
+};
+
+// GridOptions converter for use with argparse. Parses the format 'MxN'.
+struct GridOptionsConverter {
+  // Methods expected by argparse.
+  argparse::ConvertedValue<GridOptions> from_str(const std::string& str);
   std::vector<std::string> default_choices();
 };
 
@@ -74,6 +97,7 @@ struct BasicImageEncodeArgs {
   argparse::ArgValue<int> speed;
   argparse::ArgValue<int> quality;
   argparse::ArgValue<int> quality_alpha;
+  argparse::ArgValue<GridOptions> grid;
 
   // can_have_alpha should be true if the image can have alpha and the
   // output format can be avif.
@@ -91,6 +115,9 @@ struct BasicImageEncodeArgs {
           .help("Quality for alpha (0-100, where 100 is lossless)")
           .default_value("100");
     }
+    argparse.add_argument<GridOptions, GridOptionsConverter>(grid, "--grid")
+        .help("Encode a grid AVIF with M cols and N rows, expressed as MxN")
+        .default_value("1x1");
   }
 };
 

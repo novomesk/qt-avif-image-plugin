@@ -11,10 +11,12 @@
 namespace avif {
 
 TonemapCommand::TonemapCommand()
-    : ProgramCommand("tonemap",
-                     "Tone maps an avif image that has a gain map to a "
-                     "given HDR headroom (how much brighter the display can go "
-                     "compared to an SDR display)") {
+    : ProgramCommand(
+          "tonemap",
+          "Tone map an AVIF image that has a gain map to a given HDR headroom "
+          "(how much brighter the display can go compared to SDR white)",
+          "Images with ICC  profiles are not supported: use --ignore-profile "
+          "and optionally set --cicp-input and/or --cicp-output if needed.") {
   argparse_.add_argument(arg_input_filename_, "input_image");
   argparse_.add_argument(arg_output_filename_, "output_image");
   argparse_.add_argument(arg_headroom_, "--headroom")
@@ -40,7 +42,9 @@ TonemapCommand::TonemapCommand()
           "primaries, 'transfer characteristics' defaults to 16 (PQ) if "
           "headroom > 0, or 13 (sRGB) otherwise, 'matrix coefficients' "
           "defaults to 6 (BT601).");
-  argparse_.add_argument(arg_clli_str_, "--clli")
+  argparse_
+      .add_argument<avifContentLightLevelInformationBox, ClliConverter>(
+          arg_clli_, "--clli")
       .help(
           "Override content light level information expressed as: "
           "MaxCLL,MaxPALL. Only relevant when saving to AVIF.");
@@ -49,20 +53,8 @@ TonemapCommand::TonemapCommand()
 }
 
 avifResult TonemapCommand::Run() {
-  avifContentLightLevelInformationBox clli_box = {};
-  bool clli_set = false;
-  if (!arg_clli_str_.value().empty()) {
-    std::vector<uint16_t> clli;
-    if (!ParseList(arg_clli_str_, ',', 2, &clli)) {
-      std::cerr << "Invalid clli values, expected format: maxCLL,maxPALL where "
-                   "both maxCLL and maxPALL are positive integers, got: "
-                << arg_clli_str_ << "\n";
-      return AVIF_RESULT_INVALID_ARGUMENT;
-    }
-    clli_box.maxCLL = clli[0];
-    clli_box.maxPALL = clli[1];
-    clli_set = true;
-  }
+  avifContentLightLevelInformationBox clli_box = arg_clli_.value();
+  bool clli_set = arg_clli_.provenance() == argparse::Provenance::SPECIFIED;
 
   const float headroom = arg_headroom_;
   const bool tone_mapping_to_hdr = (headroom > 0.0f);
@@ -213,8 +205,10 @@ avifResult TonemapCommand::Run() {
   tone_mapped->colorPrimaries = cicp.color_primaries;
   tone_mapped->matrixCoefficients = cicp.matrix_coefficients;
 
-  return WriteImage(tone_mapped.get(), arg_output_filename_,
-                    arg_image_encode_.quality, arg_image_encode_.speed);
+  return WriteImage(tone_mapped.get(), arg_image_encode_.grid.value().grid_cols,
+                    arg_image_encode_.grid.value().grid_rows,
+                    arg_output_filename_, arg_image_encode_.quality,
+                    arg_image_encode_.speed);
 }
 
 }  // namespace avif

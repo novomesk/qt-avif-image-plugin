@@ -1,13 +1,17 @@
 #include "program_command.h"
 
+#include <vector>
+
 namespace avif {
 
 ProgramCommand::ProgramCommand(const std::string& name,
-                               const std::string& description)
-    : argparse_(
-          argparse::ArgumentParser("avifgainmaputil " + name, description)),
+                               const std::string& short_description,
+                               const std::string& long_description)
+    : argparse_(argparse::ArgumentParser(
+          "avifgainmaputil " + name,
+          short_description + ".\n" + long_description)),
       name_(name),
-      description_(description) {}
+      short_description_(short_description) {}
 
 // Parses command line arguments. Should be called before Run().
 avifResult ProgramCommand::ParseArgs(int argc, const char* const argv[]) {
@@ -47,9 +51,10 @@ argparse::ConvertedValue<CicpValues> CicpConverter::from_str(
   std::vector<uint32_t> cicp_values;
   if (!ParseList(str, '/', 3, &cicp_values)) {
     converted_value.set_error(
-        "Invalid cicp values, expected format: P/T/M where each "
+        "Invalid CICP values, expected format: P/T/M where each "
         "value is a positive integer, got: " +
         str);
+    return converted_value;
   }
 
   CicpValues cicp = {};
@@ -62,5 +67,46 @@ argparse::ConvertedValue<CicpValues> CicpConverter::from_str(
 }
 
 std::vector<std::string> CicpConverter::default_choices() { return {}; }
+
+argparse::ConvertedValue<avifContentLightLevelInformationBox>
+ClliConverter::from_str(const std::string& str) {
+  argparse::ConvertedValue<avifContentLightLevelInformationBox> converted_value;
+
+  std::vector<uint16_t> clli;
+  if (!ParseList(str, ',', 2, &clli)) {
+    converted_value.set_error(
+        "Invalid CLLI values, expected format: maxCLL,maxPALL where "
+        "both maxCLL and maxPALL are positive integers, got: " +
+        str);
+    return converted_value;
+  }
+  avifContentLightLevelInformationBox clli_box = {};
+  clli_box.maxCLL = clli[0];
+  clli_box.maxPALL = clli[1];
+  converted_value.set_value(clli_box);
+
+  return converted_value;
+}
+
+std::vector<std::string> ClliConverter::default_choices() { return {}; }
+
+argparse::ConvertedValue<GridOptions> GridOptionsConverter::from_str(
+    const std::string& str) {
+  argparse::ConvertedValue<GridOptions> converted_value;
+
+  std::vector<int> grid_dims;
+  if (!ParseList(str, 'x', 2, &grid_dims) || grid_dims[0] <= 0 ||
+      grid_dims[1] <= 0) {
+    converted_value.set_error("Invalid grid dimensions: " + str);
+    return converted_value;
+  }
+  GridOptions grid_options = {grid_dims[0], grid_dims[1]};
+
+  converted_value.set_value(grid_options);
+
+  return converted_value;
+}
+
+std::vector<std::string> GridOptionsConverter::default_choices() { return {}; }
 
 }  // namespace avif

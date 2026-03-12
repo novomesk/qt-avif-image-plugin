@@ -1,4 +1,4 @@
-set(AVIF_SVT_GIT_TAG "v3.0.1")
+set(AVIF_SVT_GIT_TAG "v4.0.1")
 
 set(LIB_FILENAME "${AVIF_SOURCE_DIR}/ext/SVT-AV1/Bin/Release/${AVIF_LIBRARY_PREFIX}SvtAv1Enc${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
@@ -22,19 +22,21 @@ else()
         set(SVT_BINARY_DIR "${SVT_BINARY_DIR}/${ANDROID_ABI}")
     endif()
 
-    # Workaround https://gitlab.kitware.com/cmake/cmake/-/issues/25042 by enabling ASM before ASM_NASM
-    if(NOT CMAKE_ASM_COMPILER)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|amd64)")
+        # NASM is only used on x86.
+        if(NOT CMAKE_ASM_NASM_COMPILER)
+            include(CheckLanguage)
+            check_language(ASM_NASM)
+            if(CMAKE_ASM_NASM_COMPILER)
+                enable_language(ASM_NASM)
+            endif()
+        endif()
+    elseif(NOT CMAKE_ASM_COMPILER)
+        # ASM is only used on ARM.
         include(CheckLanguage)
         check_language(ASM)
         if(CMAKE_ASM_COMPILER)
             enable_language(ASM)
-        endif()
-    endif()
-    if(NOT CMAKE_ASM_NASM_COMPILER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|amd64)")
-        include(CheckLanguage)
-        check_language(ASM_NASM)
-        if(CMAKE_ASM_NASM_COMPILER)
-            enable_language(ASM_NASM)
         endif()
     endif()
 
@@ -91,7 +93,7 @@ else()
     add_dependencies(SvtAv1Enc _svt_install_headers)
     set_target_properties(SvtAv1Enc PROPERTIES AVIF_LOCAL ON)
 
-    target_include_directories(SvtAv1Enc INTERFACE ${SVT_INCLUDE_DIR})
+    target_include_directories(SvtAv1Enc INTERFACE $<BUILD_INTERFACE:${SVT_INCLUDE_DIR}>)
 
     message(CHECK_PASS "complete")
 endif()

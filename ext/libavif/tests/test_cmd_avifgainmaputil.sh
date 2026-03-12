@@ -50,7 +50,7 @@ pushd ${TMP_DIR}
   "${AVIFGAINMAPUTIL}" combine "${INPUT_JPEG_AVIF_GAINMAP_SDR}" "${INPUT_AVIF_GAINMAP_HDR}" "${AVIF_OUTPUT}" \
       -q 50 --qgain-map 90 --ignore-profile
   "${AVIFGAINMAPUTIL}" combine "${INPUT_AVIF_GAINMAP_SDR}" "${INPUT_AVIF_GAINMAP_HDR2020}" "${AVIF_OUTPUT}" \
-      -q 50 --downscaling 2 --yuv-gain-map 400
+      -q 50 --downscaling 2 --yuv-gain-map 400 --grid 2x2
 
   "${AVIFGAINMAPUTIL}" combine "${INPUT_AVIF_GAINMAP_HDR}" "${INPUT_AVIF_GAINMAP_SDR}" "${AVIF_OUTPUT}" \
       -q 90 --qgain-map 90
@@ -68,6 +68,10 @@ pushd ${TMP_DIR}
   "${AVIFGAINMAPUTIL}" convert "${INPUT_JPEG_AVIF_GAINMAP_SDR}" "${AVIF_OUTPUT}" --swap-base && exit 1
   "${AVIFGAINMAPUTIL}" convert "${INPUT_JPEG_AVIF_GAINMAP_SDR}" "${AVIF_OUTPUT}" --swap-base --ignore-profile \
       --cicp 2/3/4
+
+   # also test the are_images_equal binary itself with some gain maps
+  "${ARE_IMAGES_EQUAL}" "${INPUT_JPEG_AVIF_GAINMAP_SDR}" "${INPUT_JPEG_AVIF_GAINMAP_SDR}" 0 40 0
+  "${ARE_IMAGES_EQUAL}" "${INPUT_JPEG_AVIF_GAINMAP_SDR}" "${INPUT_JPEG_AVIF_GAINMAP_SDR}" 0 40 1
 popd
 
 exit 0

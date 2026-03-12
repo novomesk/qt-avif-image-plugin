@@ -2,6 +2,33 @@
 
 ## Still images
 
+### File [abc.png](abc.png)
+
+![](abc.png)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+Black opaque letters "abc" written on a translucent white background.
+
+### File [abc_color_irot_alpha_irot.avif](abc_color_irot_alpha_irot.avif)
+
+![](abc_color_irot_alpha_irot.avif)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+`abc.png` encoded with libavif and having a correct association between the
+`irot` transformative property and the alpha auxiliary image item corresponding
+to the same rotation applied to the color image item.
+
+### File [abc_color_irot_alpha_NOirot.avif](abc_color_irot_alpha_NOirot.avif)
+
+![](abc_color_irot_alpha_NOirot.avif)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+`abc.png` encoded with libavif 1.3.0 and missing an association between the
+`irot` transformative property and the alpha auxiliary image item.
+
 ### File [circle-trns-after-plte.png](circle-trns-after-plte.png)
 
 ![](circle-trns-after-plte.png)
@@ -106,6 +133,15 @@ License: released by the Eastman Kodak Company for unrestricted usage
 It is [kodim03_yuv420_8bpc.avif](io/kodim03_yuv420_8bpc.avif) converted to
 grayscale and tagged as Gamma 1.6 gAMA PNG chunk.
 
+#### File [kodim03_grayscale_cicp.png](kodim03_grayscale_cicp.png)
+
+![](kodim03_grayscale_cicp.png)
+
+License: released by the Eastman Kodak Company for unrestricted usage
+
+It is [kodim03_yuv420_8bpc.avif](io/kodim03_yuv420_8bpc.avif) converted to
+grayscale and tagged with a cICP chunk.
+
 #### File [kodim03_grayscale_gamma1.6-reference.png](kodim03_grayscale_gamma1.6-reference.png)
 
 ![](kodim03_grayscale_gamma1.6-reference.png)
@@ -148,6 +184,15 @@ photographer or Signature Edits."
 Source: Picture from https://www.signatureedits.com/free-raw-photos/, rescaled, modified color balance and converted
 with GIMP+Darktable to 16b PNG, metadata removed with `exiftool -All=`.
 
+#### File [weld_sato_12B_8B_q0.avif](weld_sato_12B_8B_q0.avif)
+
+![](weld_sato_12B_8B_q0.avif)
+
+License: Same as for `weld_16bit.png`.
+
+Source: `weld_16bit.png` encoded with `AVIF_SAMPLE_TRANSFORM_BIT_DEPTH_EXTENSION_12B_8B_OVERLAP_4B` at quality 0 and
+fastest effort.
+
 ## Metadata
 
 The structure can be displayed using `exiv2 -pS <file>`.
@@ -187,6 +232,15 @@ Source: Personal photo edited with Gimp 2.10.
 |    1156 | 0xffe1 APP1 |   3929 | `http://ns.adobe.com/xap/1.0/.<?x`           |
 |    5087 | 0xffe2 APP2 |    612 | `ICC_PROFILE......T........mntrRG chunk 1/1` |
 |         |             |        | ...                                          |
+
+### File [paris_exif_xmp_modified_icc.jpg](paris_exif_xmp_modified_icc.jpg)
+
+![](paris_exif_xmp_modified_icc.jpg)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+Source: Same as paris_exif_xmp_icc.jpg but edited to have libpng report 'PCS illuminant is not D50'
+(the byte at position 0x1440 was changed from 0x2D to 0x2C).
 
 ### File [paris_extended_xmp.jpg](paris_extended_xmp.jpg)
 
@@ -525,6 +579,26 @@ a hex editor to make the MPF metadata big endian, as signaled by the four bytes
 |   33489 | 0xffe0 APP0 |     16 | `JFIF.....,.,.`                              |
 |   33507 | 0xffe1 APP1 |    571 | `http://ns.adobe.com/xap/1.0/.<?x`           |
 |         |             |        | ...                                          |
+
+### File [apple_gainmap_old.jpg](apple_gainmap_old.jpg)
+
+![](apple_gainmap_old.jpg)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+Source: Personal photo taken on an iPhone with an older OS, resized using Preview
+to save space. The XMP does not contain the HDR headroom, instead it has to be
+read from Exif metadata.
+
+### File [apple_gainmap_new.jpg](apple_gainmap_new.jpg)
+
+![](apple_gainmap_new.jpg)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+Source: Same as apple_gainmap_old.jpg, but with XMP data manually copied from a
+picture taken on a more recent iPhone. The difference is that the XMP metadata
+contains the <HDRGainMap:HDRGainMapHeadroom> element.
 
 ### File [paris_exif_xmp_icc_gainmap_bigendian.jpg](paris_exif_xmp_icc_gainmap_bigendian.jpg)
 

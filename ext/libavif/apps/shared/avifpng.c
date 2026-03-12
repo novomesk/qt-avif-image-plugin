@@ -138,6 +138,8 @@ static avifBool avifExtractExifAndXMP(png_structp png, png_infop info, avifBool 
             // It is easier to set it to 1 (the default top-left) than actually removing the tag.
             // libheif has the same behavior, see
             // https://github.com/strukturag/libheif/blob/18291ddebc23c924440a8a3c9a7267fe3beb5901/examples/heif_enc.cc#L703
+            // However note that some software does use Exif orientation, e.g. Chrome, see also
+            // https://github.com/AOMediaCodec/libavif/issues/3070
             // Ignore errors because not being able to set Exif orientation now means it cannot be parsed later either.
             (void)avifSetExifOrientation(&avif->exif, 1);
             *ignoreExif = AVIF_TRUE; // Ignore any other Exif chunk.
@@ -210,6 +212,48 @@ static avifBool avifExtractExifAndXMP(png_structp png, png_infop info, avifBool 
     return AVIF_TRUE;
 }
 
+typedef struct avifUnknownCicpChunkData
+{
+    avifImage * avif;
+    avifBool cicpChunkRead;
+} avifUnknownCicpChunkData;
+
+static void avifSetPNGCicp(avifImage * avif,
+                           png_byte cicpColorPrimaries,
+                           png_byte cicpTransferCharacteristics,
+                           png_byte cicpMatrixCoefficients,
+                           png_byte cicpVideoFullRangeFlag)
+{
+    avif->colorPrimaries = cicpColorPrimaries;
+    avif->transferCharacteristics = cicpTransferCharacteristics;
+    // PNG specification Third Edition Section 4.3:
+    //  RGB is currently the only supported color model in PNG, and as such Matrix Coefficients shall be set to 0.
+    // Note that we don't set avif->matrixCoefficients to this value as the Avif's YUV matrix is independent from the PNG's.
+    if (cicpMatrixCoefficients != 0) {
+        fprintf(stderr, "Warning: Unsupported PNG CICP matrix coefficients value %d. Expected to be 0.\n", cicpMatrixCoefficients);
+    }
+    // Limited range PNG files are uncommon and would require conversion to full range which we don't support for now for simplicity.
+    // See also https://github.com/w3c/png/issues/312#issuecomment-2325281113 and https://svgees.us/blog/cICP.html#the-other-two-numbers
+    // Similarly, we don't set avif->yuvRange to this value as the Avif's YUV range is independent from the PNG's.
+    if (cicpVideoFullRangeFlag != 1) {
+        fprintf(stderr, "Warning: Unsupported PNG CICP full range flag value %d. Expected to be 1.\n", cicpVideoFullRangeFlag);
+    }
+}
+
+// Callback for unknown chunks. Used to detect/handle chunks that we are missing support for.
+static int avifPNGReadUnknownChunk(png_structp png_ptr, png_unknown_chunkp chunk)
+{
+    avifUnknownCicpChunkData * data = (avifUnknownCicpChunkData *)png_get_user_chunk_ptr(png_ptr);
+    avifImage * avif = data->avif;
+    if (!memcmp(chunk->name, "cICP", 4)) {
+        if (chunk->size >= 4) {
+            data->cicpChunkRead = AVIF_TRUE;
+            avifSetPNGCicp(avif, chunk->data[0], chunk->data[1], chunk->data[2], chunk->data[3]);
+        }
+    }
+    return 1;
+}
+
 // Note on setjmp() and volatile variables:
 //
 // K & R, The C Programming Language 2nd Ed, p. 254 says:
@@ -224,17 +268,17 @@ static avifBool avifExtractExifAndXMP(png_structp png, png_infop info, avifBool 
 // modified between setjmp and longjmp. But GCC's -Wclobbered warning may have
 // trouble figuring that out, so we preemptively declare them as volatile.
 
-avifBool avifPNGRead(const char * inputFilename,
-                     avifImage * avif,
-                     avifPixelFormat requestedFormat,
-                     uint32_t requestedDepth,
-                     avifChromaDownsampling chromaDownsampling,
-                     avifBool ignoreColorProfile,
-                     avifBool ignoreExif,
-                     avifBool ignoreXMP,
-                     avifBool allowChangingCicp,
-                     uint32_t imageSizeLimit,
-                     uint32_t * outPNGDepth)
+static avifBool avifPNGReadImpl(FILE * f,
+                                const char * inputFilename,
+                                avifImage * avif,
+                                avifPixelFormat requestedFormat,
+                                uint32_t requestedDepth,
+                                avifChromaDownsampling chromaDownsampling,
+                                avifBool ignoreColorProfile,
+                                avifBool ignoreExif,
+                                avifBool ignoreXMP,
+                                uint32_t imageSizeLimit,
+                                uint32_t * outPNGDepth)
 {
     volatile avifBool readResult = AVIF_FALSE;
     png_structp png = NULL;
@@ -243,12 +287,6 @@ avifBool avifPNGRead(const char * inputFilename,
 
     avifRGBImage rgb;
     memset(&rgb, 0, sizeof(avifRGBImage));
-
-    FILE * f = fopen(inputFilename, "rb");
-    if (!f) {
-        fprintf(stderr, "Can't open PNG file for read: %s\n", inputFilename);
-        goto cleanup;
-    }
 
     uint8_t header[8];
     size_t bytesRead = fread(header, 1, 8, f);
@@ -276,6 +314,9 @@ avifBool avifPNGRead(const char * inputFilename,
         fprintf(stderr, "Error reading PNG: %s\n", inputFilename);
         goto cleanup;
     }
+
+    avifUnknownCicpChunkData unknownChunkData = { avif, AVIF_FALSE };
+    png_set_read_user_chunk_fn(png, &unknownChunkData, &avifPNGReadUnknownChunk);
 
     png_init_io(png, f);
     png_set_sig_bytes(png, 8);
@@ -356,13 +397,26 @@ avifBool avifPNGRead(const char * inputFilename,
         unsigned char * iccpData = NULL;
         png_uint_32 iccpDataLen = 0;
         int srgbIntent;
-
-        // PNG specification 1.2 Section 4.2.2:
-        // The sRGB and iCCP chunks should not both appear.
-        //
-        // When the sRGB / iCCP chunk is present, applications that recognize it and are capable of color management
-        // must ignore the gAMA and cHRM chunks and use the sRGB / iCCP chunk instead.
-        if (png_get_iCCP(png, info, &iccpProfileName, &iccpCompression, &iccpData, &iccpDataLen) == PNG_INFO_iCCP) {
+        // PNG specification Third Edition Section 4.3 lists color space information chunk types by priority:
+        //   Chunk Type     Priority
+        //   cICP           1
+        //   iCCP           2
+        //   sRGB           3
+        //   cHRM and gAMA  4
+        //   If a single image contains more than one of these chunk types, the chunk with the lowest
+        //   Priority number should take precedence and any higher-numbered chunk types should be ignored.
+#if defined(PNG_cICP_SUPPORTED)
+        png_byte cicpColorPrimaries;
+        png_byte cicpTransferCharacteristics;
+        png_byte cicpMatrixCoefficients;
+        png_byte cicpVideoFullRangeFlag;
+        if (png_get_cICP(png, info, &cicpColorPrimaries, &cicpTransferCharacteristics, &cicpMatrixCoefficients, &cicpVideoFullRangeFlag)) {
+            avifSetPNGCicp(avif, cicpColorPrimaries, cicpTransferCharacteristics, cicpMatrixCoefficients, cicpVideoFullRangeFlag);
+        } else
+#endif
+            if (unknownChunkData.cicpChunkRead) {
+            // Already handled in avifPNGReadUnknownChunk()
+        } else if (png_get_iCCP(png, info, &iccpProfileName, &iccpCompression, &iccpData, &iccpDataLen) == PNG_INFO_iCCP) {
             if (!rawColorTypeIsGray && avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
                 fprintf(stderr,
                         "The image contains a color ICC profile which is incompatible with the requested output "
@@ -379,78 +433,75 @@ avifBool avifPNGRead(const char * inputFilename,
                 fprintf(stderr, "Setting ICC profile failed: out of memory.\n");
                 goto cleanup;
             }
-        } else if (allowChangingCicp) {
-            if (png_get_sRGB(png, info, &srgbIntent) == PNG_INFO_sRGB) {
-                // srgbIntent ignored
-                avif->colorPrimaries = AVIF_COLOR_PRIMARIES_SRGB;
-                avif->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_SRGB;
+        } else if (png_get_sRGB(png, info, &srgbIntent) == PNG_INFO_sRGB) {
+            // srgbIntent ignored
+            avif->colorPrimaries = AVIF_COLOR_PRIMARIES_SRGB;
+            avif->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_SRGB;
+        } else {
+            avifBool needToGenerateICC = AVIF_FALSE;
+            double gamma;
+            double wX, wY, rX, rY, gX, gY, bX, bY;
+            float primaries[8];
+            if (png_get_gAMA(png, info, &gamma) == PNG_INFO_gAMA) {
+                gamma = 1.0 / gamma;
+                avif->transferCharacteristics = avifTransferCharacteristicsFindByGamma((float)gamma);
+                if (avif->transferCharacteristics == AVIF_TRANSFER_CHARACTERISTICS_UNKNOWN) {
+                    needToGenerateICC = AVIF_TRUE;
+                }
             } else {
-                avifBool needToGenerateICC = AVIF_FALSE;
-                double gamma;
-                double wX, wY, rX, rY, gX, gY, bX, bY;
-                float primaries[8];
-                if (png_get_gAMA(png, info, &gamma) == PNG_INFO_gAMA) {
-                    gamma = 1.0 / gamma;
-                    avif->transferCharacteristics = avifTransferCharacteristicsFindByGamma((float)gamma);
-                    if (avif->transferCharacteristics == AVIF_TRANSFER_CHARACTERISTICS_UNKNOWN) {
-                        needToGenerateICC = AVIF_TRUE;
-                    }
+                // No gamma information in file. Assume the default value.
+                // PNG specification 1.2 Section 10.5:
+                // Assume a CRT exponent of 2.2 unless detailed calibration measurements
+                // of this particular CRT are available.
+                gamma = 2.2;
+            }
+
+            if (png_get_cHRM(png, info, &wX, &wY, &rX, &rY, &gX, &gY, &bX, &bY) == PNG_INFO_cHRM) {
+                primaries[0] = (float)rX;
+                primaries[1] = (float)rY;
+                primaries[2] = (float)gX;
+                primaries[3] = (float)gY;
+                primaries[4] = (float)bX;
+                primaries[5] = (float)bY;
+                primaries[6] = (float)wX;
+                primaries[7] = (float)wY;
+                avif->colorPrimaries = avifColorPrimariesFind(primaries, NULL);
+                if (avif->colorPrimaries == AVIF_COLOR_PRIMARIES_UNKNOWN) {
+                    needToGenerateICC = AVIF_TRUE;
+                }
+            } else {
+                // No chromaticity information in file. Assume the default value.
+                // PNG specification 1.2 Section 10.6:
+                // Decoders may wish to do this for PNG files with no cHRM chunk.
+                // In that case, a reasonable default would be the CCIR 709 primaries [ITU-R-BT709].
+                avifColorPrimariesGetValues(AVIF_COLOR_PRIMARIES_BT709, primaries);
+            }
+
+            if (needToGenerateICC) {
+                avif->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
+                avif->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
+                fprintf(stderr,
+                        "INFO: legacy PNG color space information found in file %s not matching any CICP value. libavif is generating an ICC profile for it."
+                        " Use --ignore-profile to ignore color space information instead (may affect the colors of the encoded AVIF image).\n",
+                        inputFilename);
+
+                avifBool generateICCResult = AVIF_FALSE;
+                if (avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
+                    generateICCResult = avifGenerateGrayICC(&avif->icc, (float)gamma, &primaries[6]);
                 } else {
-                    // No gamma information in file. Assume the default value.
-                    // PNG specification 1.2 Section 10.5:
-                    // Assume a CRT exponent of 2.2 unless detailed calibration measurements
-                    // of this particular CRT are available.
-                    gamma = 2.2;
+                    generateICCResult = avifGenerateRGBICC(&avif->icc, (float)gamma, primaries);
                 }
 
-                if (png_get_cHRM(png, info, &wX, &wY, &rX, &rY, &gX, &gY, &bX, &bY) == PNG_INFO_cHRM) {
-                    primaries[0] = (float)rX;
-                    primaries[1] = (float)rY;
-                    primaries[2] = (float)gX;
-                    primaries[3] = (float)gY;
-                    primaries[4] = (float)bX;
-                    primaries[5] = (float)bY;
-                    primaries[6] = (float)wX;
-                    primaries[7] = (float)wY;
-                    avif->colorPrimaries = avifColorPrimariesFind(primaries, NULL);
-                    if (avif->colorPrimaries == AVIF_COLOR_PRIMARIES_UNKNOWN) {
-                        needToGenerateICC = AVIF_TRUE;
-                    }
-                } else {
-                    // No chromaticity information in file. Assume the default value.
-                    // PNG specification 1.2 Section 10.6:
-                    // Decoders may wish to do this for PNG files with no cHRM chunk.
-                    // In that case, a reasonable default would be the CCIR 709 primaries [ITU-R-BT709].
-                    avifColorPrimariesGetValues(AVIF_COLOR_PRIMARIES_BT709, primaries);
-                }
-
-                if (needToGenerateICC) {
-                    avif->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
-                    avif->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
+                if (!generateICCResult) {
                     fprintf(stderr,
-                            "INFO: legacy PNG color space information found in file %s not matching any CICP value. libavif is generating an ICC profile for it."
-                            " Use --ignore-profile to ignore color space information instead (may affect the colors of the encoded AVIF image).\n",
+                            "WARNING: libavif could not generate an ICC profile for file %s. "
+                            "It may be caused by invalid values in the color space information. "
+                            "The encoded AVIF image's colors may be affected.\n",
                             inputFilename);
-
-                    avifBool generateICCResult = AVIF_FALSE;
-                    if (avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
-                        generateICCResult = avifGenerateGrayICC(&avif->icc, (float)gamma, &primaries[6]);
-                    } else {
-                        generateICCResult = avifGenerateRGBICC(&avif->icc, (float)gamma, primaries);
-                    }
-
-                    if (!generateICCResult) {
-                        fprintf(stderr,
-                                "WARNING: libavif could not generate an ICC profile for file %s. "
-                                "It may be caused by invalid values in the color space information. "
-                                "The encoded AVIF image's colors may be affected.\n",
-                                inputFilename);
-                    }
                 }
             }
         }
         // Note: There is no support for the rare "Raw profile type icc" or "Raw profile type icm" text chunks.
-        // TODO(yguyon): Also check if there is a cICp chunk (https://github.com/AOMediaCodec/libavif/pull/1065#discussion_r958534232)
     }
 
     const int numChannels = png_get_channels(png, info);
@@ -515,9 +566,6 @@ avifBool avifPNGRead(const char * inputFilename,
     readResult = AVIF_TRUE;
 
 cleanup:
-    if (f) {
-        fclose(f);
-    }
     if (png) {
         png_destroy_read_struct(&png, &info, NULL);
     }
@@ -526,6 +574,47 @@ cleanup:
     }
     avifRGBImageFreePixels(&rgb);
     return readResult;
+}
+
+avifBool avifPNGRead(const char * inputFilename,
+                     avifImage * avif,
+                     avifPixelFormat requestedFormat,
+                     uint32_t requestedDepth,
+                     avifChromaDownsampling chromaDownsampling,
+                     avifBool ignoreColorProfile,
+                     avifBool ignoreExif,
+                     avifBool ignoreXMP,
+                     uint32_t imageSizeLimit,
+                     uint32_t * outPNGDepth)
+{
+    FILE * f;
+    if (inputFilename) {
+        f = fopen(inputFilename, "rb");
+        if (!f) {
+            fprintf(stderr, "Can't open PNG file for read: %s\n", inputFilename);
+            return AVIF_FALSE;
+        }
+    } else {
+        f = stdin;
+        inputFilename = "(stdin)";
+    }
+
+    const avifBool res = avifPNGReadImpl(f,
+                                         inputFilename,
+                                         avif,
+                                         requestedFormat,
+                                         requestedDepth,
+                                         chromaDownsampling,
+                                         ignoreColorProfile,
+                                         ignoreExif,
+                                         ignoreXMP,
+                                         imageSizeLimit,
+                                         outPNGDepth);
+
+    if (f != stdin) {
+        fclose(f);
+    }
+    return res;
 }
 
 //------------------------------------------------------------------------------
@@ -540,8 +629,8 @@ avifBool avifPNGWrite(const char * outputFilename, const avifImage * avif, uint3
     png_bytep * volatile rowPointers = NULL;
     FILE * volatile f = NULL;
 
-    avifRGBImage rgb;
-    memset(&rgb, 0, sizeof(avifRGBImage));
+    avifRGBImage rgbData;
+    memset(&rgbData, 0, sizeof(avifRGBImage));
 
     volatile int rgbDepth = requestedDepth;
     if (rgbDepth == 0) {
@@ -564,35 +653,48 @@ avifBool avifPNGWrite(const char * outputFilename, const avifImage * avif, uint3
         rgbDepth = 8;
     }
 
-    volatile avifBool monochrome8bit = (avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) && !avif->alphaPlane && (avif->depth == 8) &&
-                                       (rgbDepth == 8);
+    volatile avifBool hasTransforms = avif->transformFlags & (AVIF_TRANSFORM_CLAP | AVIF_TRANSFORM_IROT | AVIF_TRANSFORM_IMIR);
+    volatile avifBool copyYPlane = (avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) && !avif->alphaPlane && (avif->depth == 8) &&
+                                   (rgbDepth == 8) && !hasTransforms;
 
     volatile int colorType;
-    if (monochrome8bit) {
+    if (copyYPlane) {
         colorType = PNG_COLOR_TYPE_GRAY;
     } else {
-        avifRGBImageSetDefaults(&rgb, avif);
-        rgb.depth = rgbDepth;
+        avifRGBImageSetDefaults(&rgbData, avif);
+        rgbData.depth = rgbDepth;
         if (avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400 && avif->alphaPlane) {
             colorType = PNG_COLOR_TYPE_GRAY_ALPHA;
-            rgb.format = AVIF_RGB_FORMAT_GRAYA;
+            rgbData.format = AVIF_RGB_FORMAT_GRAYA;
         } else if (avif->yuvFormat == AVIF_PIXEL_FORMAT_YUV400 && !avif->alphaPlane) {
             colorType = PNG_COLOR_TYPE_GRAY;
-            rgb.format = AVIF_RGB_FORMAT_GRAY;
+            rgbData.format = AVIF_RGB_FORMAT_GRAY;
         } else {
-            rgb.chromaUpsampling = chromaUpsampling;
+            rgbData.chromaUpsampling = chromaUpsampling;
             colorType = PNG_COLOR_TYPE_RGBA;
             if (avifImageIsOpaque(avif)) {
                 colorType = PNG_COLOR_TYPE_RGB;
-                rgb.format = AVIF_RGB_FORMAT_RGB;
+                rgbData.format = AVIF_RGB_FORMAT_RGB;
             }
         }
-        if (avifRGBImageAllocatePixels(&rgb) != AVIF_RESULT_OK) {
+        if (avifRGBImageAllocatePixels(&rgbData) != AVIF_RESULT_OK) {
             fprintf(stderr, "Conversion to RGB failed: %s (out of memory)\n", outputFilename);
             goto cleanup;
         }
-        if (avifImageYUVToRGB(avif, &rgb) != AVIF_RESULT_OK) {
+        if (avifImageYUVToRGB(avif, &rgbData) != AVIF_RESULT_OK) {
             fprintf(stderr, "Conversion to RGB failed: %s\n", outputFilename);
+            goto cleanup;
+        }
+    }
+
+    // rgbView is a view on rgbData. avifApplyTransforms() may modify rgbData.
+    avifRGBImage rgbView = rgbData;
+    avifResult transformResult = avifApplyTransforms(&rgbView, &rgbData, avif);
+    if (transformResult != AVIF_RESULT_OK) {
+        if (transformResult == AVIF_RESULT_INVALID_ARGUMENT) {
+            fprintf(stderr, "Warning, ignoring invalid transforms (clap/irot/imir)\n");
+        } else {
+            fprintf(stderr, "Failed to apply transforms: %s\n", avifResultToString(transformResult));
             goto cleanup;
         }
     }
@@ -608,6 +710,9 @@ avifBool avifPNGWrite(const char * outputFilename, const avifImage * avif, uint3
         fprintf(stderr, "Cannot init libpng (png): %s\n", outputFilename);
         goto cleanup;
     }
+
+    png_set_benign_errors(png, 1); // Treat benign errors as warnings.
+
     info = png_create_info_struct(png);
     if (!info) {
         fprintf(stderr, "Cannot init libpng (info): %s\n", outputFilename);
@@ -631,7 +736,10 @@ avifBool avifPNGWrite(const char * outputFilename, const avifImage * avif, uint3
         png_set_compression_level(png, compressionLevel);
     }
 
-    png_set_IHDR(png, info, avif->width, avif->height, rgbDepth, colorType, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    volatile uint32_t width = copyYPlane ? avif->width : rgbView.width;
+    volatile uint32_t height = copyYPlane ? avif->height : rgbView.height;
+
+    png_set_IHDR(png, info, width, height, rgbDepth, colorType, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
 
     const avifBool hasIcc = avif->icc.data && (avif->icc.size > 0);
     if (hasIcc) {
@@ -677,7 +785,28 @@ avifBool avifPNGWrite(const char * outputFilename, const avifImage * avif, uint3
             fprintf(stderr, "Error writing PNG: Exif metadata is too big\n");
             goto cleanup;
         }
-        png_set_eXIf_1(png, info, (png_uint_32)avif->exif.size, avif->exif.data);
+        // Make a copy of the Exif data to avoid modifying the input image when setting orientation.
+        avifRWData exif = { NULL, 0 };
+        if (avifRWDataRealloc(&exif, avif->exif.size) != AVIF_RESULT_OK) {
+            fprintf(stderr, "Error writing PNG metadata: out of memory\n");
+            goto cleanup;
+        }
+        memcpy(exif.data, avif->exif.data, avif->exif.size);
+        // We already rotated the pixels if necessary in avifApplyTransforms(), so we set the orientation to 1 (no rotation, no mirror).
+        avifResult result = avifSetExifOrientation(&exif, 1);
+        if (result != AVIF_RESULT_OK) {
+            if (result == AVIF_RESULT_INVALID_EXIF_PAYLOAD || result == AVIF_RESULT_NOT_IMPLEMENTED) {
+                // Either the Exif is invalid, or it doesn't have an orientation field.
+                // If it's invalid, we can consider it as equivalent to not having an orientation.
+                // In both cases, we can ignore the error.
+            } else {
+                fprintf(stderr, "Error writing PNG metadata: %s\n", avifResultToString(result));
+                avifRWDataFree(&exif);
+                goto cleanup;
+            }
+        }
+        png_set_eXIf_1(png, info, (png_uint_32)exif.size, exif.data);
+        avifRWDataFree(&exif);
     }
     if (avif->xmp.data && (avif->xmp.size > 0)) {
         // The iTXt XMP payload may not contain a zero byte according to section 4.2.3.3 of
@@ -721,44 +850,23 @@ avifBool avifPNGWrite(const char * outputFilename, const avifImage * avif, uint3
         png_write_chunk(png, cicp, cicpData, 4);
     }
 
-    rowPointers = (png_bytep *)malloc(sizeof(png_bytep) * avif->height);
+    rowPointers = (png_bytep *)malloc(sizeof(png_bytep) * height);
     if (rowPointers == NULL) {
         fprintf(stderr, "Error writing PNG: memory allocation failure");
         goto cleanup;
     }
     uint8_t * row;
     uint32_t rowBytes;
-    if (monochrome8bit) {
+    if (copyYPlane) {
         row = avif->yuvPlanes[AVIF_CHAN_Y];
         rowBytes = avif->yuvRowBytes[AVIF_CHAN_Y];
     } else {
-        row = rgb.pixels;
-        rowBytes = rgb.rowBytes;
+        row = rgbView.pixels;
+        rowBytes = rgbView.rowBytes;
     }
-    for (uint32_t y = 0; y < avif->height; ++y) {
+    for (uint32_t y = 0; y < height; ++y) {
         rowPointers[y] = row;
         row += rowBytes;
-    }
-
-    if (avif->transformFlags & AVIF_TRANSFORM_CLAP) {
-        avifCropRect cropRect;
-        avifDiagnostics diag;
-        if (avifCropRectFromCleanApertureBox(&cropRect, &avif->clap, avif->width, avif->height, &diag) &&
-            (cropRect.x != 0 || cropRect.y != 0 || cropRect.width != avif->width || cropRect.height != avif->height)) {
-            // TODO: https://github.com/AOMediaCodec/libavif/issues/2427 - Implement.
-            fprintf(stderr,
-                    "Warning: Clean Aperture values were ignored, the output image was NOT cropped to rectangle {%u,%u,%u,%u}\n",
-                    cropRect.x,
-                    cropRect.y,
-                    cropRect.width,
-                    cropRect.height);
-        }
-    }
-    if (avifImageGetExifOrientationFromIrotImir(avif) != 1) {
-        // TODO: https://github.com/AOMediaCodec/libavif/issues/2427 - Rotate the samples.
-        fprintf(stderr,
-                "Warning: Orientation %u was ignored, the output image was NOT rotated or mirrored\n",
-                avifImageGetExifOrientationFromIrotImir(avif));
     }
 
     if (rgbDepth > 8) {
@@ -781,6 +889,6 @@ cleanup:
     if (rowPointers) {
         free(rowPointers);
     }
-    avifRGBImageFreePixels(&rgb);
+    avifRGBImageFreePixels(&rgbData);
     return writeResult;
 }
