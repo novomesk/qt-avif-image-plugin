@@ -1,3 +1,21 @@
+2026-03-17 v3.13.2
+  This release includes several bug fixes. This release is ABI
+  compatible with the last release. See
+  https://aomedia.googlesource.com/aom/+log/v3.13.1..v3.13.2 for all the
+  commits in this release.
+
+  - Bug Fixes
+    * x86: enable SSE4.2 in x86_simd_caps
+      https://aomedia-review.googlesource.com/206481
+    * b:448994065: Working nasm-3.0.0 is not detected with libaom on
+      3.13.1
+    * b:480978101: Heap buffer overflow in av1_copy_and_extend_frame
+      during encode triggered by NV12/bordered image with size_align
+    * b:487259772: Out-of-bounds heap read in VP9 encoder via WebCodecs
+      VideoEncoder dimension reconfiguration
+    * b:489473886: Invalid memory read access in aom_sse_avx2 (Mozilla
+      report)
+
 2025-09-05 v3.13.1
   This release is ABI compatible with the last release.
 

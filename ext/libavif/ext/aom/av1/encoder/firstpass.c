@@ -1334,7 +1334,7 @@ void av1_first_pass(AV1_COMP *cpi, const int64_t ts_duration) {
 
   const int tile_cols = cm->tiles.cols;
   const int tile_rows = cm->tiles.rows;
-  if (cpi->allocated_tiles < tile_cols * tile_rows) {
+  if (cpi->allocated_tiles != tile_cols * tile_rows) {
     av1_alloc_tile_data(cpi);
   }
 

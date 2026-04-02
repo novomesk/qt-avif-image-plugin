@@ -72,6 +72,7 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/dropframe_encode_test.cc"
             "${AOM_ROOT}/test/svc_datarate_test.cc"
             "${AOM_ROOT}/test/encode_api_test.cc"
+            "${AOM_ROOT}/test/encode_large_width_height_test.cc"
             "${AOM_ROOT}/test/encode_small_width_height_test.cc"
             "${AOM_ROOT}/test/encode_test_driver.cc"
             "${AOM_ROOT}/test/encode_test_driver.h"

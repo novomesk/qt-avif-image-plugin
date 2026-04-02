@@ -11,6 +11,7 @@
 
 #include <cassert>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -489,6 +490,8 @@ class AV1Encoder {
                  aom_rc_mode end_usage, unsigned int usage);
   void Encode(bool key_frame);
 
+  aom_codec_ctx_t *GetCodecCtx() { return &enc_; }
+
  private:
   // Flushes the encoder. Should be called after all the Encode() calls.
   void Flush();
@@ -527,6 +530,32 @@ void AV1Encoder::Configure(unsigned int threads, unsigned int width,
     cfg_.rc_max_quantizer = 58;
     ASSERT_EQ(aom_codec_enc_init(&enc_, iface, &cfg_, 0), AOM_CODEC_OK);
     ASSERT_EQ(aom_codec_control(&enc_, AOME_SET_CPUUSED, speed_), AOM_CODEC_OK);
+
+    const int log2_threads =
+        (cfg_.g_threads == 0) ? 0 : static_cast<int>(std::log2(cfg_.g_threads));
+    int tile_columns_log2 = 0;
+    int tile_rows_log2 = 0;
+    switch (log2_threads) {
+      case 4:
+        tile_columns_log2 = 2;
+        tile_rows_log2 = 2;
+        break;
+      case 3:
+        tile_columns_log2 = 2;
+        tile_rows_log2 = 1;
+        break;
+      case 2:
+        tile_columns_log2 = 1;
+        tile_rows_log2 = 1;
+        break;
+      default: tile_columns_log2 = log2_threads;
+    }
+    ASSERT_EQ(
+        aom_codec_control(&enc_, AV1E_SET_TILE_COLUMNS, tile_columns_log2),
+        AOM_CODEC_OK);
+    ASSERT_EQ(aom_codec_control(&enc_, AV1E_SET_TILE_ROWS, tile_rows_log2),
+              AOM_CODEC_OK);
+
     initialized_ = true;
     return;
   }
@@ -976,6 +1005,60 @@ TEST(EncodeAPI, Buganizer392929025) {
   ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
 }
 
+void ReproBuganizer487259772(const bool row_mt, int initial_threads = 2) {
+  AV1Encoder encoder(7);
+
+  encoder.Configure(initial_threads, 800, 600, AOM_VBR, AOM_USAGE_REALTIME);
+  // This is not exposed by the WebCodecs interface. It's set to 1 in Chrome's
+  // implementation.
+  ASSERT_EQ(aom_codec_control(encoder.GetCodecCtx(), AV1E_SET_ROW_MT, row_mt),
+            AOM_CODEC_OK);
+  encoder.Encode(false);
+  encoder.Encode(false);
+  encoder.Encode(false);
+
+  encoder.Configure(1, 352, 288, AOM_VBR, AOM_USAGE_REALTIME);
+  encoder.Encode(false);
+  encoder.Encode(false);
+  encoder.Encode(false);
+  encoder.Encode(false);
+
+  encoder.Configure(1, 48, 480, AOM_VBR, AOM_USAGE_REALTIME);
+  encoder.Encode(false);
+  encoder.Encode(true);
+  encoder.Encode(false);
+
+  encoder.Configure(1, 8, 8, AOM_VBR, AOM_USAGE_REALTIME);
+  encoder.Encode(false);
+  encoder.Encode(false);
+
+  encoder.Configure(1, 24, 24, AOM_VBR, AOM_USAGE_REALTIME);
+  encoder.Encode(false);
+  encoder.Encode(false);
+
+  encoder.Configure(1, 97, 53, AOM_VBR, AOM_USAGE_REALTIME);
+  encoder.Encode(false);
+  encoder.Encode(false);
+
+  encoder.Configure(1, 32, 320, AOM_VBR, AOM_USAGE_REALTIME);
+  encoder.Encode(false);
+  encoder.Encode(false);
+}
+
+TEST(EncodeAPI, Buganizer487259772NoThreads) {
+  ReproBuganizer487259772(/*row_mt=*/false, /*initial_threads=*/1);
+}
+
+// TODO: bug 487259772 - Enable this test after assertion/crash (NULL mbmi) in
+// av1_loopfilter is fixed.
+TEST(EncodeAPI, DISABLED_Buganizer487259772NoRowMT) {
+  ReproBuganizer487259772(/*row_mt=*/false);
+}
+
+TEST(EncodeAPI, Buganizer487259772RowMT) {
+  ReproBuganizer487259772(/*row_mt=*/true);
+}
+
 class EncodeAPIParameterized
     : public testing::TestWithParam<std::tuple<
           /*usage=*/unsigned int, /*speed=*/int, /*aq_mode=*/unsigned int>> {};
@@ -1283,5 +1366,38 @@ TEST(EncodeAPI, PerFramePsnrNotSupportedWithLagInFrames) {
   ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
 }
 #endif  // !CONFIG_REALTIME_ONLY
+
+TEST(EncodeAPI, SizeAlignOverflow) {
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME),
+            AOM_CODEC_OK);
+
+  cfg.g_w = 16;
+  cfg.g_h = 16;
+  cfg.g_threads = 1;
+  cfg.g_lag_in_frames = 0;
+
+  aom_codec_ctx_t enc;
+  ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, 0), AOM_CODEC_OK);
+
+  // Bug aomdiea:480978101: size_align=32 causes w,h=32 while d_w,d_h=16
+  // This mismatch causes buffer overflow in av1_copy_and_extend_frame()
+  // if the fix is not present.
+  aom_image_t *img =
+      aom_img_alloc_with_border(NULL, AOM_IMG_FMT_NV12, /*d_w=*/16, /*d_h=*/16,
+                                /*align=*/32,
+                                /*size_align=*/32,
+                                /*border=*/15);
+  ASSERT_NE(img, nullptr);
+  memset(img->img_data, 128, img->sz);
+
+  // Should not crash with heap-buffer-overflow
+  EXPECT_EQ(aom_codec_encode(&enc, img, /*pts=*/0, /*duration=*/1, /*flags=*/0),
+            AOM_CODEC_OK);
+
+  aom_img_free(img);
+  ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
+}
 
 }  // namespace

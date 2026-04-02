@@ -185,15 +185,12 @@ static inline void release_compound_type_rd_buffers(
 static inline void dealloc_compressor_data(AV1_COMP *cpi) {
   AV1_COMMON *const cm = &cpi->common;
   TokenInfo *token_info = &cpi->token_info;
-  AV1EncRowMultiThreadInfo *const enc_row_mt = &cpi->mt_info.enc_row_mt;
   const int num_planes = av1_num_planes(cm);
   dealloc_context_buffers_ext(&cpi->mbmi_ext_info);
 
   aom_free(cpi->tile_data);
   cpi->tile_data = NULL;
   cpi->allocated_tiles = 0;
-  enc_row_mt->allocated_tile_cols = 0;
-  enc_row_mt->allocated_tile_rows = 0;
 
   // Delete sementation map
   aom_free(cpi->enc_seg.map);

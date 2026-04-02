@@ -249,6 +249,7 @@ static void row_mt_mem_alloc(AV1_COMP *cpi, int max_rows, int max_cols,
   av1_row_mt_mem_dealloc(cpi);
 
   // Allocate memory for row based multi-threading
+  assert(cpi->allocated_tiles == tile_cols * tile_rows);
   for (tile_row = 0; tile_row < tile_rows; tile_row++) {
     for (tile_col = 0; tile_col < tile_cols; tile_col++) {
       int tile_index = tile_row * tile_cols + tile_col;
@@ -265,6 +266,8 @@ static void row_mt_mem_alloc(AV1_COMP *cpi, int max_rows, int max_cols,
       }
     }
   }
+  enc_row_mt->allocated_tile_cols = tile_cols;
+  enc_row_mt->allocated_tile_rows = tile_rows;
   const int sb_rows = get_sb_rows_in_frame(cm);
   CHECK_MEM_ERROR(
       cm, enc_row_mt->num_tile_cols_done,
@@ -295,6 +298,8 @@ void av1_row_mt_mem_dealloc(AV1_COMP *cpi) {
       }
     }
   }
+  enc_row_mt->allocated_tile_cols = 0;
+  enc_row_mt->allocated_tile_rows = 0;
   aom_free(enc_row_mt->num_tile_cols_done);
   enc_row_mt->num_tile_cols_done = NULL;
   enc_row_mt->allocated_rows = 0;
@@ -1732,9 +1737,8 @@ void av1_encode_tiles_mt(AV1_COMP *cpi) {
   const int tile_rows = cm->tiles.rows;
   int num_workers = mt_info->num_mod_workers[MOD_ENC];
 
-  assert(IMPLIES(cpi->tile_data == NULL,
-                 cpi->allocated_tiles < tile_cols * tile_rows));
-  if (cpi->allocated_tiles < tile_cols * tile_rows) av1_alloc_tile_data(cpi);
+  assert(IMPLIES(cpi->tile_data == NULL, cpi->allocated_tiles == 0));
+  if (cpi->allocated_tiles != tile_cols * tile_rows) av1_alloc_tile_data(cpi);
 
   av1_init_tile_data(cpi);
   num_workers = AOMMIN(num_workers, mt_info->num_workers);
@@ -1922,9 +1926,10 @@ void av1_encode_tiles_row_mt(AV1_COMP *cpi) {
        enc_row_mt->allocated_rows != max_sb_rows_in_tile ||
        enc_row_mt->allocated_cols != (max_sb_cols_in_tile - 1) ||
        enc_row_mt->allocated_sb_rows != sb_rows_in_frame);
-  const bool alloc_tile_data = cpi->allocated_tiles < tile_cols * tile_rows;
+  const bool alloc_tile_data = cpi->allocated_tiles != tile_cols * tile_rows;
 
   assert(IMPLIES(cpi->tile_data == NULL, alloc_tile_data));
+  assert(IMPLIES(cpi->tile_data == NULL, cpi->allocated_tiles == 0));
   if (alloc_tile_data) {
     av1_alloc_tile_data(cpi);
   }
@@ -2000,9 +2005,10 @@ void av1_fp_encode_tiles_row_mt(AV1_COMP *cpi) {
   const bool alloc_row_mt_mem = enc_row_mt->allocated_tile_cols != tile_cols ||
                                 enc_row_mt->allocated_tile_rows != tile_rows ||
                                 enc_row_mt->allocated_rows != max_mb_rows;
-  const bool alloc_tile_data = cpi->allocated_tiles < tile_cols * tile_rows;
+  const bool alloc_tile_data = cpi->allocated_tiles != tile_cols * tile_rows;
 
   assert(IMPLIES(cpi->tile_data == NULL, alloc_tile_data));
+  assert(IMPLIES(cpi->tile_data == NULL, cpi->allocated_tiles == 0));
   if (alloc_tile_data) {
     av1_alloc_tile_data(cpi);
   }
