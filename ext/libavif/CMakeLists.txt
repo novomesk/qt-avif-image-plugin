@@ -22,7 +22,7 @@ endif()
 # New in CMake version 3.30. FetchContent_Populate(<name>) is deprecated, call
 # FetchContent_MakeAvailable(<name>) instead.
 if(POLICY CMP0169)
-    cmake_policy(SET CMP0169 OLD)
+    cmake_policy(SET CMP0169 NEW)
 endif()
 
 # Disallow MSVC for ASM.
@@ -31,7 +31,7 @@ if(POLICY CMP0194)
     cmake_policy(SET CMP0194 NEW)
 endif()
 
-project(libavif LANGUAGES C VERSION 1.4.0)
+project(libavif LANGUAGES C VERSION 1.4.1)
 
 # The root directory of the avif source
 set(AVIF_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -68,7 +68,7 @@ endif()
 #     Increment PATCH.
 set(LIBRARY_VERSION_MAJOR 16)
 set(LIBRARY_VERSION_MINOR 4)
-set(LIBRARY_VERSION_PATCH 0)
+set(LIBRARY_VERSION_PATCH 1)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
 set(LIBRARY_SOVERSION ${LIBRARY_VERSION_MAJOR})
 
@@ -482,16 +482,6 @@ check_avif_option(AVIF_CODEC_RAV1E TARGET rav1e::rav1e PKG_NAME rav1e)
 if(AVIF_CODEC_RAV1E_ENABLED)
     target_compile_definitions(avif_obj PRIVATE -DAVIF_CODEC_RAV1E=1)
     target_sources(avif_obj PRIVATE src/codec_rav1e.c)
-
-    # Unfortunately, rav1e requires a few more libraries
-    # first check that RAV1E_LIBRARIES hasn't been populated by the LocalRav1e module
-    if(NOT RAV1E_LIBRARIES)
-        if(WIN32)
-            target_link_libraries(rav1e::rav1e INTERFACE ntdll.lib userenv.lib ws2_32.lib bcrypt.lib)
-        elseif(UNIX AND NOT APPLE)
-            target_link_libraries(rav1e::rav1e INTERFACE ${CMAKE_DL_LIBS}) # for backtrace
-        endif()
-    endif()
 
     avif_target_link_library(rav1e::rav1e)
 

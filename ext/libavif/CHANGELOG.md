@@ -8,6 +8,23 @@ The changes are relative to the previous release, unless the baseline is specifi
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-03-20
+
+### Changed since 1.4.0
+
+* Fix build with CMake 3.22
+* Update aom.cmd/LocalAom.cmake: v3.13.2
+* Update libxml2.cmd/LocalLibXml2.cmake: v2.15.2
+* Update libyuv.cmd/LocalLibyuv.cmake: 6067afde5 (1922)
+* Support long path names in Windows
+* Fix cicp management and memory leaks in avifgainmaputil
+  https://github.com/AOMediaCodec/libavif/issues/3102.
+
+### Removed since 1.4.0
+
+* Remove experimental status for the following options of avifenc: --progressive,
+  --layered and --scaling-mode, and the extraLayerCount option of avifEncoder.
+
 ## [1.4.0] - 2026-03-04
 
 ### Added since 1.3.0
@@ -1339,7 +1356,8 @@ code.
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/AOMediaCodec/libavif/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/AOMediaCodec/libavif/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/AOMediaCodec/libavif/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/AOMediaCodec/libavif/compare/v1.2.0...v1.2.1
