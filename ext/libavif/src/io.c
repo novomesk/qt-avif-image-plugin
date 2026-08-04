@@ -1,11 +1,85 @@
 // Copyright 2020 Joe Drago. All rights reserved.
 // SPDX-License-Identifier: BSD-2-Clause
 
+#if !defined(_WIN32)
+// Ensure off_t is 64 bits.
+#undef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+// Ensure we have some POSIX compatibility with fseeko/ftello.
+#undef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+
 #include "avif/internal.h"
 
+#include <assert.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#if defined(_WIN32)
+// Windows uses _fseeki64 / _ftelli64 for large file support
+typedef __int64 avif_off_t;
+#define AVIF_OFF_MAX INT64_MAX
+
+static int avif_fseeko(FILE * stream, avif_off_t offset, int whence)
+{
+    return _fseeki64(stream, offset, whence);
+}
+
+static avif_off_t avif_ftello(FILE * stream)
+{
+    return _ftelli64(stream);
+}
+#else
+
+#include <unistd.h>
+
+#if defined(__ANDROID__)
+#include <android/api-level.h>
+#if __ANDROID_API__ >= 24
+#define AVIF_USE_FSEEKO
+#endif
+#elif defined(_POSIX_VERSION) && _POSIX_VERSION >= 200112L
+// Standard Modern POSIX. The _POSIX_VERSION >= 200112L test for fseeko/ftello
+// is used in the first example in the APPLICATION USAGE section in
+// https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/unistd.h.html.
+#define AVIF_USE_FSEEKO
+#endif
+
+#if defined(AVIF_USE_FSEEKO)
+// POSIX large file support
+static_assert(sizeof(off_t) == sizeof(int64_t), "");
+typedef off_t avif_off_t;
+#define AVIF_OFF_MAX INT64_MAX
+
+static int avif_fseeko(FILE * stream, avif_off_t offset, int whence)
+{
+    return fseeko(stream, offset, whence);
+}
+
+static avif_off_t avif_ftello(FILE * stream)
+{
+    return ftello(stream);
+}
+#else
+// Unknown or very old platform. Fall back on fseek/ftell.
+typedef long avif_off_t;
+#define AVIF_OFF_MAX LONG_MAX
+
+static int avif_fseeko(FILE * stream, avif_off_t offset, int whence)
+{
+    return fseek(stream, offset, whence);
+}
+
+static avif_off_t avif_ftello(FILE * stream)
+{
+    return ftell(stream);
+}
+#endif // defined(AVIF_USE_FSEEKO)
+
+#endif // defined(_WIN32)
 
 void avifIODestroy(avifIO * io)
 {
@@ -104,13 +178,13 @@ static avifResult avifIOFileReaderRead(struct avifIO * io, uint32_t readFlags, u
     }
 
     if (size > 0) {
-        if (offset > LONG_MAX) {
+        if (offset > AVIF_OFF_MAX) {
             return AVIF_RESULT_IO_ERROR;
         }
         if (reader->buffer.size < size) {
             AVIF_CHECKRES(avifRWDataRealloc(&reader->buffer, size));
         }
-        if (fseek(reader->f, (long)offset, SEEK_SET) != 0) {
+        if (avif_fseeko(reader->f, (avif_off_t)offset, SEEK_SET) != 0) {
             return AVIF_RESULT_IO_ERROR;
         }
         size_t bytesRead = fread(reader->buffer.data, 1, size, reader->f);
@@ -142,37 +216,19 @@ avifIO * avifIOCreateFileReader(const char * filename)
         return NULL;
     }
 
-#if defined(_WIN32)
-    // Windows uses _fseeki64 / _ftelli64 for large file support
-    if (_fseeki64(f, 0, SEEK_END) != 0) {
+    if (avif_fseeko(f, 0, SEEK_END) != 0) {
         fclose(f);
         return NULL;
     }
-    __int64 fileSize = _ftelli64(f);
+    avif_off_t fileSize = avif_ftello(f);
     if (fileSize < 0) {
         fclose(f);
         return NULL;
     }
-    if (_fseeki64(f, 0, SEEK_SET) != 0) {
+    if (avif_fseeko(f, 0, SEEK_SET) != 0) {
         fclose(f);
         return NULL;
     }
-#else
-    // POSIX large file support
-    if (fseeko(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return NULL;
-    }
-    off_t fileSize = ftello(f);
-    if (fileSize < 0) {
-        fclose(f);
-        return NULL;
-    }
-    if (fseeko(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return NULL;
-    }
-#endif
 
     avifIOFileReader * reader = (avifIOFileReader *)avifAlloc(sizeof(avifIOFileReader));
     if (!reader) {

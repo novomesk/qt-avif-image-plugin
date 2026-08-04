@@ -51,6 +51,7 @@ list(APPEND AOM_UNIT_TEST_COMMON_SOURCES
 add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_SOURCES)
 
 list(APPEND AOM_UNIT_TEST_DECODER_SOURCES "${AOM_ROOT}/test/decode_api_test.cc"
+            "${AOM_ROOT}/test/decode_frame_size_limit_test.cc"
             "${AOM_ROOT}/test/decode_scalability_test.cc"
             "${AOM_ROOT}/test/external_frame_buffer_test.cc"
             "${AOM_ROOT}/test/invalid_file_test.cc"
@@ -77,6 +78,7 @@ list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
             "${AOM_ROOT}/test/encode_test_driver.cc"
             "${AOM_ROOT}/test/encode_test_driver.h"
             "${AOM_ROOT}/test/end_to_end_psnr_test.cc"
+            "${AOM_ROOT}/test/ext_ratectrl_test.cc"
             "${AOM_ROOT}/test/forced_max_frame_width_height_test.cc"
             "${AOM_ROOT}/test/force_key_frame_test.cc"
             "${AOM_ROOT}/test/gf_pyr_height_test.cc"
@@ -129,6 +131,7 @@ if(CONFIG_REALTIME_ONLY)
                    "${AOM_ROOT}/test/deltaq_mode_test.cc"
                    "${AOM_ROOT}/test/dropframe_encode_test.cc"
                    "${AOM_ROOT}/test/end_to_end_psnr_test.cc"
+                   "${AOM_ROOT}/test/ext_ratectrl_test.cc"
                    "${AOM_ROOT}/test/force_key_frame_test.cc"
                    "${AOM_ROOT}/test/gf_pyr_height_test.cc"
                    "${AOM_ROOT}/test/horz_superres_test.cc"
@@ -188,6 +191,11 @@ if(NOT BUILD_SHARED_LIBS)
     add_to_libaom_test_srcs(AOM_UNIT_TEST_COMMON_INTRIN_AVX2)
   endif()
 
+  if(CONFIG_MULTITHREAD)
+    list(APPEND AOM_UNIT_TEST_DECODER_SOURCES
+                "${AOM_ROOT}/test/grain_synthesis_race_test.cc")
+  endif()
+
   list(APPEND AOM_UNIT_TEST_ENCODER_SOURCES
               "${AOM_ROOT}/test/arf_freq_test.cc"
               "${AOM_ROOT}/test/av1_convolve_test.cc"
@@ -235,6 +243,7 @@ if(NOT BUILD_SHARED_LIBS)
               "${AOM_ROOT}/test/subtract_test.cc"
               "${AOM_ROOT}/test/sum_squares_test.cc"
               "${AOM_ROOT}/test/sse_sum_test.cc"
+              "${AOM_ROOT}/test/use_fixed_qp_offsets_test.cc"
               "${AOM_ROOT}/test/variance_test.cc"
               "${AOM_ROOT}/test/warp_filter_test.cc"
               "${AOM_ROOT}/test/warp_filter_test_util.cc"
@@ -422,6 +431,8 @@ if(ENABLE_TESTS)
     aom_gtest STATIC
     "${AOM_ROOT}/third_party/googletest/src/googletest/src/gtest-all.cc")
   set_property(TARGET aom_gtest PROPERTY FOLDER ${AOM_IDE_TEST_FOLDER})
+  # Starting from the 1.17.0 release, GoogleTest requires at least C++17.
+  target_compile_features(aom_gtest PUBLIC cxx_std_17)
   # There are -Wundef warnings in the gtest headers. Tell the compiler to treat
   # the gtest include directories as system include directories and suppress
   # compiler warnings in the gtest headers.

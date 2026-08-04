@@ -40,10 +40,7 @@
 #include <string.h>
 
 #if defined(AVIF_CODEC_AVM)
-// TODO: b/398931194 - Remove specific codec includes once AV2 is released.
-#include "av2/common/enums.h"
 #include "avm/avm_codec.h"
-#include "config/avm_config.h"
 #endif
 
 // ---------------------------------------------------------------------------
@@ -152,19 +149,27 @@ static uint32_t avifBitsReadRG(avifBits * const bits, const uint32_t n)
 //
 // Originally dav1d's parse_seq_hdr() function (heavily modified and split)
 
-static avifBool parseSequenceHeaderProfile(avifBits * bits, uint32_t numBits, avifSequenceHeader * header)
+static avifBool parseAV1SequenceHeaderProfile(avifBits * bits, avifSequenceHeader * header)
 {
-    uint32_t seq_profile = avifBitsRead(bits, numBits);
-#if defined(CONFIG_AV2_PROFILES) && CONFIG_AV2_PROFILES
-    if (seq_profile > 5) {
-#else
+    uint32_t seq_profile = avifBitsRead(bits, 3);
     if (seq_profile > 2) {
-#endif
         return AVIF_FALSE;
     }
     header->av1C.seqProfile = (uint8_t)seq_profile;
     return !bits->error;
 }
+
+#if defined(AVIF_CODEC_AVM)
+static avifBool parseAV2SequenceHeaderProfile(avifBits * bits, avifSequenceHeader * header)
+{
+    uint32_t seq_profile = avifBitsRead(bits, 5);
+    if (seq_profile >= 32) {
+        return AVIF_FALSE;
+    }
+    header->av1C.seqProfile = (uint8_t)seq_profile;
+    return !bits->error;
+}
+#endif // defined(AVIF_CODEC_AVM)
 
 static avifBool parseSequenceHeaderLevelIdxAndTier(avifBits * bits, avifSequenceHeader * header)
 {
@@ -439,7 +444,7 @@ static avifBool parseAV2ChromaFormatBitdepth(avifBits * bits, avifSequenceHeader
 
 static avifBool parseAV1SequenceHeader(avifBits * bits, avifSequenceHeader * header)
 {
-    AVIF_CHECK(parseSequenceHeaderProfile(bits, 3, header));
+    AVIF_CHECK(parseAV1SequenceHeaderProfile(bits, header));
     AVIF_CHECK(parseSequenceHeaderLevelIdxAndTier(bits, header));
 
     AVIF_CHECK(parseSequenceHeaderFrameMaxDimensions(bits, header));
@@ -458,6 +463,19 @@ static avifBool parseAV1SequenceHeader(avifBits * bits, avifSequenceHeader * hea
 }
 
 #if defined(AVIF_CODEC_AVM)
+static int avifCeilLog2(int x)
+{
+    if (x < 2)
+        return 0;
+    int i = 1;
+    int p = 2;
+    while (p < x) {
+        i++;
+        p <<= 1;
+    }
+    return i;
+}
+
 // See read_sequence_header_obu() in av2/decoder/obu.c.
 static avifBool parseAV2SequenceHeader(avifBits * bits, avifSequenceHeader * header)
 {
@@ -466,32 +484,33 @@ static avifBool parseAV2SequenceHeader(avifBits * bits, avifSequenceHeader * hea
         return AVIF_FALSE;
     }
 
-    AVIF_CHECK(parseSequenceHeaderProfile(bits, PROFILE_BITS, header));
+    AVIF_CHECK(parseAV2SequenceHeaderProfile(bits, header));
     header->reduced_still_picture_header = (uint8_t)avifBitsRead(bits, 1); // single_picture_header_flag
-    if (!header->reduced_still_picture_header) {
-        avifBitsRead(bits, 3); // seq_lcr_id
-        avifBitsRead(bits, 1); // still_picture
-        return AVIF_FALSE;
-    }
     header->av1C.seqLevelIdx0 = (uint8_t)avifBitsRead(bits, 5);
-    if (header->av1C.seqLevelIdx0 > 7 && !header->reduced_still_picture_header) {
-        avifBitsRead(bits, 1); // single_tier_0
+    if (header->av1C.seqLevelIdx0 >= 4 && !header->reduced_still_picture_header) {
+        header->av1C.seqTier0 = avifBitsRead(bits, 1);
+    } else {
+        header->av1C.seqTier0 = 0;
     }
-    header->av1C.seqTier0 = 0;
+
+    AVIF_CHECK(parseAV2ChromaFormatBitdepth(bits, header));
+
+    if (!header->reduced_still_picture_header) {
+        avifBitsRead(bits, 3);                         // seq_lcr_id
+        avifBitsRead(bits, 1);                         // still_picture
+        avifBitsRead(bits, 2);                         // max_tlayer_id
+        const int maxMlayerId = avifBitsRead(bits, 3); // max_mlayer_id
+        if (maxMlayerId > 0) {
+            const int n = avifCeilLog2(maxMlayerId + 1);
+            avifBitsRead(bits, n); // seq_max_mlayer_cnt_minus_1
+        }
+        avifBitsRead(bits, 1); // monotonic_output_order_flag
+    }
 
     uint32_t frame_width_bits = avifBitsRead(bits, 4) + 1;
     uint32_t frame_height_bits = avifBitsRead(bits, 4) + 1;
     header->maxWidth = avifBitsRead(bits, frame_width_bits) + 1;   // max_frame_width
     header->maxHeight = avifBitsRead(bits, frame_height_bits) + 1; // max_frame_height
-
-    if (avifBitsRead(bits, 1)) { // conf_window_flag
-        avifBitsReadVLC(bits);   // conf_win_left_offset
-        avifBitsReadVLC(bits);   // conf_win_right_offset
-        avifBitsReadVLC(bits);   // conf_win_top_offset
-        avifBitsReadVLC(bits);   // conf_win_bottom_offset
-    }
-
-    AVIF_CHECK(parseAV2ChromaFormatBitdepth(bits, header));
 
     header->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
     header->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;

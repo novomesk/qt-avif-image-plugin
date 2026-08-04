@@ -222,8 +222,10 @@ typedef struct avifDecoderItem
     avifContentType contentType;
     avifPropertyArray properties;
     avifExtentArray extents;       // All extent offsets/sizes
-    avifRWData mergedExtents;      // if set, is a single contiguous block of this item's extents (unused when extents.count == 1)
-    avifBool ownsMergedExtents;    // if true, mergedExtents must be freed when this item is destroyed
+    avifRWData mergedExtents;      // A single contiguous block of this item's extents
+    avifBool ownsMergedExtents;    // If true, mergedExtents must be freed when this item is destroyed.
+                                   // If false, mergedExtents is used as an avifROData and points to a
+                                   // buffer it doesn't own.
     avifBool partialMergedExtents; // If true, mergedExtents doesn't have all of the item data yet
     uint32_t thumbnailForID;       // if non-zero, this item is a thumbnail for Item #{thumbnailForID}
     uint32_t auxForID;             // if non-zero, this item is an auxC plane for Item #{auxForID}
@@ -1531,7 +1533,8 @@ static avifResult avifDecoderItemRead(avifDecoderItem * item,
         }
 
         if (singlePersistentBuffer) {
-            memcpy(&item->mergedExtents, &offsetBuffer, sizeof(avifRWData));
+            item->mergedExtents.data = (uint8_t *)offsetBuffer.data; // const_cast
+            AVIF_ASSERT_OR_RETURN(bytesToRead <= offsetBuffer.size);
             item->mergedExtents.size = bytesToRead;
         } else {
             AVIF_ASSERT_OR_RETURN(item->ownsMergedExtents);
@@ -2647,7 +2650,7 @@ static avifResult avifParseMiniHDRProperties(avifROStream * s, uint32_t * hasCll
 // See https://aomediacodec.github.io/av1-isobmff/v1.2.0.html#av1codecconfigurationbox-syntax.
 static avifBool avifParseCodecConfiguration(avifROStream * s, avifCodecConfigurationBox * config, const char * configPropName, avifDiagnostics * diag)
 {
-    const size_t av1COffset = s->offset;
+    const size_t av1COffset = avifROStreamOffset(s);
 
     uint32_t marker, version;
     AVIF_CHECK(avifROStreamReadBitsU32(s, &marker, /*bitCount=*/1)); // unsigned int (1) marker = 1;
@@ -2691,7 +2694,7 @@ static avifBool avifParseCodecConfiguration(avifROStream * s, avifCodecConfigura
     // The following is skipped by avifParseItemPropertyContainerBox().
     // unsigned int (8) configOBUs[];
 
-    AVIF_CHECK(s->offset - av1COffset == 4); // Make sure avifParseCodecConfiguration() reads exactly 4 bytes.
+    AVIF_CHECK(avifROStreamOffset(s) - av1COffset == 4); // Make sure avifParseCodecConfiguration() reads exactly 4 bytes.
     return AVIF_TRUE;
 }
 
@@ -4524,7 +4527,8 @@ static avifResult avifParseMinimizedImageBox(avifDecoderData * data,
         colorItem->premByID = alphaIsPremultiplied;
         avifProperty * alphaAuxProp = avifMetaCreateProperty(meta, "auxC");
         AVIF_CHECKERR(alphaAuxProp, AVIF_RESULT_OUT_OF_MEMORY);
-        strcpy(alphaAuxProp->u.auxC.auxType, AVIF_URN_ALPHA0);
+        static_assert(sizeof(alphaAuxProp->u.auxC.auxType) >= sizeof(AVIF_URN_ALPHA0), "");
+        memcpy(alphaAuxProp->u.auxC.auxType, AVIF_URN_ALPHA0, sizeof(AVIF_URN_ALPHA0));
         AVIF_CHECKERR(avifDecoderItemAddProperty(alphaItem, alphaAuxProp), AVIF_RESULT_OUT_OF_MEMORY);
 
         // Property with fixed index 2 (reused).
@@ -4836,7 +4840,7 @@ static avifResult avifParse(avifDecoder * decoder)
         BEGIN_STREAM(headerStream, headerContents.data, headerContents.size, &decoder->diag, "File-level box header");
         avifBoxHeader header;
         AVIF_CHECKERR(avifROStreamReadBoxHeaderPartial(&headerStream, &header, /*topLevel=*/AVIF_TRUE), AVIF_RESULT_BMFF_PARSE_FAILED);
-        parseOffset += headerStream.offset;
+        parseOffset += avifROStreamOffset(&headerStream);
         AVIF_ASSERT_OR_RETURN(decoder->io->sizeHint == 0 || parseOffset <= decoder->io->sizeHint);
 
         // Try to get the remainder of the box, if necessary
@@ -5792,12 +5796,12 @@ static avifResult avifDecoderFindGainMapItem(const avifDecoder * decoder,
     // Allocate avifGainMap on the stack instead of using avifGainMapCreate() to simplify error handling.
     avifGainMap gainMapTmp;
     avifGainMapSetDefaults(&gainMapTmp);
-    const avifResult tmapParsingRes = avifParseToneMappedImageBox(&gainMapTmp, tmapData.data, tmapData.size, data->diag);
-    if (tmapParsingRes == AVIF_RESULT_NOT_IMPLEMENTED) {
+    avifResult result = avifParseToneMappedImageBox(&gainMapTmp, tmapData.data, tmapData.size, data->diag);
+    if (result == AVIF_RESULT_NOT_IMPLEMENTED) {
         // Unsupported gain map version. Simply ignore the gain map.
         return AVIF_RESULT_OK;
     }
-    AVIF_CHECKRES(tmapParsingRes);
+    AVIF_CHECKRES(result);
 
     avifDecoderItem * gainMapItemTmp;
     AVIF_CHECKRES(avifMetaFindOrCreateItem(data->meta, gainMapItemID, &gainMapItemTmp));
@@ -5805,24 +5809,30 @@ static avifResult avifDecoderFindGainMapItem(const avifDecoder * decoder,
         return AVIF_RESULT_NOT_IMPLEMENTED;
     }
 
-    const avifResult gainMapParsingRes = avifDecoderItemReadAndParse(decoder,
-                                                                     gainMapItemTmp,
-                                                                     /*isItemInInput=*/AVIF_TRUE,
-                                                                     &data->tileInfos[AVIF_ITEM_GAIN_MAP].grid,
-                                                                     gainMapCodecType);
-    if (gainMapParsingRes == AVIF_RESULT_NOT_IMPLEMENTED) {
+    avifCodecType gainMapCodecTypeTmp;
+    result = avifDecoderItemReadAndParse(decoder,
+                                         gainMapItemTmp,
+                                         /*isItemInInput=*/AVIF_TRUE,
+                                         &data->tileInfos[AVIF_ITEM_GAIN_MAP].grid,
+                                         &gainMapCodecTypeTmp);
+    if (result == AVIF_RESULT_NOT_IMPLEMENTED) {
         return AVIF_RESULT_OK;
     }
-    AVIF_CHECKRES(gainMapParsingRes);
+    AVIF_CHECKRES(result);
 
-    AVIF_CHECKRES(avifReadColorProperties(decoder->io,
-                                          &toneMappedImageItemTmp->properties,
-                                          &gainMapTmp.altICC,
-                                          &gainMapTmp.altColorPrimaries,
-                                          &gainMapTmp.altTransferCharacteristics,
-                                          &gainMapTmp.altMatrixCoefficients,
-                                          &gainMapTmp.altYUVRange,
-                                          /*cicpSet=*/NULL));
+    // This may allocate gainMapTmp.altICC which must be freed in case of error.
+    result = avifReadColorProperties(decoder->io,
+                                     &toneMappedImageItemTmp->properties,
+                                     &gainMapTmp.altICC,
+                                     &gainMapTmp.altColorPrimaries,
+                                     &gainMapTmp.altTransferCharacteristics,
+                                     &gainMapTmp.altMatrixCoefficients,
+                                     &gainMapTmp.altYUVRange,
+                                     /*cicpSet=*/NULL);
+    if (result != AVIF_RESULT_OK) {
+        avifRWDataFree(&gainMapTmp.altICC);
+        return result;
+    }
 
     const avifProperty * clliProp = avifPropertyArrayFind(&toneMappedImageItemTmp->properties, "clli");
     if (clliProp) {
@@ -5841,10 +5851,12 @@ static avifResult avifDecoderFindGainMapItem(const avifDecoder * decoder,
         // Every image item shall be associated with one property of this type, prior to the association
         // of all transformative properties.
         avifDiagnosticsPrintf(data->diag, "Box[tmap] missing mandatory ispe property");
+        avifRWDataFree(&gainMapTmp.altICC);
         return AVIF_RESULT_BMFF_PARSE_FAILED;
     }
     if (ispeProp->u.ispe.width != colorItem->width || ispeProp->u.ispe.height != colorItem->height) {
         avifDiagnosticsPrintf(data->diag, "Box[tmap] ispe property width/height does not match base image");
+        avifRWDataFree(&gainMapTmp.altICC);
         return AVIF_RESULT_BMFF_PARSE_FAILED;
     }
 
@@ -5859,6 +5871,7 @@ static avifResult avifDecoderFindGainMapItem(const avifDecoder * decoder,
         // enforced at encoding. Other patterns are rejected at decoding.
         avifDiagnosticsPrintf(data->diag,
                               "Box[tmap] 'pasp', 'clap', 'irot' and 'imir' properties must be associated with base and gain map items instead of 'tmap'");
+        avifRWDataFree(&gainMapTmp.altICC);
         return AVIF_RESULT_INVALID_TONE_MAPPED_IMAGE;
     }
 
@@ -5868,29 +5881,40 @@ static avifResult avifDecoderFindGainMapItem(const avifDecoder * decoder,
     avifRange yuvRange = AVIF_RANGE_FULL;
     avifBool cicpSet = AVIF_FALSE;
     // Look for a colr nclx box. Other colr box types (e.g. ICC) are not supported.
-    AVIF_CHECKRES(
-        avifReadColorNclxProperty(&gainMapItemTmp->properties, &colorPrimaries, &transferCharacteristics, &matrixCoefficients, &yuvRange, &cicpSet));
+    result =
+        avifReadColorNclxProperty(&gainMapItemTmp->properties, &colorPrimaries, &transferCharacteristics, &matrixCoefficients, &yuvRange, &cicpSet);
+    if (result != AVIF_RESULT_OK) {
+        avifRWDataFree(&gainMapTmp.altICC);
+        return result;
+    }
 
     // -- Everything is valid, do memory allocations and fill in output data. --
 
     decoder->image->gainMap = avifGainMapCreate();
-    AVIF_CHECKERR(decoder->image->gainMap, AVIF_RESULT_OUT_OF_MEMORY);
-    *decoder->image->gainMap = gainMapTmp;
+    if (!decoder->image->gainMap) {
+        avifRWDataFree(&gainMapTmp.altICC);
+        return AVIF_RESULT_OUT_OF_MEMORY;
+    }
 
     if (decoder->imageContentToDecode & AVIF_IMAGE_CONTENT_GAIN_MAP) {
-        decoder->image->gainMap->image = avifImageCreateEmpty();
-        avifImage * image = decoder->image->gainMap->image;
-        AVIF_CHECKERR(image, AVIF_RESULT_OUT_OF_MEMORY);
+        avifImage * image = avifImageCreateEmpty();
+        if (!image) {
+            avifRWDataFree(&gainMapTmp.altICC);
+            return AVIF_RESULT_OUT_OF_MEMORY;
+        }
         if (cicpSet) {
             image->colorPrimaries = colorPrimaries;
             image->transferCharacteristics = transferCharacteristics;
             image->matrixCoefficients = matrixCoefficients;
             image->yuvRange = yuvRange;
         }
+        gainMapTmp.image = image;
     }
 
-    // Only set the output pointer after everything has been validated.
+    // Only set the output pointers after everything has been validated.
+    *decoder->image->gainMap = gainMapTmp;
     *gainMapItem = gainMapItemTmp;
+    *gainMapCodecType = gainMapCodecTypeTmp;
     return AVIF_RESULT_OK;
 }
 

@@ -8,6 +8,35 @@ The changes are relative to the previous release, unless the baseline is specifi
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-05-26
+
+### Added since 1.4.1
+
+* Add --jobs flag to avifgainmaputil to use multiple worker threads when
+  reading/writing AVIF files.
+
+### Changed since 1.4.1
+
+* Require C11 for compilation. Public headers will remain C99.
+* Add --jobs flag to avifgainmaputil and enable auto tiling.
+* Use AOM_TUNE_IQ for layered image inter-frame encoding.
+* Update aom.cmd/LocalAom.cmake: v3.14.1
+* Update LocalAvm.cmake: research-v15.0.0
+* Update libjpeg.cmd/LocalJpeg.cmake: 3.1.4.1
+* Update libxml2.cmd/LocalLibXml2.cmake: v2.15.3
+* Update libyuv.cmd/LocalLibyuv.cmake: 644251f25 (1924)
+* Update svt.cmd/svt.sh/LocalSvt.cmake: v4.1.0
+* Update zlibpng.cmd/LocalZlibpng.cmake: libpng 1.6.58
+* Fix memory leak of altICC if avifDecoderFindGainMapItem returns early.
+* Avoid MT loop restoration crash in libaom < 3.13.3
+* Fix decoding layered image with multiple scaled alpha layers
+* Fix NaN bypass of AVIF_CLAMP in gain map tone mapping (use fminf/fmaxf)
+* Fix null pointer dereference in avifImageCopy() when avifImageCreateEmpty()
+  fails to allocate the destination gain map image.
+* avifenc: reject mismatched --depth for Y4M input
+* Use libaom AOMD_SET_FRAME_SIZE_LIMIT if available
+* Fix bug in transfer function 11 (used for gain map creation/tone mapping)
+
 ## [1.4.1] - 2026-03-20
 
 ### Changed since 1.4.0
@@ -1356,7 +1385,8 @@ code.
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/AOMediaCodec/libavif/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/AOMediaCodec/libavif/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/AOMediaCodec/libavif/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/AOMediaCodec/libavif/compare/v1.2.1...v1.3.0

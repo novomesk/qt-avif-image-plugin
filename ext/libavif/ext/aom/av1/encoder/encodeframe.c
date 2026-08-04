@@ -175,6 +175,8 @@ static const uint8_t *get_var_offs(int use_hbd, int bd) {
 void av1_init_rtc_counters(MACROBLOCK *const x) {
   av1_init_cyclic_refresh_counters(x);
   x->cnt_zeromv = 0;
+  x->sb_col_scroll = 0;
+  x->sb_row_scroll = 0;
 }
 
 void av1_accumulate_rtc_counters(AV1_COMP *cpi, const MACROBLOCK *const x) {
@@ -306,15 +308,25 @@ static inline void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
 
   const int delta_q_res = delta_q_info->delta_q_res;
   int current_qindex = cm->quant_params.base_qindex;
+  const int sb_row = mi_row >> cm->seq_params->mib_size_log2;
+  const int sb_col = mi_col >> cm->seq_params->mib_size_log2;
+  const int sb_cols =
+      CEIL_POWER_OF_TWO(cm->mi_params.mi_cols, cm->seq_params->mib_size_log2);
+  const int sb_index = sb_row * sb_cols + sb_col;
   if (cpi->use_ducky_encode && cpi->ducky_encode_info.frame_info.qp_mode ==
                                    DUCKY_ENCODE_FRAME_MODE_QINDEX) {
-    const int sb_row = mi_row >> cm->seq_params->mib_size_log2;
-    const int sb_col = mi_col >> cm->seq_params->mib_size_log2;
-    const int sb_cols =
-        CEIL_POWER_OF_TWO(cm->mi_params.mi_cols, cm->seq_params->mib_size_log2);
-    const int sb_index = sb_row * sb_cols + sb_col;
     current_qindex =
         cpi->ducky_encode_info.frame_info.superblock_encode_qindex[sb_index];
+  } else if (cpi->ext_ratectrl.ready &&
+             (cpi->ext_ratectrl.funcs.rc_type & AOM_RC_QP) != 0 &&
+             cpi->ext_ratectrl.funcs.get_encodeframe_decision != NULL &&
+             cpi->ext_ratectrl.sb_params_list != NULL) {
+    if (cpi->ext_ratectrl.use_delta_q) {
+      const int q_index = cpi->ext_ratectrl.sb_params_list[sb_index].q_index;
+      if (q_index != AOM_DEFAULT_Q) {
+        current_qindex = q_index;
+      }
+    }
   } else if (cpi->oxcf.q_cfg.deltaq_mode == DELTA_Q_PERCEPTUAL) {
     if (DELTA_Q_PERCEPTUAL_MODULATION == 1) {
       const int block_wavelet_energy_level =
@@ -1281,8 +1293,6 @@ static inline void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
     x->sb_me_block = 0;
     x->sb_me_partition = 0;
     x->sb_me_mv.as_int = 0;
-    x->sb_col_scroll = 0;
-    x->sb_row_scroll = 0;
     x->sb_force_fixed_part = 1;
     x->color_palette_thresh = 64;
     x->force_color_check_block_level = 0;
@@ -1688,6 +1698,100 @@ static inline void set_default_interp_skip_flags(
                         : INTERP_SKIP_LUMA_SKIP_CHROMA;
 }
 
+/*!\cond */
+typedef struct {
+  // Scoring function for usefulness of references (the lower score, the more
+  // useful)
+  int score;
+  // Index in the reference buffer
+  int index;
+} RefScoreData;
+/*!\endcond */
+
+// Comparison function to sort reference frames in ascending score order.
+static int compare_score_data_asc(const void *a, const void *b) {
+  const RefScoreData *ra = (const RefScoreData *)a;
+  const RefScoreData *rb = (const RefScoreData *)b;
+
+  const int score_diff = ra->score - rb->score;
+  if (score_diff != 0) return score_diff;
+
+  return ra->index - rb->index;
+}
+
+// Determines whether a given reference frame is "good" based on temporal
+// distance and base_qindex. The "good" reference frames are not allowed to be
+// pruned by the speed feature "prune_single_ref" and "prune_comp_ref_frames"
+// at block level.
+static inline void setup_keep_ref_frame_mask(AV1_COMP *cpi) {
+  const int prune_single_ref = cpi->sf.inter_sf.prune_single_ref;
+  const int prune_comp_ref_frames = cpi->sf.inter_sf.prune_comp_ref_frames;
+  const AV1_COMMON *const cm = &cpi->common;
+  cpi->keep_single_ref_frame_mask = 0;
+  cpi->keep_comp_ref_frame_mask = 0;
+  if (frame_is_intra_only(cm)) return;
+
+  RefScoreData ref_score_data[INTER_REFS_PER_FRAME];
+  for (int i = 0; i < INTER_REFS_PER_FRAME; ++i) {
+    ref_score_data[i].score = INT_MAX;
+    ref_score_data[i].index = i;
+  }
+
+  // Calculate score for each reference frame based on relative distance to
+  // the current frame and its base_qindex. A lower score means that the
+  // reference is potentially more useful.
+  for (MV_REFERENCE_FRAME ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME;
+       ++ref_frame) {
+    if (cpi->ref_frame_flags & av1_ref_frame_flag_list[ref_frame]) {
+      const RefFrameDistanceInfo *const ref_frame_dist_info =
+          &cpi->ref_frame_dist_info;
+      const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
+      ref_score_data[ref_frame - LAST_FRAME].score =
+          abs(ref_frame_dist_info->ref_relative_dist[ref_frame - LAST_FRAME]) +
+          buf->base_qindex;
+    }
+  }
+
+  qsort(ref_score_data, INTER_REFS_PER_FRAME, sizeof(ref_score_data[0]),
+        compare_score_data_asc);
+
+  // Decide the number of reference frames for which pruning via the speed
+  // feature prune_single_ref is disallowed.
+  // prune_single_ref = 0 => None of the 7 reference frames are pruned.
+  // prune_single_ref = 1 => The best 5 reference frames are not pruned.
+  // prune_single_ref = 2 => The best 3 reference frames are not pruned.
+  // prune_single_ref = 3, 4 => All the 7 references are allowed to be pruned.
+  static const int num_single_ref_to_keep_lookup[5] = { INTER_REFS_PER_FRAME, 5,
+                                                        3, 0, 0 };
+  assert(prune_single_ref >= 0 && prune_single_ref <= 4);
+  const int num_single_ref_to_keep =
+      num_single_ref_to_keep_lookup[prune_single_ref];
+  for (int i = 0; i < num_single_ref_to_keep; ++i) {
+    const int idx = ref_score_data[i].index;
+    cpi->keep_single_ref_frame_mask |= 1 << idx;
+  }
+
+  // Decide the number of reference frame pairs for which pruning via the speed
+  // feature "prune_comp_ref_frames" is disallowed.
+  // prune_comp_ref_frames = 0    => None of the allowed reference frame pairs
+  //                                 are pruned.
+  // prune_comp_ref_frames = 1    => The best 3 reference frame pairs are not
+  //                                 allowed to be pruned, i.e, reference frame
+  //                                 pairs with rank (1, 2), (1, 3), (2, 3) are
+  //                                 not  pruned.
+  // prune_comp_ref_frames = 2, 3 => All the reference frame pairs are allowed
+  //                                 to be pruned.
+  static const int num_comp_ref_to_keep_lookup[4] = { INTER_REFS_PER_FRAME, 3,
+                                                      0, 0 };
+  assert(prune_comp_ref_frames >= 0 && prune_comp_ref_frames <= 3);
+  const int num_comp_ref_to_keep =
+      num_comp_ref_to_keep_lookup[prune_comp_ref_frames];
+  for (int i = 0; i < num_comp_ref_to_keep; ++i) {
+    const int idx = ref_score_data[i].index;
+    cpi->keep_comp_ref_frame_mask |= 1 << idx;
+  }
+}
+
 static inline void setup_prune_ref_frame_mask(AV1_COMP *cpi) {
   if ((!cpi->oxcf.ref_frm_cfg.enable_onesided_comp ||
        cpi->sf.inter_sf.disable_onesided_comp) &&
@@ -1850,11 +1954,11 @@ static int aom_get_variance_boost_delta_q_res(int qindex) {
 
 #if !CONFIG_REALTIME_ONLY
 static float get_thresh_based_on_q(int qindex, int speed) {
-  const float min_threshold_arr[2] = { 0.06f, 0.09f };
-  const float max_threshold_arr[2] = { 0.10f, 0.13f };
-
-  const float min_thresh = min_threshold_arr[speed >= 3];
-  const float max_thresh = max_threshold_arr[speed >= 3];
+  const float min_threshold_arr[3] = { 0.084f, 0.087f, 0.126f };
+  const float max_threshold_arr[3] = { 0.140f, 0.150f, 0.182f };
+  const int idx = (speed >= 3) ? 2 : (speed - 1);
+  const float min_thresh = min_threshold_arr[idx];
+  const float max_thresh = max_threshold_arr[idx];
   const float thresh = min_thresh + (max_thresh - min_thresh) *
                                         ((float)MAXQ - (float)qindex) /
                                         (float)(MAXQ - MINQ);
@@ -1894,12 +1998,12 @@ static int get_spatial_mvpred_err(AV1_COMMON *cm, TplParams *const tpl_data,
 
   int mv_err = INT32_MAX;
   const int step = 1 << block_mis_log2;
-  const int mv_pred_pos_in_mis[6][2] = {
-    { -step, 0 },     { 0, -step },     { -step, step },
-    { -step, -step }, { -2 * step, 0 }, { 0, -2 * step },
+  const int mv_pred_pos_in_mis[8][2] = {
+    { -step, 0 },     { 0, -step },     { -step, step },  { -step, -step },
+    { -2 * step, 0 }, { 0, -2 * step }, { -3 * step, 0 }, { 0, -3 * step },
   };
 
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < 8; i++) {
     int row_offset = mv_pred_pos_in_mis[i][0];
     int col_offset = mv_pred_pos_in_mis[i][1];
     if (!is_inside_frame_border(mi_row, mi_col, row_offset, col_offset,
@@ -2255,6 +2359,9 @@ static inline void encode_frame_internal(AV1_COMP *cpi) {
   cpi->prune_ref_frame_mask = 0;
   // Figure out which ref frames can be skipped at frame level.
   setup_prune_ref_frame_mask(cpi);
+  // Disable certain reference frame pruning based on temporal distance and
+  // quality of that reference frame.
+  setup_keep_ref_frame_mask(cpi);
 
   x->txfm_search_info.txb_split_count = 0;
 #if CONFIG_SPEED_STATS

@@ -330,16 +330,21 @@ LIBYUV_API SAFEBUFFERS int RiscvCpuCaps(const char* cpuinfo_name) {
         // supervisor-level extensions.
         extensions = strpbrk(isa, "zxs");
         if (extensions) {
+          extensions_len = strlen(extensions);
           // Multi-letter extensions are seperated by a single underscore
           // as described in RISC-V User-Level ISA V2.2.
-          char* ext = strtok(extensions, "_");
-          extensions_len = strlen(extensions);
+          char* ext = extensions;
           while (ext) {
+            char* next = strchr(ext, '_');
+            if (next) {
+              *next = '\0';
+              next++;
+            }
             // Search for the ZVFH (Vector FP16) extension.
             if (!strcmp(ext, "zvfh")) {
               flag |= kCpuHasRVVZVFH;
             }
-            ext = strtok(NULL, "_");
+            ext = next;
           }
         }
         std_isa_len = isa_len - extensions_len - 5;
@@ -392,6 +397,7 @@ static SAFEBUFFERS int GetCpuFlags(void) {
   int cpu_info7[4] = {0, 0, 0, 0};
   int cpu_einfo7[4] = {0, 0, 0, 0};
   int cpu_info24[4] = {0, 0, 0, 0};
+  int cpu_info21[4] = {0, 0, 0, 0};
   int cpu_amdinfo21[4] = {0, 0, 0, 0};
   CpuId(0, 0, cpu_info0);
   CpuId(1, 0, cpu_info1);
@@ -399,6 +405,9 @@ static SAFEBUFFERS int GetCpuFlags(void) {
     CpuId(7, 0, cpu_info7);
     CpuId(7, 1, cpu_einfo7);
     CpuId(0x80000021, 0, cpu_amdinfo21);
+  }
+  if (cpu_info0[0] >= 0x21) {
+    CpuId(0x21, 0, cpu_info21);
   }
   if (cpu_info0[0] >= 0x24) {
     CpuId(0x24, 0, cpu_info24);
@@ -422,7 +431,7 @@ static SAFEBUFFERS int GetCpuFlags(void) {
     cpu_info |= ((cpu_amdinfo21[0] & 0x00008000) ? kCpuHasERMS : 0);
 
     // Detect AVX512bw
-    if ((GetXCR0() & 0xe0) == 0xe0) {
+    if ((GetXCR0() & 0xe0) == 0xe0 && (cpu_info7[1] & 0x00010000)) {
       cpu_info |= ((cpu_info7[1] & 0x40000000) ? kCpuHasAVX512BW : 0) |
                   ((cpu_info7[1] & 0x80000000) ? kCpuHasAVX512VL : 0) |
                   ((cpu_info7[2] & 0x00000002) ? kCpuHasAVX512VBMI : 0) |
@@ -430,7 +439,8 @@ static SAFEBUFFERS int GetCpuFlags(void) {
                   ((cpu_info7[2] & 0x00000800) ? kCpuHasAVX512VNNI : 0) |
                   ((cpu_info7[2] & 0x00001000) ? kCpuHasAVX512VBITALG : 0) |
                   ((cpu_einfo7[3] & 0x00080000) ? kCpuHasAVX10 : 0) |
-                  ((cpu_info7[3] & 0x02000000) ? kCpuHasAMXINT8 : 0);
+                  ((cpu_info7[3] & 0x02000000) ? kCpuHasAMXINT8 : 0) |
+                  ((cpu_info21[0] & 0x00800000) ? kCpuHasAVX512BMM : 0);
       if (cpu_info0[0] >= 0x24 && (cpu_einfo7[3] & 0x00080000)) {
         cpu_info |= ((cpu_info24[1] & 0xFF) >= 2) ? kCpuHasAVX10_2 : 0;
       }

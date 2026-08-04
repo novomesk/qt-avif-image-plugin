@@ -31,7 +31,7 @@ if(POLICY CMP0194)
     cmake_policy(SET CMP0194 NEW)
 endif()
 
-project(libavif LANGUAGES C VERSION 1.4.1)
+project(libavif LANGUAGES C VERSION 1.4.2)
 
 # The root directory of the avif source
 set(AVIF_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -45,18 +45,15 @@ include(FindPkgConfig)
 include(AvifExternalProjectUtils)
 include(GNUInstallDirs)
 
-option(AVIF_ENABLE_NODISCARD "Add [[nodiscard]] to some functions. CMake must be at least 3.21 to force C23." OFF)
+option(AVIF_ENABLE_NODISCARD "Add [[nodiscard]] to some functions." OFF)
 
-# Set C99 as the default
+# Set C11 as the default
 if(AVIF_ENABLE_NODISCARD)
     # [[nodiscard]] requires C23.
-    if(CMAKE_VERSION VERSION_LESS 3.21.0)
-        message(FATAL_ERROR "CMake must be at least 3.21 to force C23, bailing out")
-    endif()
     set(CMAKE_C_STANDARD 23)
     set(CMAKE_C_STANDARD_REQUIRED ON)
 else()
-    set(CMAKE_C_STANDARD 99)
+    set(CMAKE_C_STANDARD 11)
 endif()
 
 # SOVERSION scheme: MAJOR.MINOR.PATCH
@@ -68,7 +65,7 @@ endif()
 #     Increment PATCH.
 set(LIBRARY_VERSION_MAJOR 16)
 set(LIBRARY_VERSION_MINOR 4)
-set(LIBRARY_VERSION_PATCH 1)
+set(LIBRARY_VERSION_PATCH 2)
 set(LIBRARY_VERSION "${LIBRARY_VERSION_MAJOR}.${LIBRARY_VERSION_MINOR}.${LIBRARY_VERSION_PATCH}")
 set(LIBRARY_SOVERSION ${LIBRARY_VERSION_MAJOR})
 

@@ -48,14 +48,6 @@ static void avmCodecDestroyInternal(avifCodec * codec)
     avifFree(codec->internal);
 }
 
-static avifResult avifCheckCodecVersionAVM()
-{
-    // The minimum supported version of avm is the anchor 4.0.0.
-    // avm_codec.h says: avm_codec_version() == (major<<16 | minor<<8 | patch)
-    AVIF_CHECKERR((avm_codec_version() >> 16) >= 4, AVIF_RESULT_NO_CODEC_AVAILABLE);
-    return AVIF_RESULT_OK;
-}
-
 static avifBool avmCodecGetNextImage(struct avifCodec * codec,
                                      const avifDecodeSample * sample,
                                      avifBool alpha,
@@ -65,8 +57,6 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
     assert(sample);
 
     if (!codec->internal->decoderInitialized) {
-        AVIF_CHECKRES(avifCheckCodecVersionAVM());
-
         avm_codec_dec_cfg_t cfg;
         memset(&cfg, 0, sizeof(avm_codec_dec_cfg_t));
         cfg.threads = codec->maxThreads;
@@ -80,7 +70,8 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
         if (avm_codec_control(&codec->internal->decoder, AV2D_SET_OUTPUT_ALL_LAYERS, codec->allLayers)) {
             return AVIF_FALSE;
         }
-        if (avm_codec_control(&codec->internal->decoder, AV2D_SET_OPERATING_POINT, codec->operatingPoint)) {
+        if (codec->operatingPoint != 0) {
+            // Not implemented.
             return AVIF_FALSE;
         }
 
@@ -130,7 +121,6 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
         avifPixelFormat yuvFormat = AVIF_PIXEL_FORMAT_NONE;
         switch (codec->internal->image->fmt) {
             case AVM_IMG_FMT_I420:
-            case AVM_IMG_FMT_AVMI420:
             case AVM_IMG_FMT_I42016:
                 yuvFormat = AVIF_PIXEL_FORMAT_YUV420;
                 break;
@@ -144,7 +134,6 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
                 break;
             case AVM_IMG_FMT_NONE:
             case AVM_IMG_FMT_YV12:
-            case AVM_IMG_FMT_AVMYV12:
             case AVM_IMG_FMT_YV1216:
             default:
                 return AVIF_FALSE;
@@ -153,13 +142,6 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
             yuvFormat = AVIF_PIXEL_FORMAT_YUV400;
         }
 
-        if (image->width && image->height) {
-            if ((image->width != codec->internal->image->d_w) || (image->height != codec->internal->image->d_h) ||
-                (image->depth != codec->internal->image->bit_depth) || (image->yuvFormat != yuvFormat)) {
-                // Throw it all out
-                avifImageFreePlanes(image, AVIF_PLANES_ALL);
-            }
-        }
         image->width = codec->internal->image->d_w;
         image->height = codec->internal->image->d_h;
         image->depth = codec->internal->image->bit_depth;
@@ -214,15 +196,8 @@ static avifBool avmCodecGetNextImage(struct avifCodec * codec,
             image->imageOwnsYUVPlanes = AVIF_FALSE;
         }
     } else {
-        // Alpha plane - ensure image is correct size, fill color
+        // Alpha plane - set image to correct size, fill alpha
 
-        if (image->width && image->height) {
-            if ((image->width != codec->internal->image->d_w) || (image->height != codec->internal->image->d_h) ||
-                (image->depth != codec->internal->image->bit_depth)) {
-                // Alpha plane doesn't match previous alpha plane decode, bail out
-                return AVIF_FALSE;
-            }
-        }
         image->width = codec->internal->image->d_w;
         image->height = codec->internal->image->d_h;
         image->depth = codec->internal->image->bit_depth;
@@ -479,8 +454,6 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
     encoderChanges &= ~AVIF_ENCODER_CHANGE_SCALING_MODE;
 
     if (!codec->internal->encoderInitialized) {
-        AVIF_CHECKRES(avifCheckCodecVersionAVM());
-
         int avmCpuUsed = -1;
         if (encoder->speed != AVIF_SPEED_DEFAULT) {
             avmCpuUsed = AVIF_CLAMP(encoder->speed, 0, 9);
@@ -509,27 +482,26 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
         // Profile 2.  8-bit and 10-bit 4:2:2
         //            12-bit 4:0:0, 4:2:0, 4:2:2 and 4:4:4
         uint8_t seqProfile = 0;
-#if defined(CONFIG_AV2_PROFILES) && CONFIG_AV2_PROFILES
         if (image->depth != 8 && image->depth != 10) {
             avifDiagnosticsPrintf(codec->diag, "%d-bit is not supported in AV2 encoder.", image->depth);
             return AVIF_RESULT_INVALID_ARGUMENT;
         }
-        // Based on https://gitlab.com/AOMediaCodec/avm/-/blob/main/av2/common/enums.h?ref_type=fcab0163f471b38fe593672fcbd24a6beb0be82e#L272
+        // Based on AV2 spec Section A.3 Profiles.
         if (alpha) {
-            seqProfile = 3; // Main_420_10
+            seqProfile = 1; // Main_420_10_IP1
         } else {
             switch (image->yuvFormat) {
                 case AVIF_PIXEL_FORMAT_YUV444:
-                    seqProfile = 5; // Main_444_10
+                    seqProfile = 4; // Main_444_10_IP1
                     break;
                 case AVIF_PIXEL_FORMAT_YUV422:
-                    seqProfile = 4; // Main_422_10
+                    seqProfile = 3; // Main_422_10_IP1
                     break;
                 case AVIF_PIXEL_FORMAT_YUV420:
-                    seqProfile = 3; // Main_420_10
+                    seqProfile = 1; // Main_420_10_IP1
                     break;
                 case AVIF_PIXEL_FORMAT_YUV400:
-                    seqProfile = 3; // Main_420_10
+                    seqProfile = 1; // Main_420_10_IP1
                     break;
                 case AVIF_PIXEL_FORMAT_NONE:
                 case AVIF_PIXEL_FORMAT_COUNT:
@@ -537,37 +509,6 @@ static avifResult avmCodecEncodeImage(avifCodec * codec,
                     break;
             }
         }
-#else
-        if (image->depth == 12) {
-            // Only seqProfile 2 can handle 12 bit
-            seqProfile = 2;
-        } else {
-            // 8-bit or 10-bit
-
-            if (alpha) {
-                seqProfile = 0;
-            } else {
-                switch (image->yuvFormat) {
-                    case AVIF_PIXEL_FORMAT_YUV444:
-                        seqProfile = 1;
-                        break;
-                    case AVIF_PIXEL_FORMAT_YUV422:
-                        seqProfile = 2;
-                        break;
-                    case AVIF_PIXEL_FORMAT_YUV420:
-                        seqProfile = 0;
-                        break;
-                    case AVIF_PIXEL_FORMAT_YUV400:
-                        seqProfile = 0;
-                        break;
-                    case AVIF_PIXEL_FORMAT_NONE:
-                    case AVIF_PIXEL_FORMAT_COUNT:
-                    default:
-                        break;
-                }
-            }
-        }
-#endif
 
         cfg->g_profile = seqProfile;
         cfg->g_bit_depth = image->depth;

@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "avif/avif.h"
 #include "aviftest_helpers.h"
@@ -126,6 +127,59 @@ TEST(AvifDecodeTest, PeekCompatibleFileTypeBad2) {
                                0x08, 0x00, 0xd7, 0x89, 0xdb, 0x7f};
   avifROData input = {kData, sizeof(kData)};
   EXPECT_FALSE(avifPeekCompatibleFileType(&input));
+}
+
+struct NonPersistentIO {
+  std::vector<uint8_t> data;
+  avifROData ro_data;
+};
+
+// Every read call will explicitly invalidate the pointer returned by the
+// previous read call to ensure non-persistent IO.
+avifResult NonPersistentRead(struct avifIO* io, uint32_t flags, uint64_t offset,
+                             size_t size, avifROData* out) {
+  NonPersistentIO* io_data = reinterpret_cast<NonPersistentIO*>(io->data);
+  if (flags != 0 || offset > io_data->ro_data.size) {
+    return AVIF_RESULT_IO_ERROR;
+  }
+  uint64_t available_size = io_data->ro_data.size - offset;
+  if (size > available_size) {
+    size = static_cast<size_t>(available_size);
+  }
+  // Clear the existing vector.
+  std::vector<uint8_t>().swap(io_data->data);
+  // Copy new data into the vector.
+  io_data->data.reserve(size);
+  io_data->data.assign(io_data->ro_data.data + offset,
+                       io_data->ro_data.data + offset + size);
+  // Set the output.
+  out->data = io_data->data.data();
+  out->size = size;
+  return AVIF_RESULT_OK;
+}
+
+TEST(AvifDecodeTest, NonPersistentIOBug506387278) {
+  const testutil::AvifRwData avif =
+      testutil::ReadFile(std::string(data_path) + "poc_b_506387278.avif");
+  NonPersistentIO io_data;
+  io_data.ro_data = {/*.data=*/avif.data, /*.size=*/avif.size};
+  avifIO io = {/*.destroy=*/nullptr,
+               /*.read=*/NonPersistentRead,
+               /*.write=*/nullptr,
+               /*.sizeHint=*/avif.size,
+               /*.persistent=*/false,
+               /*.data=*/&io_data};
+  // |io| must outlive the decoder.
+  DecoderPtr decoder(avifDecoderCreate());
+  ASSERT_NE(decoder, nullptr);
+  avifDecoderSetIO(decoder.get(), &io);
+  ASSERT_EQ(avifDecoderParse(decoder.get()), AVIF_RESULT_OK);
+  EXPECT_EQ(decoder->imageSequenceTrackPresent, AVIF_TRUE);
+  EXPECT_EQ(decoder->imageCount, 2);
+  if (testutil::Av1DecoderAvailable()) {
+    EXPECT_EQ(avifDecoderNextImage(decoder.get()), AVIF_RESULT_OK);
+    EXPECT_EQ(avifDecoderNextImage(decoder.get()), AVIF_RESULT_OK);
+  }
 }
 
 }  // namespace

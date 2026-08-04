@@ -79,7 +79,7 @@ extern "C" {
 // to leverage in-development code without breaking their stable builds.
 #define AVIF_VERSION_MAJOR 1
 #define AVIF_VERSION_MINOR 4
-#define AVIF_VERSION_PATCH 1
+#define AVIF_VERSION_PATCH 2
 #define AVIF_VERSION_DEVEL 0
 #define AVIF_VERSION \
     ((AVIF_VERSION_MAJOR * 1000000) + (AVIF_VERSION_MINOR * 10000) + (AVIF_VERSION_PATCH * 100) + AVIF_VERSION_DEVEL)
@@ -154,7 +154,7 @@ AVIF_API unsigned int avifLibYUVVersion(void); // returns 0 if libavif wasn't co
 // ---------------------------------------------------------------------------
 // Memory management
 
-// Returns NULL on memory allocation failure.
+// Returns NULL on memory allocation failure or if size is 0.
 AVIF_API void * avifAlloc(size_t size);
 AVIF_API void avifFree(void * p);
 
@@ -1415,6 +1415,9 @@ AVIF_API avifResult avifDecoderReadFile(avifDecoder * decoder, avifImage * image
 // to reset the internal decoder back to before the first frame. Calling either
 // avifDecoderSetSource() or avifDecoderParse() will automatically Reset the decoder.
 //
+// The decoder must be destroyed once there is no need for further parsing or decoding.
+// Reusing the decoder instance for another file is not recommended. Call avifDecoderCreate() instead.
+//
 // avifDecoderSetSource() allows you not only to choose whether to parse tracks or
 // items in a file containing both, but switch between sources without having to
 // Parse again. Normally AVIF_DECODER_SOURCE_AUTO is enough for the common path.
@@ -1648,6 +1651,7 @@ typedef uint32_t avifAddImageFlags;
 //
 // Usage / function call order is:
 // * avifEncoderCreate()
+//
 // - Still image:
 //   * avifEncoderAddImage() [exactly once]
 // - Still image grid:
@@ -1661,11 +1665,15 @@ typedef uint32_t avifAddImageFlags;
 // - Still layered grid:
 //   * Set encoder->extraLayerCount correctly
 //   * avifEncoderAddImageGrid() ... [exactly encoder->extraLayerCount+1 times]
+//
 // * avifEncoderFinish()
 // * avifEncoderDestroy()
 //
 // The image passed to avifEncoderAddImage() or avifEncoderAddImageGrid() is encoded during the
 // call (which may be slow) and can be freed after the function returns.
+//
+// The encoder must be destroyed after avifEncoderFinish() is called.
+// The encoder instance cannot be reused. Call avifEncoderCreate() instead.
 //
 // durationInTimescales is ignored if AVIF_ADD_IMAGE_FLAG_SINGLE is set in addImageFlags,
 // or if we are encoding a layered image.

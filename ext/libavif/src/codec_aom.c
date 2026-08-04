@@ -90,6 +90,14 @@ static void aomCodecDestroyInternal(avifCodec * codec)
     avifFree(codec->internal);
 }
 
+// Writes a libaom error code and error detail into diagnostics.
+static void aomDiagPrintf(avifDiagnostics * diag, const char * func, const aom_codec_ctx_t * ctx)
+{
+    const char * error = aom_codec_error(ctx);
+    const char * error_detail = aom_codec_error_detail(ctx);
+    avifDiagnosticsPrintf(diag, "%s failed: %s: %s", func, error, error_detail ? error_detail : "no error detail");
+}
+
 #if defined(AVIF_CODEC_AOM_DECODE)
 
 static avifBool aomCodecGetNextImage(struct avifCodec * codec,
@@ -101,6 +109,11 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
     assert(sample);
 
     aom_codec_iface_t * const decoderInterface = aom_codec_av1_dx();
+#if !defined(AOM_CTRL_AOMD_SET_FRAME_SIZE_LIMIT)
+    // The AOMD_SET_FRAME_SIZE_LIMIT codec control (added in libaom v3.14.0)
+    // can be used to impose a maximum on AV1 frame size. When
+    // AOMD_SET_FRAME_SIZE_LIMIT is not available, approximate it with
+    // aom_codec_peek_stream_info() and avifDimensionsTooLarge().
     struct aom_codec_stream_info streamInfo = { 0 };
     aom_codec_err_t err = aom_codec_peek_stream_info(decoderInterface, sample->data.data, sample->data.size, &streamInfo);
     if (err != AOM_CODEC_OK) {
@@ -119,6 +132,7 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
             return AVIF_FALSE;
         }
     }
+#endif // !defined(AOM_CTRL_AOMD_SET_FRAME_SIZE_LIMIT)
 
     if (!codec->internal->decoderInitialized) {
         aom_codec_dec_cfg_t cfg;
@@ -127,14 +141,23 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
         cfg.allow_lowbitdepth = 1;
 
         if (aom_codec_dec_init(&codec->internal->decoder, decoderInterface, &cfg, 0)) {
+            aomDiagPrintf(codec->diag, "aom_codec_dec_init()", &codec->internal->decoder);
             return AVIF_FALSE;
         }
         codec->internal->decoderInitialized = AVIF_TRUE;
 
+#if defined(AOM_CTRL_AOMD_SET_FRAME_SIZE_LIMIT)
+        if (codec->imageSizeLimit != 0 && aom_codec_control(&codec->internal->decoder, AOMD_SET_FRAME_SIZE_LIMIT, codec->imageSizeLimit)) {
+            aomDiagPrintf(codec->diag, "aom_codec_control(AOMD_SET_FRAME_SIZE_LIMIT)", &codec->internal->decoder);
+            return AVIF_FALSE;
+        }
+#endif // defined(AOM_CTRL_AOMD_SET_FRAME_SIZE_LIMIT)
         if (aom_codec_control(&codec->internal->decoder, AV1D_SET_OUTPUT_ALL_LAYERS, codec->allLayers)) {
+            aomDiagPrintf(codec->diag, "aom_codec_control(AV1D_SET_OUTPUT_ALL_LAYERS)", &codec->internal->decoder);
             return AVIF_FALSE;
         }
         if (aom_codec_control(&codec->internal->decoder, AV1D_SET_OPERATING_POINT, codec->operatingPoint)) {
+            aomDiagPrintf(codec->diag, "aom_codec_control(AV1D_SET_OPERATING_POINT)", &codec->internal->decoder);
             return AVIF_FALSE;
         }
 
@@ -160,11 +183,7 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
         } else if (sample) {
             codec->internal->iter = NULL;
             if (aom_codec_decode(&codec->internal->decoder, sample->data.data, sample->data.size, NULL)) {
-                const char * error_detail = aom_codec_error_detail(&codec->internal->decoder);
-                avifDiagnosticsPrintf(codec->diag,
-                                      "aom_codec_decode() failed: %s: %s",
-                                      aom_codec_error(&codec->internal->decoder),
-                                      error_detail ? error_detail : "no error detail");
+                aomDiagPrintf(codec->diag, "aom_codec_decode()", &codec->internal->decoder);
                 return AVIF_FALSE;
             }
             spatialID = sample->spatialID;
@@ -191,7 +210,6 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
         avifPixelFormat yuvFormat = AVIF_PIXEL_FORMAT_NONE;
         switch (codec->internal->image->fmt) {
             case AOM_IMG_FMT_I420:
-            case AOM_IMG_FMT_AOMI420:
             case AOM_IMG_FMT_I42016:
                 yuvFormat = AVIF_PIXEL_FORMAT_YUV420;
                 break;
@@ -210,7 +228,6 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
             case AOM_IMG_FMT_NV12:
 #endif
             case AOM_IMG_FMT_YV12:
-            case AOM_IMG_FMT_AOMYV12:
             case AOM_IMG_FMT_YV1216:
             default:
                 return AVIF_FALSE;
@@ -219,13 +236,6 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
             yuvFormat = AVIF_PIXEL_FORMAT_YUV400;
         }
 
-        if (image->width && image->height) {
-            if ((image->width != codec->internal->image->d_w) || (image->height != codec->internal->image->d_h) ||
-                (image->depth != codec->internal->image->bit_depth) || (image->yuvFormat != yuvFormat)) {
-                // Throw it all out
-                avifImageFreePlanes(image, AVIF_PLANES_ALL);
-            }
-        }
         image->width = codec->internal->image->d_w;
         image->height = codec->internal->image->d_h;
         image->depth = codec->internal->image->bit_depth;
@@ -247,15 +257,8 @@ static avifBool aomCodecGetNextImage(struct avifCodec * codec,
         }
         image->imageOwnsYUVPlanes = AVIF_FALSE;
     } else {
-        // Alpha plane - ensure image is correct size, fill color
+        // Alpha plane - set image to correct size, fill alpha
 
-        if (image->width && image->height) {
-            if ((image->width != codec->internal->image->d_w) || (image->height != codec->internal->image->d_h) ||
-                (image->depth != codec->internal->image->bit_depth)) {
-                // Alpha plane doesn't match previous alpha plane decode, bail out
-                return AVIF_FALSE;
-            }
-        }
         image->width = codec->internal->image->d_w;
         image->height = codec->internal->image->d_h;
         image->depth = codec->internal->image->bit_depth;
@@ -512,12 +515,13 @@ static avifBool avifProcessAOMOptionsPostInit(avifCodec * codec, avifBool alpha)
             key += shortPrefixLen;
         }
         if (aom_codec_set_option(&codec->internal->encoder, key, entry->value) != AOM_CODEC_OK) {
+            const char * error_detail = aom_codec_error_detail(&codec->internal->encoder);
             avifDiagnosticsPrintf(codec->diag,
                                   "aom_codec_set_option(\"%s\", \"%s\") failed: %s: %s",
                                   key,
                                   entry->value,
                                   aom_codec_error(&codec->internal->encoder),
-                                  aom_codec_error_detail(&codec->internal->encoder));
+                                  error_detail ? error_detail : "no error detail");
             return AVIF_FALSE;
         }
 #else  // !defined(HAVE_AOM_CODEC_SET_OPTION)
@@ -666,16 +670,24 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         codec->internal->qualityFirstLayer = quality;
     }
 
-    // Determine whether the encoder should be configured to use intra frames only, either by setting aomUsage to AOM_USAGE_ALL_INTRA,
-    // or by manually configuring the encoder so all frames will be key frames (if AOM_USAGE_ALL_INTRA isn't available).
+    // Determine whether the encoder should be configured to use intra frames only, either by setting aomUsage to
+    // AOM_USAGE_ALL_INTRA, or by manually configuring the encoder so all frames will be key frames (if AOM_USAGE_ALL_INTRA isn't
+    // available).
 
-    // All-intra encoding is beneficial when encoding a two-layer image item and the quality of the first layer is very low.
-    // Switching to all-intra encoding comes with the following benefits:
+    // For libaom versions older than 3.14.0, all-intra encoding is beneficial when encoding a two-layer image item and the
+    // quality of the first layer is very low. Switching to all-intra encoding comes with the following benefits:
     // - The first layer will be smaller than the second layer (which is often not the case with inter encoding)
-    // - Outputs have predictable file sizes: the sum of the first layer (quality <= 10) plus the second layer (quality set by the caller)
-    // - Because the first layer is very small, layered encoding overhead is also smaller and more stable (about 5-8% for quality 40 and 2-4% for quality 60)
-    // - Option of choosing tune IQ (which requires AOM_USAGE_ALL_INTRA)
-    avifBool useAllIntraForLayered = encoder->extraLayerCount == 1 &&
+    // - Outputs have predictable file sizes: the sum of the first layer (quality <= 10) plus the second layer (quality set by
+    //   the caller)
+    // - Because the first layer is very small, layered encoding overhead is also smaller and more stable (about 5-8% for quality
+    //   40 and 2-4% for quality 60)
+    // Note: libaom 3.14.0 introduces a mechanism to completely control each layer's QP, and extends tune IQ to inter-frame
+    // encoding modes (AOM_USAGE_GOOD_QUALITY and AOM_USAGE_REALTIME), so there's no need to use all-intra encoding for layered.
+
+    // aom_codec.h says: aom_codec_version() == (major<<16 | minor<<8 | patch)
+    static const int aomVersion_3_14_0 = (3 << 16) | (14 << 8);
+    const int aomVersion = aom_codec_version();
+    avifBool useAllIntraForLayered = aomVersion < aomVersion_3_14_0 && encoder->extraLayerCount == 1 &&
                                      codec->internal->qualityFirstLayer <= TWO_LAYER_ALL_INTRA_QUALITY_THRESHOLD;
     // Also use all-intra encoding when encoding still images.
     avifBool useAllIntra = (addImageFlags & AVIF_ADD_IMAGE_FLAG_SINGLE) || useAllIntraForLayered;
@@ -713,9 +725,7 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         }
     }
 
-    // aom_codec.h says: aom_codec_version() == (major<<16 | minor<<8 | patch)
     static const int aomVersion_2_0_0 = (2 << 16);
-    const int aomVersion = aom_codec_version();
     if (aomVersion <= aomVersion_2_0_0) {
         // Issue with v1.0.0-errata1-avif: https://github.com/AOMediaCodec/libavif/issues/56
         // Issue with v2.0.0: https://aomedia-review.googlesource.com/q/I26a39791f820b4d4e1d63ff7141f594c3c7181f5
@@ -752,13 +762,18 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
                 // AOM_TUNE_IQ has been tuned for the YCbCr family of color spaces, and is favored for
                 // its low perceptual distortion. AOM_TUNE_IQ partially generalizes to, and benefits
                 // from other "YUV-like" spaces (e.g. YCgCo and ICtCp) including monochrome (luma only).
-                // AOM_TUNE_IQ sets --deltaq-mode=6 which can only be used in all intra mode.
+                //
                 // AOM_TUNE_IQ was introduced in libaom v3.12.0 but it has significantly different bit
                 // allocation characteristics compared to v3.13.0. AOM_TUNE_IQ is used by default
                 // starting with v3.13.0 for fewer behavior changes in libavif.
+                //
+                // Starting with libaom v3.14.0, AOM_TUNE_IQ supports all-intra, good-quality and
+                // realtime modes (for single and layered images). Prior to v3.14.0, AOM_TUNE_IQ is only
+                // supported in all-intra mode.
                 static const int aomVersion_3_13_0 = (3 << 16) | (13 << 8);
-                if (image->matrixCoefficients != AVIF_MATRIX_COEFFICIENTS_IDENTITY && aomUsage == AOM_USAGE_ALL_INTRA &&
-                    aomVersion >= aomVersion_3_13_0) {
+                if (image->matrixCoefficients != AVIF_MATRIX_COEFFICIENTS_IDENTITY &&
+                    ((aomUsage == AOM_USAGE_ALL_INTRA && aomVersion >= aomVersion_3_13_0) ||
+                     (encoder->extraLayerCount > 0 && aomVersion >= aomVersion_3_14_0))) {
                     libavifDefaultTuneMetric = AOM_TUNE_IQ;
                 }
 #endif
@@ -906,6 +921,14 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
             // For layered image, disable lagged encoding to always get output
             // frame for each input frame.
             cfg->g_lag_in_frames = 0;
+
+            if (aomVersion >= aomVersion_3_14_0) {
+                // Disable QP offsets, so CQ level = frame QP for every frame.
+                // This feature requires libaom 3.14.0 or later.
+                if (cfg->rc_end_usage == AOM_Q) {
+                    cfg->use_fixed_qp_offsets = 2;
+                }
+            }
         }
         if (disableLaggedOutput) {
             cfg->g_lag_in_frames = 0;
@@ -955,10 +978,7 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
             encoderFlags |= AOM_CODEC_USE_HIGHBITDEPTH;
         }
         if (aom_codec_enc_init(&codec->internal->encoder, encoderInterface, cfg, encoderFlags) != AOM_CODEC_OK) {
-            avifDiagnosticsPrintf(codec->diag,
-                                  "aom_codec_enc_init() failed: %s: %s",
-                                  aom_codec_error(&codec->internal->encoder),
-                                  aom_codec_error_detail(&codec->internal->encoder));
+            aomDiagPrintf(codec->diag, "aom_codec_enc_init()", &codec->internal->encoder);
             return AVIF_RESULT_UNKNOWN_ERROR;
         }
         codec->internal->encoderInitialized = AVIF_TRUE;
@@ -979,11 +999,13 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         if (encoder->extraLayerCount > 0) {
             int layerCount = encoder->extraLayerCount + 1;
             if (aom_codec_control(&codec->internal->encoder, AOME_SET_NUMBER_SPATIAL_LAYERS, layerCount) != AOM_CODEC_OK) {
+                aomDiagPrintf(codec->diag, "aom_codec_control(AOME_SET_NUMBER_SPATIAL_LAYERS)", &codec->internal->encoder);
                 return AVIF_RESULT_UNKNOWN_ERROR;
             }
         }
         if (aomCpuUsed != -1) {
             if (aom_codec_control(&codec->internal->encoder, AOME_SET_CPUUSED, aomCpuUsed) != AOM_CODEC_OK) {
+                aomDiagPrintf(codec->diag, "aom_codec_control(AOME_SET_CPUUSED)", &codec->internal->encoder);
                 return AVIF_RESULT_UNKNOWN_ERROR;
             }
         }
@@ -1049,6 +1071,7 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
 
         if (useLibavifDefaultTuneMetric &&
             aom_codec_control(&codec->internal->encoder, AOME_SET_TUNING, libavifDefaultTuneMetric) != AOM_CODEC_OK) {
+            aomDiagPrintf(codec->diag, "aom_codec_control(AOME_SET_TUNING)", &codec->internal->encoder);
             return AVIF_RESULT_UNKNOWN_ERROR;
         }
         if (!avifProcessAOMOptionsPostInit(codec, alpha)) {
@@ -1058,6 +1081,7 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         if (image->depth == 12) {
             // The encoder may produce integer overflows with 12-bit input when loop restoration is enabled. See crbug.com/aomedia/42302587.
             if (aom_codec_control(&codec->internal->encoder, AV1E_SET_ENABLE_RESTORATION, 0) != AOM_CODEC_OK) {
+                aomDiagPrintf(codec->diag, "aom_codec_control(AV1E_SET_ENABLE_RESTORATION)", &codec->internal->encoder);
                 return AVIF_RESULT_UNKNOWN_ERROR;
             }
         }
@@ -1109,10 +1133,7 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         if (quantizerUpdated || dimensionsChanged) {
             aom_codec_err_t err = aom_codec_enc_config_set(&codec->internal->encoder, cfg);
             if (err != AOM_CODEC_OK) {
-                avifDiagnosticsPrintf(codec->diag,
-                                      "aom_codec_enc_config_set() failed: %s: %s",
-                                      aom_codec_error(&codec->internal->encoder),
-                                      aom_codec_error_detail(&codec->internal->encoder));
+                aomDiagPrintf(codec->diag, "aom_codec_enc_config_set()", &codec->internal->encoder);
                 return AVIF_RESULT_UNKNOWN_ERROR;
             }
         }
@@ -1159,6 +1180,15 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
     if ((aomScalingMode.h_scaling_mode != AOME_NORMAL) || (aomScalingMode.v_scaling_mode != AOME_NORMAL)) {
         // AOME_SET_SCALEMODE only applies to next frame (layer), so we have to set it every time.
         aom_codec_control(&codec->internal->encoder, AOME_SET_SCALEMODE, &aomScalingMode);
+
+        // Check if we need to avoid a multithreading crash in loop restoration
+        // code in libaom < 3.13.3 when the first layer of a layered image is
+        // scaled. See https://aomedia-review.googlesource.com/208901.
+        static const int aomVersion_3_13_3 = (3 << 16) | (13 << 8) | 3;
+        if (aomVersion < aomVersion_3_13_3 && encoder->maxThreads > 1 && encoder->extraLayerCount > 0 &&
+            codec->internal->currentLayer == 0) {
+            aom_codec_control(&codec->internal->encoder, AV1E_SET_ENABLE_RESTORATION, 0);
+        }
     }
 
     aom_image_t aomImage;
@@ -1284,10 +1314,7 @@ static avifResult aomCodecEncodeImage(avifCodec * codec,
         aom_img_free(&aomImage);
     }
     if (encodeErr != AOM_CODEC_OK) {
-        avifDiagnosticsPrintf(codec->diag,
-                              "aom_codec_encode() failed: %s: %s",
-                              aom_codec_error(&codec->internal->encoder),
-                              aom_codec_error_detail(&codec->internal->encoder));
+        aomDiagPrintf(codec->diag, "aom_codec_encode()", &codec->internal->encoder);
         return AVIF_RESULT_UNKNOWN_ERROR;
     }
 
@@ -1328,10 +1355,7 @@ static avifBool aomCodecEncodeFinish(avifCodec * codec, avifCodecEncodeOutput * 
     for (;;) {
         // flush encoder
         if (aom_codec_encode(&codec->internal->encoder, NULL, 0, 1, 0) != AOM_CODEC_OK) {
-            avifDiagnosticsPrintf(codec->diag,
-                                  "aom_codec_encode() with img=NULL failed: %s: %s",
-                                  aom_codec_error(&codec->internal->encoder),
-                                  aom_codec_error_detail(&codec->internal->encoder));
+            aomDiagPrintf(codec->diag, "aom_codec_encode() with img=NULL", &codec->internal->encoder);
             return AVIF_FALSE;
         }
 

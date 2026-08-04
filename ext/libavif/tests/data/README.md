@@ -728,6 +728,17 @@ Source : created from a personal photo, converted to HDR using Photoshop, then s
 see https://helpx.adobe.com/camera-raw/using/hdr-output.html and
 https://gregbenzphotography.com/hdr-images/jpg-hdr-gain-maps-in-adobe-camera-raw/
 
+
+### File [seine_sdr_different_gainmap_srgb.jpg](seine_sdr_different_gainmap_srgb.jpg)
+
+![](seine_sdr_different_gainmap_srgb.jpg)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+Source : manually edited from seine_sdr_gainmap_srgb.jpg (extracted the gainmap
+with a hex editor, added some text on it with macOS Preview, used a hex editor 
+again to add it back to the file and update the image size in the MPF segment)
+
 ### File [seine_hdr_rec2020.avif](seine_hdr_rec2020.avif)
 
 ![](seine_hdr_rec2020.avif)
@@ -969,6 +980,14 @@ changed to depth using a hex editor.
 License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
 
 Source: Random frames generated with libavif.
+
+### File [poc_b_506387278.avif](poc_b_506387278.avif)
+
+![](poc_b_506387278.avif)
+
+License: [same as libavif](https://github.com/AOMediaCodec/libavif/blob/main/LICENSE)
+
+Source: https://b.corp.google.com/issues/506387278
 
 ### File [webp_logo_animated.y4m](webp_logo_animated.y4m)
 

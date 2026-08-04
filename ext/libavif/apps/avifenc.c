@@ -222,10 +222,10 @@ static void syntaxLong(void)
     printf("    --mini                            : EXPERIMENTAL: Use reduced header if possible (backward-incompatible)\n");
 #endif
     printf("    -l,--lossless                     : Set all defaults to encode losslessly, and emit warnings when settings/input don't allow for it\n");
-    printf("    -d,--depth D[,Dextension]         : D is the output bit depth per channel. D must be 8, 10 or 12. (JPEG/PNG only; y4m or stdin: bit depth is retained)\n");
+    printf("    -d,--depth D[,Dextension]         : D is the output bit depth per channel. D must be 8, 10 or 12. (JPEG/PNG only; y4m: D must match the input bit depth, and Dextension is unsupported)\n");
     printf("                                        If specified, Dextension adds a hidden encoded image of Dextension bit depth in the same file as the primary image to reach 16-bit depth at decoding.\n");
     printf("                                        See avifSampleTransformRecipe for the supported combinations (8,8 and 12,4 and 12,8).\n");
-    printf("    -y,--yuv FORMAT                   : Output format, one of 'auto' (default), 444, 422, 420 or 400. Ignored for y4m or stdin (y4m format is retained)\n");
+    printf("    -y,--yuv FORMAT                   : Output format, one of 'auto' (default), 444, 422, 420 or 400. Ignored for y4m (y4m format is retained)\n");
     printf("                                        For JPEG, auto honors the JPEG's internal format, if possible. For grayscale PNG, auto defaults to 400. For all other cases, auto defaults to 444\n");
     printf("    -p,--premultiply                  : Premultiply color by the alpha channel and signal this in the AVIF\n");
     printf("    --sharpyuv                        : Use sharp RGB to YUV420 conversion (if supported). Ignored for y4m or if output is not 420.\n");
@@ -236,7 +236,7 @@ static void syntaxLong(void)
     printf("                                        T = transfer characteristics\n");
     printf("                                        M = matrix coefficients\n");
     printf("                                        Use 2 for any you wish to leave unspecified\n");
-    printf("    -r,--range RANGE                  : YUV range, one of 'limited' or 'l', 'full' or 'f'. (JPEG/PNG only, default: full; For y4m or stdin, range is retained)\n");
+    printf("    -r,--range RANGE                  : YUV range, one of 'limited' or 'l', 'full' or 'f'. (JPEG/PNG only, default: full; For y4m, range is retained)\n");
     printf("    --target-size S                   : Set target file size in bytes (up to 7 times slower)\n");
     printf("    --progressive                     : Automatically set parameters to encode a simple layered image supporting progressive rendering from a single input frame.\n");
     printf("    --layered                         : Encode a layered AVIF. Each input is encoded as one layer and at most %d layers can be encoded.\n",
@@ -545,6 +545,10 @@ static avifBool avifInputReadImage(avifInput * input,
 #if defined(AVIF_ENABLE_JPEG_GAIN_MAP_CONVERSION)
         if (cached->image->gainMap && cached->image->gainMap->image) {
             image->gainMap->image = avifImageCreateEmpty();
+            if (!image->gainMap->image) {
+                fprintf(stderr, "ERROR: Out of memory\n");
+                return AVIF_FALSE;
+            }
             const avifCropRect gainMapRect = { 0, 0, cached->image->gainMap->image->width, cached->image->gainMap->image->height };
             if (avifImageSetViewRect(image->gainMap->image, cached->image->gainMap->image, &gainMapRect) != AVIF_RESULT_OK) {
                 assert(AVIF_FALSE);
@@ -573,7 +577,7 @@ static avifBool avifInputReadImage(avifInput * input,
     avifAppSourceTiming * dstSourceTiming = sourceTiming;
     if (input->cacheEnabled) {
         if (!avifInputAddCachedImage(input)) {
-            fprintf(stderr, "ERROR: Out of memory");
+            fprintf(stderr, "ERROR: Out of memory\n");
             return AVIF_FALSE;
         }
         assert(imageIndex + 1 == input->cacheCount);
@@ -610,28 +614,42 @@ static avifBool avifInputReadImage(avifInput * input,
 
     const avifColorPrimaries colorPrimariesBefore = dstImage->colorPrimaries;
     const avifTransferCharacteristics transferCharacteristicsBefore = dstImage->transferCharacteristics;
-    if (avifReadImage(currentFile->filename,
-                      inputFormat,
-                      input->requestedFormat,
-                      input->requestedDepthExtension == 0 ? input->requestedDepth : 16,
-                      chromaDownsampling,
-                      ignoreColorProfile,
-                      ignoreExif,
-                      ignoreXMP,
-                      ignoreGainMap,
-                      UINT32_MAX,
-                      dstImage,
-                      dstDepth,
-                      dstSourceTiming,
-                      &input->frameIter) == AVIF_APP_FILE_FORMAT_UNKNOWN) {
+    const avifAppFileFormat actualInputFormat = avifReadImage(currentFile->filename,
+                                                              inputFormat,
+                                                              input->requestedFormat,
+                                                              input->requestedDepthExtension == 0 ? input->requestedDepth : 16,
+                                                              chromaDownsampling,
+                                                              ignoreColorProfile,
+                                                              ignoreExif,
+                                                              ignoreXMP,
+                                                              ignoreGainMap,
+                                                              UINT32_MAX,
+                                                              dstImage,
+                                                              dstDepth,
+                                                              dstSourceTiming,
+                                                              &input->frameIter);
+    if (actualInputFormat == AVIF_APP_FILE_FORMAT_UNKNOWN) {
         fprintf(stderr,
                 "ERROR: Couldn't read %s file %s\n",
                 avifFileFormatToString(inputFormat),
                 currentFile->filename == AVIF_FILENAME_STDIN ? "from standard input" : currentFile->filename);
         if (currentFile->filename == AVIF_FILENAME_STDIN && inputFormat == AVIF_APP_FILE_FORMAT_Y4M) {
-            fprintf(stderr, "Specify --input-format if the input is not y4m\n");
+            fprintf(stderr, "Specify --input-format if the standard input is not Y4M\n");
         }
         return AVIF_FALSE;
+    }
+    if (actualInputFormat == AVIF_APP_FILE_FORMAT_Y4M) {
+        if (input->requestedDepthExtension) {
+            fprintf(stderr, "ERROR: --depth %d,%d is not supported for Y4M input\n", input->requestedDepth, input->requestedDepthExtension);
+            return AVIF_FALSE;
+        }
+        if (input->requestedDepth && (input->requestedDepth != (int)dstImage->depth)) {
+            fprintf(stderr,
+                    "ERROR: --depth %d does not match Y4M bit depth %u; Y4M bit-depth conversion is not supported\n",
+                    input->requestedDepth,
+                    dstImage->depth);
+            return AVIF_FALSE;
+        }
     }
     if (!allowChangingCicp) {
         // Restore the previous primaries/transfer in case avifReadImage changed them.
@@ -643,7 +661,7 @@ static avifBool avifInputReadImage(avifInput * input,
         ++input->fileIndex;
     }
     if (dstSourceIsRGB) {
-        *dstSourceIsRGB = (inputFormat != AVIF_APP_FILE_FORMAT_Y4M);
+        *dstSourceIsRGB = (actualInputFormat != AVIF_APP_FILE_FORMAT_Y4M);
     }
     if (dstSettings) {
         *dstSettings = &currentFile->settings;
@@ -993,6 +1011,10 @@ static avifBool avifEncodeRestOfLayeredImage(avifEncoder * encoder,
             // reversed lerp, so that last layer reaches exact targetQuality
             encoder->quality = targetQuality - (targetQuality - PROGRESSIVE_START_QUALITY) *
                                                    (encoder->extraLayerCount - layerIndex) / encoder->extraLayerCount;
+            // We scaled the first layer by a half (numerator: 1, denominator: 2).
+            // Don't perform any scaling for the second layer (numerator: 1, denominator: 1).
+            const avifScalingMode scalingMode = { { 1, 1 }, { 1, 1 } };
+            encoder->scalingMode = scalingMode;
         } else {
             const avifInputFile * nextFile = avifInputGetFile(input, layerIndex);
             // main() function should set number of layers to number of input,
@@ -1143,7 +1165,7 @@ static avifBool avifEncodeImagesFixedQuality(const avifSettings * settings,
 
     char manualTilingStr[128];
     snprintf(manualTilingStr, sizeof(manualTilingStr), "tileRowsLog2 [%d], tileColsLog2 [%d]", encoder->tileRowsLog2, encoder->tileColsLog2);
-
+    // Note: this is mirrored in apps/avifgainmaputil/imageio.cc, changes here may be mirrored there if relevant.
     printf("Encoding with initial settings: codec '%s' speed [%s], color quality [%d (%s)], alpha quality [%d (%s)]%s, %s, %d worker thread(s), please wait...\n",
            codecName ? codecName : "none",
            speedStr,
@@ -1160,8 +1182,11 @@ static avifBool avifEncodeImagesFixedQuality(const avifSettings * settings,
         // we should not reach here.
         assert(encoder->quality >= PROGRESSIVE_WORST_QUALITY);
         // Encode the base layer with a very low quality to ensure a small encoded size.
-        encoder->quality = 2;
+        encoder->quality = 10;
         // Low alpha quality resulted in weird artifact, so we don't do it.
+        // For further size savings, scale the first layer by a half (numerator: 1, denominator: 2).
+        const avifScalingMode scalingMode = { { 1, 2 }, { 1, 2 } };
+        encoder->scalingMode = scalingMode;
     }
 
     if (settings->layers > 1) {
@@ -2604,7 +2629,7 @@ int main(int argc, char * argv[])
                   settings.layers > 1 ? AVIF_PROGRESSIVE_STATE_AVAILABLE : AVIF_PROGRESSIVE_STATE_UNAVAILABLE);
 
     avifEncodedByteSizes byteSizes = { 0, 0, 0 };
-    if (!avifEncodeImages(&settings, &input, firstFile, image, (const avifImage * const *)gridCells, &raw, &byteSizes)) {
+    if (!avifEncodeImages(&settings, &input, firstFile, image, (const avifImage **)gridCells, &raw, &byteSizes)) {
         goto cleanup;
     }
 
