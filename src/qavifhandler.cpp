@@ -1211,17 +1211,13 @@ bool QAVIFHandler::jumpToNextImage()
 
     if (m_decoder->imageIndex >= 0) {
         if (m_decoder->imageCount < 2) {
-            m_parseState = ParseAvifSuccess;
-            return true;
+            // single image, there is no next image
+            return false;
         }
 
-        if (m_decoder->imageIndex >= m_decoder->imageCount - 1) { // start from beginning
-            decodeResult = avifDecoderReset(m_decoder);
-            if (decodeResult != AVIF_RESULT_OK) {
-                qWarning("ERROR in avifDecoderReset: %s", avifResultToString(decodeResult));
-                m_parseState = ParseAvifError;
-                return false;
-            }
+        if (m_decoder->imageIndex >= m_decoder->imageCount - 1) {
+            // do not start from beginning when at the end already
+            return false;
         }
     }
 
