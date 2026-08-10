@@ -1207,8 +1207,6 @@ bool QAVIFHandler::jumpToNextImage()
         return false;
     }
 
-    avifResult decodeResult;
-
     if (m_decoder->imageIndex >= 0) {
         if (m_decoder->imageCount < 2) {
             // single image, there is no next image
@@ -1221,7 +1219,7 @@ bool QAVIFHandler::jumpToNextImage()
         }
     }
 
-    decodeResult = avifDecoderNextImage(m_decoder);
+    avifResult decodeResult = avifDecoderNextImage(m_decoder);
 
     if (decodeResult != AVIF_RESULT_OK) {
         qWarning("ERROR: Failed to decode Next image in sequence: %s", avifResultToString(decodeResult));
