@@ -51,10 +51,26 @@ static void *Memset16(void *dest, int val, size_t length) {
 static void FillImage(aom_image_t *img, uint8_t val) {
   for (int p = 0; p < 3; ++p) {
     uint8_t *buf = img->planes[p];
-    const int h = p == 0 ? (int)img->d_h : (int)((img->d_h + 1) / 2);
-    const int w = p == 0 ? (int)img->d_w : (int)((img->d_w + 1) / 2);
+    const int h = p == 0 ? (int)img->h : (int)((img->h + 1) / 2);
+    const int w = p == 0 ? (int)img->w : (int)((img->w + 1) / 2);
     for (int r = 0; r < h; ++r) {
       memset(buf, val, w);
+      buf += img->stride[p];
+    }
+  }
+}
+
+static void FillImageRandom(aom_image_t *img) {
+  ::libaom_test::ACMRandom rnd;
+  rnd.Reset(::libaom_test::ACMRandom::DeterministicSeed());
+  for (int p = 0; p < 3; ++p) {
+    uint8_t *buf = img->planes[p];
+    const int h = p == 0 ? (int)img->h : (int)((img->h + 1) / 2);
+    const int w = p == 0 ? (int)img->w : (int)((img->w + 1) / 2);
+    for (int r = 0; r < h; ++r) {
+      for (int c = 0; c < w; ++c) {
+        buf[c] = rnd.Rand8();
+      }
       buf += img->stride[p];
     }
   }
@@ -235,6 +251,60 @@ TEST(EncodeAPI, InvalidSvcParams) {
 
   EXPECT_EQ(aom_codec_encode(&enc, &img, 0, 1, 0), AOM_CODEC_OK);
   EXPECT_EQ(aom_codec_encode(&enc, nullptr, 0, 0, 0), AOM_CODEC_OK);
+  EXPECT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
+}
+
+// Bug: 538651949.
+TEST(EncodeAPI, SvcFixBypass) {
+  aom_codec_ctx_t enc;
+  aom_codec_enc_cfg_t cfg;
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_svc_layer_id_t layer_id = { 3, 0 };
+  aom_svc_params_t svc_params = {};
+
+  EXPECT_EQ(aom_codec_enc_config_default(iface, &cfg, kUsage), AOM_CODEC_OK);
+  cfg.g_w = 320;
+  cfg.g_h = 240;
+  cfg.g_threads = 1;
+  cfg.g_lag_in_frames = 0;
+
+  ASSERT_EQ(aom_codec_enc_init(&enc, iface, &cfg, 0), AOM_CODEC_OK);
+
+  // Set number of spatial layers to 4 via control SET_NUMBER_SPATIAL_LAYERS.
+  EXPECT_EQ(aom_codec_control(&enc, AOME_SET_NUMBER_SPATIAL_LAYERS, 4),
+            AOM_CODEC_OK);
+
+  // Set the active spatial layer id to 3. This is expected to fail since
+  // cpi->svc.number_spatial_layers is still 1 (default).
+  EXPECT_EQ(aom_codec_control(&enc, AV1E_SET_SVC_LAYER_ID, &layer_id),
+            AOM_CODEC_INVALID_PARAM);
+
+  // Set SVC params to 2x2 layer config, via AV1E_SET_SVC_PARAMS. This sets
+  // all svc layer parameters, allocates for the layer context, and sets use_svc
+  // = 1.
+  svc_params.number_spatial_layers = 2;
+  svc_params.number_temporal_layers = 2;
+  for (int i = 0; i < AOM_MAX_LAYERS; i++) {
+    svc_params.max_quantizers[i] = 52;
+    svc_params.min_quantizers[i] = 10;
+    svc_params.layer_target_bitrate[i] = 100;
+  }
+  svc_params.scaling_factor_num[0] = 1;
+  svc_params.scaling_factor_den[0] = 2;
+  svc_params.scaling_factor_num[1] = 1;
+  svc_params.scaling_factor_den[1] = 1;
+  svc_params.framerate_factor[0] = 2;
+  svc_params.framerate_factor[1] = 1;
+
+  EXPECT_EQ(aom_codec_control(&enc, AV1E_SET_SVC_PARAMS, &svc_params),
+            AOM_CODEC_OK);
+
+  // Now try setting number of spatial layers to 3 using the control
+  // SET_NUMBER_SPATIAL_LAYERS. This is expected to fail because SVC was
+  // configured via AV1E_SET_SVC_PARAMS, so use_svc = 1.
+  EXPECT_EQ(aom_codec_control(&enc, AOME_SET_NUMBER_SPATIAL_LAYERS, 3),
+            AOM_CODEC_INVALID_PARAM);
+
   EXPECT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
 }
 
@@ -2491,5 +2561,127 @@ TEST(EncodeAPI, Buganizer504317456) {
   ASSERT_EQ(aom_codec_destroy(&enc), AOM_CODEC_OK);
 }
 #endif  // !CONFIG_REALTIME_ONLY
+
+// Test for issue: 505976409.
+TEST(EncodeAPI, SvcSourceLastTL0Uninitialized) {
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME),
+            AOM_CODEC_OK);
+
+  cfg.g_w = 64;
+  cfg.g_h = 64;
+  cfg.rc_end_usage = AOM_CBR;
+  cfg.g_lag_in_frames = 0;
+  cfg.rc_target_bitrate = 400;
+
+  aom_codec_ctx_t codec;
+  ASSERT_EQ(aom_codec_enc_init(&codec, iface, &cfg, 0), AOM_CODEC_OK);
+  ASSERT_EQ(aom_codec_control(&codec, AOME_SET_CPUUSED, 9), AOM_CODEC_OK);
+
+  aom_svc_params_t svc = {};
+  svc.number_spatial_layers = 1;
+  svc.number_temporal_layers = 2;
+  svc.scaling_factor_num[0] = 1;
+  svc.scaling_factor_den[0] = 4;
+  for (int i = 0; i < 32; ++i) svc.layer_target_bitrate[i] = 200;
+  for (int i = 0; i < 8; ++i) svc.framerate_factor[i] = 1;
+  ASSERT_EQ(aom_codec_control(&codec, AV1E_SET_SVC_PARAMS, &svc), AOM_CODEC_OK);
+
+  aom_image_t *img = aom_img_alloc(nullptr, AOM_IMG_FMT_I420, 64, 64, 1);
+  ASSERT_NE(img, nullptr);
+  FillImage(img, 128);
+
+  // Frame 0: TL1 (Starts with non-zero temporal layer).
+  aom_svc_layer_id_t layer_id = { 0, 1 };
+  ASSERT_EQ(aom_codec_control(&codec, AV1E_SET_SVC_LAYER_ID, &layer_id),
+            AOM_CODEC_OK);
+
+  aom_svc_ref_frame_config_t ref_cfg = {};
+  for (int r = 0; r < 7; ++r) {
+    ref_cfg.reference[r] = 1;
+    ref_cfg.ref_idx[r] = 7;
+  }
+  ref_cfg.refresh[2] = 1;
+  ref_cfg.refresh[6] = 1;
+  ASSERT_EQ(aom_codec_control(&codec, AV1E_SET_SVC_REF_FRAME_CONFIG, &ref_cfg),
+            AOM_CODEC_OK);
+
+  ASSERT_EQ(aom_codec_encode(&codec, img, 0, 1, AOM_EFLAG_FORCE_KF),
+            AOM_CODEC_OK);
+
+  // Frame 1: TL0.
+  layer_id.temporal_layer_id = 0;
+  ASSERT_EQ(aom_codec_control(&codec, AV1E_SET_SVC_LAYER_ID, &layer_id),
+            AOM_CODEC_OK);
+  ASSERT_EQ(aom_codec_encode(&codec, img, 1, 1, 0), AOM_CODEC_OK);
+
+  // Frame 2: TL1 (Triggers use of source_last_TL0).
+  layer_id.temporal_layer_id = 1;
+  ASSERT_EQ(aom_codec_control(&codec, AV1E_SET_SVC_LAYER_ID, &layer_id),
+            AOM_CODEC_OK);
+  // This frame used to crash or hang before the fix.
+  ASSERT_EQ(aom_codec_encode(&codec, img, 2, 1, 0), AOM_CODEC_OK);
+
+  aom_img_free(img);
+  ASSERT_EQ(aom_codec_destroy(&codec), AOM_CODEC_OK);
+}
+
+TEST(EncodeAPI, Buganizer503810640) {
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME),
+            AOM_CODEC_OK);
+
+  cfg.g_w = 176;
+  cfg.g_h = 144;
+
+  aom_codec_ctx_t codec;
+  ASSERT_EQ(aom_codec_enc_init(&codec, iface, &cfg, 0), AOM_CODEC_OK);
+  ASSERT_EQ(aom_codec_control(&codec, AV1E_SET_DENOISE_NOISE_LEVEL, 29),
+            AOM_CODEC_OK);
+
+  aom_image_t *raw = aom_img_alloc(nullptr, AOM_IMG_FMT_I420, 176, 144, 1);
+  ASSERT_NE(raw, nullptr);
+
+  FillImage(raw, 128);
+  ::libaom_test::ACMRandom rnd;
+  rnd.Reset(::libaom_test::ACMRandom::DeterministicSeed());
+  for (int y = 0; y < 144; ++y) {
+    for (int x = 0; x < 176; ++x) {
+      raw->planes[AOM_PLANE_Y][y * raw->stride[AOM_PLANE_Y] + x] = rnd.Rand8();
+    }
+  }
+
+  ASSERT_EQ(aom_codec_encode(&codec, raw, 0, 1, 0), AOM_CODEC_OK);
+
+  aom_img_free(raw);
+  ASSERT_EQ(aom_codec_destroy(&codec), AOM_CODEC_OK);
+}
+
+TEST(EncodeAPI, Buganizer503810640V2) {
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  ASSERT_EQ(aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME),
+            AOM_CODEC_OK);
+
+  cfg.g_w = 437;
+  cfg.g_h = 1121;
+
+  aom_codec_ctx_t codec;
+  ASSERT_EQ(aom_codec_enc_init(&codec, iface, &cfg, 0), AOM_CODEC_OK);
+  ASSERT_EQ(aom_codec_control(&codec, AV1E_SET_DENOISE_NOISE_LEVEL, 29),
+            AOM_CODEC_OK);
+
+  aom_image_t *raw = aom_img_alloc(nullptr, AOM_IMG_FMT_I420, 437, 1121, 1);
+  ASSERT_NE(raw, nullptr);
+
+  FillImageRandom(raw);
+
+  ASSERT_EQ(aom_codec_encode(&codec, raw, 0, 1, 0), AOM_CODEC_OK);
+
+  aom_img_free(raw);
+  ASSERT_EQ(aom_codec_destroy(&codec), AOM_CODEC_OK);
+}
 
 }  // namespace

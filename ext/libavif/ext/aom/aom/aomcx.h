@@ -1637,15 +1637,25 @@ enum aome_enc_control_id {
    *
    * \attention Experimental. Not part of the stable API.
    */
-  AV1E_GET_GOP_INFO,
+  AV1E_GET_GOP_INFO = 174,
 
-  /*!\brief Codec control function to validate HBD input.
+  /*!\brief Codec control function to validate HBD input, int parameter.
    *
    * AV1 allows the encoder to validate the high bitdepth (HBD) input and
    * ensure that every pixel is within the valid range. To disable/enable,
    * set this parameter to 0/1. The default value is set to be 1.
    */
-  AOME_SET_VALIDATE_HBD_INPUT,
+  AOME_SET_VALIDATE_HBD_INPUT = 175,
+
+  /*!\brief Codec control function to toggle loopfilter mode_ref_delta_enabled,
+   * int parameter.
+   *
+   * - 0 = disable
+   * - 1 = enable (default)
+   *
+   * \note This is only used in loopfilter control unit test.
+   */
+  AV1E_SET_MODE_REF_DELTA_ENABLED = 176,
 
   // Any new encoder control IDs should be added above.
   // Maximum allowed encoder control ID is 229.
@@ -2432,6 +2442,9 @@ AOM_CTRL_USE_TYPE(AV1E_SET_EXTERNAL_RATE_CONTROL, aom_rc_funcs_t *)
 
 AOM_CTRL_USE_TYPE(AV1E_GET_GOP_INFO, aom_gop_info_t *)
 #define AOM_CTRL_AV1E_GET_GOP_INFO
+
+AOM_CTRL_USE_TYPE(AV1E_SET_MODE_REF_DELTA_ENABLED, int)
+#define AOM_CTRL_AV1E_SET_MODE_REF_DELTA_ENABLED
 
 /*!\endcond */
 /*! @} - end defgroup aom_encoder */

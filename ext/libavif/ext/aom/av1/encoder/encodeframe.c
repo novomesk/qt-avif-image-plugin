@@ -301,7 +301,6 @@ static inline void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
   AV1_COMMON *const cm = &cpi->common;
   const CommonModeInfoParams *const mi_params = &cm->mi_params;
   const DeltaQInfo *const delta_q_info = &cm->delta_q_info;
-  assert(delta_q_info->delta_q_present_flag);
 
   const BLOCK_SIZE sb_size = cm->seq_params->sb_size;
   av1_setup_src_planes(x, cpi->source, mi_row, mi_col, num_planes, sb_size);
@@ -322,6 +321,10 @@ static inline void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
              cpi->ext_ratectrl.funcs.get_encodeframe_decision != NULL &&
              cpi->ext_ratectrl.sb_params_list != NULL) {
     if (cpi->ext_ratectrl.use_delta_q) {
+      // Only used for per-coding-block RD mult calculation later.
+      current_qindex = av1_get_q_for_deltaq_objective(cpi, td, NULL, sb_size,
+                                                      mi_row, mi_col);
+
       const int q_index = cpi->ext_ratectrl.sb_params_list[sb_index].q_index;
       if (q_index != AOM_DEFAULT_Q) {
         current_qindex = q_index;
@@ -364,17 +367,22 @@ static inline void setup_delta_q(AV1_COMP *const cpi, ThreadData *td,
   }
   current_qindex = adjusted_qindex;
 
-  x->delta_qindex = current_qindex - cm->quant_params.base_qindex;
-  x->rdmult_delta_qindex = x->delta_qindex;
+  x->delta_qindex = cm->delta_q_info.delta_q_present_flag
+                        ? current_qindex - cm->quant_params.base_qindex
+                        : 0;
+  x->rdmult_delta_qindex = current_qindex - cm->quant_params.base_qindex;
 
   av1_set_offsets(cpi, tile_info, x, mi_row, mi_col, sb_size);
-  xd->mi[0]->current_qindex = current_qindex;
+  xd->mi[0]->current_qindex = cm->delta_q_info.delta_q_present_flag
+                                  ? current_qindex
+                                  : cm->quant_params.base_qindex;
   av1_init_plane_quantizers(cpi, x, xd->mi[0]->segment_id, 0);
 
   // keep track of any non-zero delta-q used
   td->deltaq_used |= (x->delta_qindex != 0);
 
-  if (cpi->oxcf.tool_cfg.enable_deltalf_mode) {
+  if (cpi->oxcf.tool_cfg.enable_deltalf_mode &&
+      cm->delta_q_info.delta_q_present_flag) {
     const int delta_lf_res = delta_q_info->delta_lf_res;
     const int lfmask = ~(delta_lf_res - 1);
     const int delta_lf_from_base =
@@ -691,7 +699,7 @@ static inline void init_encode_rd_sb(AV1_COMP *cpi, ThreadData *td,
     x->sb_energy_level = 0;
     x->part_search_info.cnn_output_valid = 0;
     if (gather_tpl_data) {
-      if (cm->delta_q_info.delta_q_present_flag) {
+      if (cpi->cb_delta_rdmult_enabled) {
         const int num_planes = av1_num_planes(cm);
         const BLOCK_SIZE sb_size = cm->seq_params->sb_size;
         setup_delta_q(cpi, td, x, tile_info, mi_row, mi_col, num_planes);
@@ -1231,7 +1239,7 @@ static inline void encode_sb_row(AV1_COMP *cpi, ThreadData *td,
 
   // Reset delta for quantizer and loof filters at the beginning of every tile
   if (mi_row == tile_info->mi_row_start || row_mt_enabled) {
-    if (cm->delta_q_info.delta_q_present_flag)
+    if (cpi->cb_delta_rdmult_enabled)
       xd->current_base_qindex = cm->quant_params.base_qindex;
     if (cm->delta_q_info.delta_lf_present_flag) {
       av1_reset_loop_filter_delta(xd, av1_num_planes(cm));
@@ -1799,7 +1807,7 @@ static inline void setup_prune_ref_frame_mask(AV1_COMP *cpi) {
     // Disable all compound references
     cpi->prune_ref_frame_mask = (1 << MODE_CTX_REF_FRAMES) - (1 << REF_FRAMES);
   } else if (!cpi->sf.rt_sf.use_nonrd_pick_mode &&
-             cpi->sf.inter_sf.selective_ref_frame >= 2) {
+             cpi->sf.inter_sf.selective_ref_frame >= 1) {
     AV1_COMMON *const cm = &cpi->common;
     const int cur_frame_display_order_hint =
         cm->current_frame.display_order_hint;
@@ -1870,6 +1878,33 @@ static int allow_deltaq_mode(AV1_COMP *cpi) {
   (void)cpi;
   return 1;
 #endif  // !CONFIG_REALTIME_ONLY
+}
+
+static inline int disable_deltaq_for_intl_arfs(const AV1_COMP *cpi) {
+  if (cpi->oxcf.mode == GOOD && is_stat_consumption_stage_twopass(cpi) &&
+      cpi->oxcf.q_cfg.deltaq_mode == DELTA_Q_OBJECTIVE &&
+      cpi->oxcf.algo_cfg.enable_tpl_model && cpi->oxcf.q_cfg.aq_mode == NO_AQ &&
+      !cpi->common.seg.enabled && !cpi->roi.enabled && !cpi->oxcf.sb_qp_sweep &&
+      !cpi->use_ducky_encode) {
+    return 1;
+  }
+  return 0;
+}
+
+static inline int enable_delta_rdmult(const AV1_COMP *cpi) {
+  if (!disable_deltaq_for_intl_arfs(cpi))
+    return cpi->common.delta_q_info.delta_q_present_flag;
+
+  const GF_GROUP *gf_group = &cpi->ppi->gf_group;
+  return gf_group->update_type[cpi->gf_frame_index] != LF_UPDATE;
+}
+
+static inline int enable_delta_q(const AV1_COMP *cpi) {
+  const GF_GROUP *gf_group = &cpi->ppi->gf_group;
+  if (!disable_deltaq_for_intl_arfs(cpi))
+    return gf_group->update_type[cpi->gf_frame_index] != LF_UPDATE;
+
+  return cpi->common.current_frame.pyramid_level <= 1;
 }
 
 #define FORCE_ZMV_SKIP_128X128_BLK_DIFF 10000
@@ -2197,7 +2232,7 @@ static inline void encode_frame_internal(AV1_COMP *cpi) {
 
   int hash_table_created = 0;
   if (!is_stat_generation_stage(cpi) && av1_use_hash_me(cpi) &&
-      !cpi->sf.rt_sf.use_nonrd_pick_mode) {
+      (!cpi->sf.rt_sf.use_nonrd_pick_mode || cpi->sf.rt_sf.rt_use_intrabc)) {
     // TODO(any): move this outside of the recoding loop to avoid recalculating
     // the hash table.
     // add to hash table
@@ -2303,10 +2338,8 @@ static inline void encode_frame_internal(AV1_COMP *cpi) {
     // is used for ineligible frames. That effectively will turn off row_mt
     // usage. Note objective delta_q and tpl eligible frames are only altref
     // frames currently.
-    const GF_GROUP *gf_group = &cpi->ppi->gf_group;
     if (cm->delta_q_info.delta_q_present_flag) {
-      if (deltaq_mode == DELTA_Q_OBJECTIVE &&
-          gf_group->update_type[cpi->gf_frame_index] == LF_UPDATE)
+      if (deltaq_mode == DELTA_Q_OBJECTIVE && !enable_delta_q(cpi))
         cm->delta_q_info.delta_q_present_flag = 0;
 
       if (deltaq_mode == DELTA_Q_OBJECTIVE &&
@@ -2333,6 +2366,7 @@ static inline void encode_frame_internal(AV1_COMP *cpi) {
     cpi->cyclic_refresh->actual_num_seg2_blocks = 0;
   }
   cpi->rc.cnt_zeromv = 0;
+  cpi->cb_delta_rdmult_enabled = enable_delta_rdmult(cpi);
 
   av1_frame_init_quantizer(cpi);
   init_encode_frame_mb_context(cpi);
@@ -2350,6 +2384,7 @@ static inline void encode_frame_internal(AV1_COMP *cpi) {
     memcpy(cm->lf.ref_deltas, cm->prev_frame->ref_deltas, REF_FRAMES);
     memcpy(cm->lf.mode_deltas, cm->prev_frame->mode_deltas, MAX_MODE_LF_DELTAS);
   }
+  cm->lf.mode_ref_delta_enabled = oxcf->algo_cfg.mode_ref_delta_enabled;
   memcpy(cm->cur_frame->ref_deltas, cm->lf.ref_deltas, REF_FRAMES);
   memcpy(cm->cur_frame->mode_deltas, cm->lf.mode_deltas, MAX_MODE_LF_DELTAS);
 

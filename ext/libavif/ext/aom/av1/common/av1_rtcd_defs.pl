@@ -460,6 +460,9 @@ if (aom_config("CONFIG_AV1_ENCODER") eq "yes") {
   add_proto qw/void av1_get_horver_correlation_full/, "const int16_t *diff, int stride, int w, int h, float *hcorr, float *vcorr";
   specialize qw/av1_get_horver_correlation_full sse4_1 avx2 neon/;
 
+  add_proto qw/void av1_interp_cubic_rate_dist/, "const double *p1, const double *p2, double x, double rate_dist_f[2]";
+  specialize qw/av1_interp_cubic_rate_dist sse2/;
+
   add_proto qw/void av1_nn_predict/, "const float *input_nodes, const NN_CONFIG *const nn_config, int reduce_prec, float *const output";
 
   add_proto qw/void av1_nn_fast_softmax_16/, "const float *input_nodes, float *output";
@@ -602,6 +605,9 @@ if(aom_config("CONFIG_AV1_HIGHBITDEPTH") eq "yes") {
   add_proto qw/void av1_convolve_2d_scale/, "const uint8_t *src, int src_stride, uint8_t *dst, int dst_stride, int w, int h, const InterpFilterParams *filter_params_x, const InterpFilterParams *filter_params_y, const int subpel_x_qn, const int x_step_qn, const int subpel_y_qn, const int y_step_qn, ConvolveParams *conv_params";
 
   specialize qw/av1_convolve_2d_sr sse2 avx2 neon neon_dotprod neon_i8mm sve2 rvv/;
+  if (aom_config("CONFIG_HIGHWAY") eq "yes") {
+    specialize qw/av1_convolve_2d_sr avx512/;
+  }
   specialize qw/av1_convolve_2d_sr_intrabc neon rvv/;
   specialize qw/av1_convolve_x_sr sse2 avx2 neon neon_dotprod neon_i8mm rvv/;
   specialize qw/av1_convolve_x_sr_intrabc neon rvv/;

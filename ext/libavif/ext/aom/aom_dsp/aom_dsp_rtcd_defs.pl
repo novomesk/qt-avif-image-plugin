@@ -530,6 +530,11 @@ specialize qw/aom_convolve_copy       neon                        sse2 avx2/;
 specialize qw/aom_convolve8_horiz     neon neon_dotprod neon_i8mm ssse3/, "$avx2_ssse3";
 specialize qw/aom_convolve8_vert      neon neon_dotprod neon_i8mm ssse3/, "$avx2_ssse3";
 
+if (aom_config("CONFIG_HIGHWAY") eq "yes") {
+  specialize qw/aom_convolve8_horiz     avx512/;
+  specialize qw/aom_convolve8_vert      avx512/;
+}
+
 add_proto qw/void aom_scaled_2d/, "const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst, ptrdiff_t dst_stride, const InterpKernel *filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int w, int h";
 specialize qw/aom_scaled_2d ssse3 neon neon_dotprod neon_i8mm/;
 
@@ -1379,6 +1384,14 @@ if (aom_config("CONFIG_AV1_ENCODER") eq "yes") {
   #
   add_proto qw/uint64_t/, "aom_mse_wxh_16bit", "uint8_t *dst, int dstride,uint16_t *src, int sstride, int w, int h";
   specialize qw/aom_mse_wxh_16bit  sse2 avx2 neon/;
+
+  add_proto qw/int64_t/, "aom_calc_variance_stat", "const uint8_t *src, int stride, int bw, int bh";
+  specialize qw/aom_calc_variance_stat avx2/;
+
+  if (aom_config("CONFIG_AV1_HIGHBITDEPTH") eq "yes") {
+    add_proto qw/int64_t/, "aom_highbd_calc_variance_stat", "const uint16_t *src, int stride, int bw, int bh";
+    specialize qw/aom_highbd_calc_variance_stat avx2/;
+  }
 
   add_proto qw/uint64_t/, "aom_mse_16xh_16bit", "uint8_t *dst, int dstride,uint16_t *src, int w, int h";
   specialize qw/aom_mse_16xh_16bit sse2 avx2 neon/;

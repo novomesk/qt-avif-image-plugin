@@ -751,7 +751,9 @@ void av1_set_size_dependent_vars(AV1_COMP *cpi, int *q, int *bottom_index,
       cpi->sf.hl_sf.static_segmentation)
     configure_static_seg_features(cpi);
 
-  if (cpi->oxcf.rc_cfg.over_shoot_pct == 0) *top_index = MAXQ;
+  if (cpi->oxcf.rc_cfg.force_max_q || cpi->oxcf.rc_cfg.over_shoot_pct == 0) {
+    *top_index = MAXQ;
+  }
   if (cpi->oxcf.rc_cfg.under_shoot_pct == 0) *bottom_index = MINQ;
 }
 
@@ -1131,19 +1133,9 @@ static void screen_content_tools_determination(
     const int allow_intrabc_orig_decision,
     const int use_screen_content_tools_orig_decision,
     const int is_screen_content_type_orig_decision, const int pass,
-    int *projected_size_pass, PSNR_STATS *psnr) {
+    PSNR_STATS *psnr) {
   AV1_COMMON *const cm = &cpi->common;
   FeatureFlags *const features = &cm->features;
-
-#if CONFIG_FPMT_TEST
-  projected_size_pass[pass] =
-      ((cpi->ppi->gf_group.frame_parallel_level[cpi->gf_frame_index] > 0) &&
-       (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE))
-          ? cpi->ppi->p_rc.temp_projected_frame_size
-          : cpi->rc.projected_frame_size;
-#else
-  projected_size_pass[pass] = cpi->rc.projected_frame_size;
-#endif
 
 #if CONFIG_AV1_HIGHBITDEPTH
   const uint32_t bit_depth = cpi->td.mb.e_mbd.bd;
@@ -1165,11 +1157,16 @@ static void screen_content_tools_determination(
   const int psnr_diff_is_large = (psnr_diff > STRICT_PSNR_DIFF_THRESH);
   const int ratio_is_large =
       ((palette_ratio >= 0.0001) && ((psnr_diff / palette_ratio) > 4));
-  const int is_sc_encoding_much_better = (psnr_diff_is_large || ratio_is_large);
+  const int ratio_is_large_2 = ((psnr_diff > 0.1) && (palette_ratio >= 0.05) &&
+                                ((psnr_diff / palette_ratio) > 2));
+  const int is_sc_encoding_much_better =
+      (psnr_diff_is_large || ratio_is_large || ratio_is_large_2);
+
   if (is_sc_encoding_much_better) {
     // Use screen content tools, if we get coding gain.
     features->allow_screen_content_tools = 1;
-    features->allow_intrabc = cpi->intrabc_used;
+    features->allow_intrabc =
+        (allow_intrabc_orig_decision || cpi->intrabc_used);
     cpi->use_screen_content_tools = 1;
     cpi->is_screen_content_type = 1;
   } else {
@@ -1216,8 +1213,7 @@ void av1_determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig) {
   const AV1EncoderConfig *const oxcf = &cpi->oxcf;
   const QuantizationCfg *const q_cfg = &oxcf->q_cfg;
   // Variables to help determine if we should allow screen content tools.
-  int projected_size_pass[3] = { 0 };
-  PSNR_STATS psnr[3];
+  PSNR_STATS psnr[2];
   const int is_key_frame = cm->current_frame.frame_type == KEY_FRAME;
   const int allow_screen_content_tools_orig_decision =
       cm->features.allow_screen_content_tools;
@@ -1290,7 +1286,7 @@ void av1_determine_sc_tools_with_encoding(AV1_COMP *cpi, const int q_orig) {
     screen_content_tools_determination(
         cpi, allow_screen_content_tools_orig_decision,
         allow_intrabc_orig_decision, use_screen_content_tools_orig_decision,
-        is_screen_content_type_orig_decision, pass, projected_size_pass, psnr);
+        is_screen_content_type_orig_decision, pass, psnr);
   }
 
   // Set partition speed feature back.

@@ -53,7 +53,7 @@ if ! [ -f libavif/ext/aom/build.libavif/libaom.a ]; then
   mkdir -p build.libavif
   cd build.libavif
 
-  cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONFIG_AV1_DECODER=0 -DCONFIG_AV1_ENCODER=1 -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTDATA=0 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 -DCONFIG_PIC=1 ..
+  cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONFIG_AV1_DECODER=0 -DCONFIG_AV1_ENCODER=1 -DENABLE_APPS=0 -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTDATA=0 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 -DCONFIG_PIC=1 ..
   ninja
 
   if ! [ -f libaom.a ]; then

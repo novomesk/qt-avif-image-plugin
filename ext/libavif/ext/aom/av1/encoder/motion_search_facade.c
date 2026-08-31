@@ -426,23 +426,6 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
               { p[0].dst.buf, p[1].dst.buf, p[2].dst.buf },
               { p[0].dst.stride, p[1].dst.stride, p[2].dst.stride },
             };
-            int64_t rd = INT64_MAX;
-            if (!mv_sf->disable_second_mv) {
-              // Calculate actual rd cost.
-              mbmi->mv[0].as_mv = best_mv->as_mv;
-              av1_enc_build_inter_predictor(cm, xd, mi_row, mi_col, &orig_dst,
-                                            bsize, 0, 0);
-              av1_subtract_plane(x, bsize, 0);
-              RD_STATS this_rd_stats;
-              av1_init_rd_stats(&this_rd_stats);
-              av1_estimate_txfm_yrd(cpi, x, &this_rd_stats, INT64_MAX, bsize,
-                                    max_txsize_rect_lookup[bsize]);
-              int this_mv_rate = av1_mv_bit_cost(
-                  &best_mv->as_mv, &ref_mv, mv_costs->nmv_joint_cost,
-                  mv_costs->mv_cost_stack, MV_COST_WEIGHT);
-              rd = RDCOST(x->rdmult, this_mv_rate + this_rd_stats.rate,
-                          this_rd_stats.dist);
-            }
 
             MV this_best_mv;
             subpel_start_mv = get_mv_from_fullmv(&second_best_mv.as_fullmv);
@@ -453,13 +436,28 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
                   xd, cm, &ms_params, subpel_start_mv, NULL, &this_best_mv,
                   &dis, &sse, fractional_ms_list);
 
-              if (!mv_sf->disable_second_mv) {
-                // If cpi->sf.mv_sf.disable_second_mv is 0, use actual rd cost
-                // to choose the better MV.
+              // If cpi->sf.mv_sf.disable_second_mv is 0 and both MVs are valid,
+              // use actual rd cost to choose the better MV.
+              if (!mv_sf->disable_second_mv && this_var != INT32_MAX) {
+                // Calculate rd cost of first MV.
+                mbmi->mv[0].as_mv = best_mv->as_mv;
+                av1_enc_build_inter_predictor(cm, xd, mi_row, mi_col, &orig_dst,
+                                              bsize, 0, 0);
+                RD_STATS this_rd_stats;
+                av1_init_rd_stats(&this_rd_stats);
+                av1_estimate_txfm_yrd(cpi, x, &this_rd_stats, INT64_MAX, bsize,
+                                      max_txsize_rect_lookup[bsize]);
+                int this_mv_rate = av1_mv_bit_cost(
+                    &best_mv->as_mv, &ref_mv, mv_costs->nmv_joint_cost,
+                    mv_costs->mv_cost_stack, MV_COST_WEIGHT);
+                const int64_t rd =
+                    RDCOST(x->rdmult, this_mv_rate + this_rd_stats.rate,
+                           this_rd_stats.dist);
+
+                // Calculate rd cost of second MV.
                 mbmi->mv[0].as_mv = this_best_mv;
                 av1_enc_build_inter_predictor(cm, xd, mi_row, mi_col, &orig_dst,
                                               bsize, 0, 0);
-                av1_subtract_plane(x, bsize, 0);
                 RD_STATS tmp_rd_stats;
                 av1_init_rd_stats(&tmp_rd_stats);
                 av1_estimate_txfm_yrd(cpi, x, &tmp_rd_stats, INT64_MAX, bsize,
@@ -548,7 +546,8 @@ void av1_single_motion_search(const AV1_COMP *const cpi, MACROBLOCK *x,
 int av1_joint_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
                             BLOCK_SIZE bsize, int_mv *cur_mv,
                             const uint8_t *mask, int mask_stride, int *rate_mv,
-                            int allow_second_mv, int joint_me_num_refine_iter) {
+                            int allow_second_mv, int joint_me_num_refine_iter,
+                            bool use_subpel_mv_cost_none) {
   const AV1_COMMON *const cm = &cpi->common;
   const int num_planes = av1_num_planes(cm);
   const int pw = block_size_wide[bsize];
@@ -710,6 +709,9 @@ int av1_joint_motion_search(const AV1_COMP *cpi, MACROBLOCK *x,
       av1_set_ms_compound_refs(&ms_params.var_params.ms_buffers, second_pred,
                                mask, mask_stride, id);
       ms_params.forced_stop = EIGHTH_PEL;
+      if (use_subpel_mv_cost_none) {
+        ms_params.mv_cost_params.mv_cost_type = MV_COST_NONE;
+      }
       MV start_mv = get_mv_from_fullmv(&best_mv.as_fullmv);
       assert(av1_is_subpelmv_in_range(&ms_params.mv_limits, start_mv));
       bestsme = cpi->mv_search_params.find_fractional_mv_step(
@@ -950,7 +952,8 @@ static inline void do_masked_motion_search_indexed(
             : NUM_JOINT_ME_REFINE_ITER;
     av1_joint_motion_search(cpi, x, bsize, tmp_mv, mask, mask_stride, rate_mv,
                             !cpi->sf.mv_sf.disable_second_mv,
-                            joint_me_num_refine_iter);
+                            joint_me_num_refine_iter,
+                            /*use_subpel_mv_cost_none=*/false);
   }
 }
 
