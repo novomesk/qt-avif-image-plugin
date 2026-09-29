@@ -1,3 +1,11 @@
+2026-09-21 v3.15.1
+  This release is ABI compatible with the last release. See
+  https://aomedia.googlesource.com/aom/+log/v3.15.0..v3.15.1 for all the
+  commits in this release.
+
+  - Bug Fixes
+    * b:558679217: Tune VMAF mode regression
+
 2026-08-25 v3.15.0
   This release is ABI compatible with the last release.
 
