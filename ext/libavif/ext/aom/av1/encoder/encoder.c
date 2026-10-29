@@ -646,7 +646,7 @@ static void init_seq_coding_tools(AV1_PRIMARY *const ppi,
   seq->enable_intra_edge_filter = oxcf->intra_mode_cfg.enable_intra_edge_filter;
   seq->enable_filter_intra = oxcf->intra_mode_cfg.enable_filter_intra;
 
-  set_bitstream_level_tier(ppi, frm_dim_cfg->width, frm_dim_cfg->height,
+  set_bitstream_level_tier(ppi, seq->max_frame_width, seq->max_frame_height,
                            oxcf->input_cfg.init_framerate);
   av1_set_svc_seq_params(ppi);
 }
@@ -741,8 +741,12 @@ static void init_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf) {
 
   alloc_compressor_data(cpi);
 
-  cpi->data_alloc_width = cm->width;
-  cpi->data_alloc_height = cm->height;
+  cpi->data_alloc_width = oxcf->frm_dim_cfg.forced_max_frame_width
+                              ? oxcf->frm_dim_cfg.forced_max_frame_width
+                              : cm->width;
+  cpi->data_alloc_height = oxcf->frm_dim_cfg.forced_max_frame_height
+                               ? oxcf->frm_dim_cfg.forced_max_frame_height
+                               : cm->height;
   cpi->frame_size_related_setup_done = false;
 
   // Single thread case: use counts in common.
@@ -1038,8 +1042,12 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
     cpi->td.firstpass_ctx = NULL;
     alloc_compressor_data(cpi);
     realloc_segmentation_maps(cpi);
-    cpi->data_alloc_width = cm->width;
-    cpi->data_alloc_height = cm->height;
+    cpi->data_alloc_width = oxcf->frm_dim_cfg.forced_max_frame_width
+                                ? oxcf->frm_dim_cfg.forced_max_frame_width
+                                : cm->width;
+    cpi->data_alloc_height = oxcf->frm_dim_cfg.forced_max_frame_height
+                                 ? oxcf->frm_dim_cfg.forced_max_frame_height
+                                 : cm->height;
     cpi->frame_size_related_setup_done = false;
   }
   av1_update_frame_size(cpi);
@@ -1048,6 +1056,12 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
     if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ) {
       int mi_rows = cpi->common.mi_params.mi_rows;
       int mi_cols = cpi->common.mi_params.mi_cols;
+      if (cpi->oxcf.frm_dim_cfg.forced_max_frame_width) {
+        mi_cols = size_in_mi(cpi->oxcf.frm_dim_cfg.forced_max_frame_width);
+      }
+      if (cpi->oxcf.frm_dim_cfg.forced_max_frame_height) {
+        mi_rows = size_in_mi(cpi->oxcf.frm_dim_cfg.forced_max_frame_height);
+      }
       aom_free(cpi->cyclic_refresh->map);
       CHECK_MEM_ERROR(
           cm, cpi->cyclic_refresh->map,
@@ -2485,11 +2499,18 @@ static void init_motion_estimation(AV1_COMP *cpi) {
   const int aligned_width = (cm->width + 7) & ~7;
   const int y_stride =
       aom_calc_y_stride(aligned_width, cpi->oxcf.border_in_pixels);
+  // cpi->ppi->lookahead->buf is a multi-slot buffer, so buf[0] may not be
+  // the current frame's slot and can retain an old stride after a frame resize
+  // in av1_lookahead_push(). During av1_encode(), cpi->unscaled_source points
+  // to the current frame's lookahead buffer entry (frame_input->source).
+  const int lookahead_y_stride = cpi->unscaled_source != NULL
+                                     ? cpi->unscaled_source->y_stride
+                                     : cpi->ppi->lookahead->buf[0].img.y_stride;
   const int y_stride_src = ((cpi->oxcf.frm_dim_cfg.width != cm->width ||
                              cpi->oxcf.frm_dim_cfg.height != cm->height) ||
                             av1_superres_scaled(cm))
                                ? y_stride
-                               : cpi->ppi->lookahead->buf->img.y_stride;
+                               : lookahead_y_stride;
   int fpf_y_stride =
       cm->cur_frame != NULL ? cm->cur_frame->buf.y_stride : y_stride;
 
@@ -2498,8 +2519,13 @@ static void init_motion_estimation(AV1_COMP *cpi) {
   const int should_update =
       !mv_search_params->search_site_cfg[SS_CFG_SRC][DIAMOND].stride ||
       !mv_search_params->search_site_cfg[SS_CFG_LOOKAHEAD][DIAMOND].stride ||
+      !mv_search_params->search_site_cfg[SS_CFG_FPF][DIAMOND].stride ||
       (y_stride !=
-       mv_search_params->search_site_cfg[SS_CFG_SRC][DIAMOND].stride);
+       mv_search_params->search_site_cfg[SS_CFG_SRC][DIAMOND].stride) ||
+      (y_stride_src !=
+       mv_search_params->search_site_cfg[SS_CFG_LOOKAHEAD][DIAMOND].stride) ||
+      (fpf_y_stride !=
+       mv_search_params->search_site_cfg[SS_CFG_FPF][DIAMOND].stride);
 
   if (!should_update) {
     return;
@@ -2625,8 +2651,12 @@ static int set_size_literal(AV1_COMP *cpi, int width, int height) {
     cpi->td.firstpass_ctx = NULL;
     alloc_compressor_data(cpi);
     realloc_segmentation_maps(cpi);
-    cpi->data_alloc_width = cm->width;
-    cpi->data_alloc_height = cm->height;
+    cpi->data_alloc_width = cpi->oxcf.frm_dim_cfg.forced_max_frame_width
+                                ? cpi->oxcf.frm_dim_cfg.forced_max_frame_width
+                                : cm->width;
+    cpi->data_alloc_height = cpi->oxcf.frm_dim_cfg.forced_max_frame_height
+                                 ? cpi->oxcf.frm_dim_cfg.forced_max_frame_height
+                                 : cm->height;
     cpi->frame_size_related_setup_done = false;
   }
   alloc_mb_mode_info_buffers(cpi);

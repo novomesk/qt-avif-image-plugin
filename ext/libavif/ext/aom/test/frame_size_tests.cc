@@ -222,10 +222,17 @@ TEST_P(AV1ResolutionChange, RandomInput) {
       iter = nullptr;
       while ((pkt = aom_codec_get_cx_data(enc.get(), &iter)) != nullptr) {
         ASSERT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
-        // The frame following a resolution change should be a keyframe as the
-        // change is too extreme to allow previous references to be used.
-        if (i == 0 || usage_ == AOM_USAGE_ALL_INTRA) {
+        // All the resolution changes above are within the reference frame
+        // scaling limits (up to 16x up and 2x down). In one pass mode
+        // without lookahead, and with the maximum frame size declared up front
+        // via g_forced_max_frame_width/height, such changes are coded as inter
+        // frames that scale their references, so only the very first frame is
+        // a keyframe. All intra mode codes every frame as a keyframe.
+        if (usage_ == AOM_USAGE_ALL_INTRA || frame_count == 0) {
           EXPECT_NE(pkt->data.frame.flags & AOM_FRAME_IS_KEY, 0u)
+              << "frame " << frame_count;
+        } else {
+          EXPECT_EQ(pkt->data.frame.flags & AOM_FRAME_IS_KEY, 0u)
               << "frame " << frame_count;
         }
         frame_count++;

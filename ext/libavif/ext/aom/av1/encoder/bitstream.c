@@ -2367,13 +2367,20 @@ static inline void write_frame_size(const AV1_COMMON *cm,
                                     struct aom_write_bit_buffer *wb) {
   const int coded_width = cm->superres_upscaled_width - 1;
   const int coded_height = cm->superres_upscaled_height - 1;
+  const SequenceHeader *seq_params = cm->seq_params;
 
   if (frame_size_override) {
-    const SequenceHeader *seq_params = cm->seq_params;
     int num_bits_width = seq_params->num_bits_width;
     int num_bits_height = seq_params->num_bits_height;
     aom_wb_write_literal(wb, coded_width, num_bits_width);
     aom_wb_write_literal(wb, coded_height, num_bits_height);
+  } else {
+    if (cm->superres_upscaled_width != seq_params->max_frame_width ||
+        cm->superres_upscaled_height != seq_params->max_frame_height) {
+      aom_internal_error(cm->error, AOM_CODEC_UNSUP_BITSTREAM,
+                         "Frame dimensions are different from the maximum "
+                         "values when frame_size_override_flag is 0");
+    }
   }
 
   write_superres_scale(cm, wb);
@@ -2977,10 +2984,7 @@ static inline void write_uncompressed_header_obu(
 
   int frame_size_override_flag = 0;
 
-  if (seq_params->reduced_still_picture_hdr) {
-    assert(cm->superres_upscaled_width == seq_params->max_frame_width &&
-           cm->superres_upscaled_height == seq_params->max_frame_height);
-  } else {
+  if (!seq_params->reduced_still_picture_hdr) {
     if (seq_params->frame_id_numbers_present_flag) {
       int frame_id_len = seq_params->frame_id_length;
       aom_wb_write_literal(wb, cm->current_frame_id, frame_id_len);

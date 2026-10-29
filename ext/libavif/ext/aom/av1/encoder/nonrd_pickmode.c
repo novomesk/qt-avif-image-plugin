@@ -1633,12 +1633,12 @@ static void av1_search_intrabc_nonrd(AV1_COMP *cpi, MACROBLOCK *x,
   FULLPEL_MOTION_SEARCH_PARAMS fullms_params;
   const SEARCH_METHODS search_method =
       av1_get_default_mv_search_method(x, &cpi->sf.mv_sf, bsize);
-  const search_site_config *lookahead_search_sites =
-      cpi->mv_search_params.search_site_cfg[SS_CFG_LOOKAHEAD];
+  const search_site_config *src_search_sites =
+      av1_get_search_site_config(cpi, x, search_method);
   const FULLPEL_MV start_mv = get_fullmv_from_mv(&dv_ref.as_mv);
   av1_make_default_fullpel_ms_params(&fullms_params, cpi, x, bsize,
-                                     &dv_ref.as_mv, start_mv,
-                                     lookahead_search_sites, search_method,
+                                     &dv_ref.as_mv, start_mv, src_search_sites,
+                                     search_method,
                                      /*fine_search_interval=*/0);
   av1_set_ms_to_intra_mode(&fullms_params, x->dv_costs);
   fullms_params.mv_limits.col_min = (xd->tile.mi_col_start - mi_col) * MI_SIZE;

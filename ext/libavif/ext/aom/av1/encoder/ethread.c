@@ -1039,12 +1039,10 @@ void av1_init_tile_thread_data(AV1_PRIMARY *ppi, int is_first_pass) {
           }
         }
 
-        if (is_gradient_caching_for_hog_enabled(ppi->cpi)) {
-          const int plane_types = PLANE_TYPES >> ppi->seq_params.monochrome;
-          AOM_CHECK_MEM_ERROR(&ppi->error, td->pixel_gradient_info,
-                              aom_malloc(sizeof(*td->pixel_gradient_info) *
-                                         plane_types * MAX_SB_SQUARE));
-        }
+        const int plane_types = PLANE_TYPES >> ppi->seq_params.monochrome;
+        AOM_CHECK_MEM_ERROR(&ppi->error, td->pixel_gradient_info,
+                            aom_malloc(sizeof(*td->pixel_gradient_info) *
+                                       plane_types * MAX_SB_SQUARE));
 
         if (is_src_var_for_4x4_sub_blocks_caching_enabled(ppi->cpi)) {
           const BLOCK_SIZE sb_size = ppi->cpi->common.seq_params->sb_size;
