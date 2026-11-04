@@ -2951,4 +2951,226 @@ TEST(EncodeAPI, Buganizer503810640V2) {
   ASSERT_EQ(aom_codec_destroy(&codec), AOM_CODEC_OK);
 }
 
+#if CONFIG_AV1_HIGHBITDEPTH
+// A test that reproduces issues.oss-fuzz.com/issues/572842743: signed integer
+// overflow in fill_variance_tree_leaves().
+TEST(EncodeAPI, Avg16x16IntegerOverflow) {
+  // clang-format off
+  // YUV 4:2:0
+  // Layer 0: 16x1
+  // Y height is padded to the even number 2. There is an unused last row,
+  // set to 0.
+  constexpr unsigned short kBuffer0[16 * 2 + 8 * 1 + 8 * 1] = {
+    // Y plane
+    667, 1, 2591, 1134, 725, 1, 0, 4095, 4095, 0, 0, 2417, 2721, 1, 1, 4095,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    // U plane
+    3238, 0, 1548, 4095, 4095, 0, 3545, 4095,
+    // V plane
+    3859, 413, 4095, 1, 3692, 3398, 0, 1,
+  };
+  // Layer 1: 2x1
+  // Y height is padded to the even number 2. There is an unused last row,
+  // set to 0.
+  constexpr unsigned short kBuffer1[2 * 2 + 1 * 1 + 1 * 1] = {
+    // Y plane
+    2293, 1918,
+    0, 0,
+    // U plane
+    0,
+    // V plane
+    71,
+  };
+  // Layer 2: 2x2
+  constexpr unsigned short kBuffer2[2 * 2 + 1 * 1 + 1 * 1] = {
+    // Y plane
+    1, 4095,
+    1, 4095,
+    // U plane
+    1,
+    // V plane
+    0,
+  };
+  // Layer 3: 18x28
+  constexpr unsigned short kBuffer3[18 * 28 + 9 * 14 + 9 * 14] = {
+    // Y plane
+    3318, 1, 4095, 1, 0, 1, 4095, 1, 2987, 4095, 1993, 0, 0, 1, 0, 0, 0, 4095,
+    4095, 4095, 1, 3467, 2171, 3082, 1, 4095, 0, 0, 0, 2776, 1, 4095, 4095, 947, 0, 4095,
+    382, 0, 0, 4095, 1, 4095, 4095, 4095, 1, 4095, 0, 4095, 1603, 0, 1547, 1123, 1, 2206,
+    1, 4095, 3963, 1440, 0, 1, 4095, 1, 2179, 3181, 4095, 1708, 4095, 0, 3401, 0, 4095, 0,
+    805, 0, 0, 2330, 2496, 1, 1, 0, 4095, 1, 1, 4095, 1, 4095, 2606, 1675, 0, 1858,
+    0, 2061, 0, 3599, 0, 0, 4095, 3121, 1, 4095, 1, 0, 1, 3253, 638, 4095, 2792, 1,
+    0, 4095, 4095, 1, 1, 1709, 1, 4095, 4095, 1, 4095, 4095, 1, 4095, 1926, 0, 0, 4063,
+    2893, 4095, 0, 4095, 4095, 0, 3581, 4095, 0, 4095, 0, 0, 340, 0, 3213, 4095, 0, 788,
+    1, 0, 0, 1, 2601, 4095, 1, 0, 2577, 4095, 0, 0, 1891, 3700, 0, 1427, 1, 4095,
+    47, 4095, 4095, 3451, 4095, 1, 0, 4095, 0, 4095, 4095, 4095, 1, 1, 1, 4095, 0, 0,
+    1, 0, 1, 0, 3737, 1, 1280, 0, 1, 4095, 0, 2845, 1, 2079, 3417, 4095, 1972, 4095,
+    1, 1, 4095, 4095, 0, 4075, 1, 3985, 0, 4095, 3462, 2080, 1, 0, 0, 0, 1, 1,
+    482, 4095, 0, 2107, 4095, 2548, 1, 4095, 1226, 3702, 2396, 4095, 4095, 1, 0, 1, 3669, 1,
+    2368, 2328, 0, 4095, 1, 0, 4095, 4095, 0, 0, 0, 4095, 4095, 2099, 0, 1649, 85, 4095,
+    1, 3100, 4095, 0, 4095, 0, 1, 4095, 0, 4095, 0, 0, 1, 1, 4095, 1064, 4095, 0,
+    1, 4095, 1, 3493, 650, 1, 0, 0, 1255, 2397, 0, 0, 1, 0, 0, 1, 3374, 65,
+    1, 1, 0, 4095, 845, 0, 0, 0, 1, 4095, 1, 4095, 0, 808, 1, 4095, 4095, 2222,
+    2031, 143, 1, 578, 1, 4095, 0, 340, 4095, 0, 4095, 1, 1, 0, 1470, 0, 4095, 0,
+    1, 1746, 0, 1, 1, 1, 1, 1306, 4095, 0, 0, 3963, 4095, 4095, 1, 447, 0, 0,
+    1, 1, 4095, 0, 4095, 4095, 3247, 4095, 1, 3663, 1, 4095, 4095, 0, 1592, 1, 142, 0,
+    1, 4095, 4095, 1, 0, 4095, 450, 1, 1, 0, 4095, 1517, 1, 1, 3380, 1, 0, 2773,
+    4095, 1434, 1, 0, 1, 0, 4095, 1, 1286, 4095, 3051, 3618, 361, 4095, 0, 4095, 1470, 0,
+    0, 1, 0, 0, 3354, 1, 0, 4095, 2693, 1, 4095, 0, 0, 2809, 1, 845, 0, 2463,
+    4095, 3093, 4095, 1, 1, 4095, 1485, 1, 0, 1, 1839, 0, 0, 1, 1, 2195, 1, 4095,
+    4095, 528, 4095, 0, 228, 4095, 1, 4, 0, 4095, 1, 1, 2550, 1, 0, 1, 1, 0,
+    1, 4095, 0, 4095, 3309, 2151, 0, 0, 1, 1, 1538, 1, 1, 1, 0, 4095, 1, 1,
+    0, 4095, 1919, 1, 1, 4095, 1, 0, 3499, 4095, 4095, 4095, 1, 0, 768, 0, 1836, 1,
+    1001, 2602, 3353, 1, 1007, 4095, 1298, 2329, 1, 1, 4095, 0, 3714, 0, 0, 1, 0, 0,
+    // U plane
+    4095, 1, 1, 1, 1753, 1, 1, 4095, 1,
+    4024, 1, 0, 1, 1, 4095, 4095, 4095, 1,
+    1721, 3999, 1, 2306, 1, 4095, 852, 4095, 2860,
+    0, 4095, 1, 0, 2168, 1, 0, 1, 4095,
+    0, 0, 1050, 0, 1, 1, 1, 4095, 589,
+    4095, 1, 0, 0, 1427, 2419, 309, 4095, 1,
+    1, 1, 4095, 1, 0, 0, 4095, 2111, 1,
+    4095, 1, 710, 2455, 1363, 1, 1, 0, 1,
+    4095, 4052, 2456, 4095, 1, 4095, 4095, 3442, 2167,
+    0, 0, 1, 4095, 0, 2405, 0, 2904, 3209,
+    1043, 1, 2524, 4095, 1495, 0, 4095, 4095, 1,
+    0, 85, 4095, 3958, 1, 0, 4095, 3844, 0,
+    4095, 2945, 2169, 3612, 4095, 4095, 301, 0, 3483,
+    2516, 0, 2902, 4095, 1, 4095, 0, 1, 2402,
+    // V plane
+    1, 1, 0, 1652, 0, 0, 3167, 4095, 1,
+    1, 4095, 0, 4095, 1, 434, 1103, 4095, 0,
+    907, 1, 0, 4095, 0, 0, 0, 0, 1,
+    4095, 4095, 1, 2003, 1, 1082, 1, 1, 4095,
+    1113, 0, 1659, 0, 0, 1002, 0, 0, 3990,
+    0, 1, 0, 1, 2948, 0, 1489, 4095, 4095,
+    1, 4095, 1, 1, 1, 2093, 2901, 4095, 3901,
+    1, 4009, 4095, 576, 0, 4095, 0, 2648, 1,
+    4095, 3527, 4095, 4095, 2285, 1, 0, 0, 1,
+    1259, 2927, 0, 0, 3691, 4095, 0, 4095, 0,
+    2735, 4095, 937, 4095, 1013, 1, 1, 4095, 1,
+    4095, 1575, 0, 1, 0, 4095, 0, 4095, 2377,
+    2204, 4095, 2193, 0, 0, 4066, 4095, 0, 2220,
+    1, 3545, 1, 1, 0, 1170, 4095, 3778, 4095,
+  };
+  // clang-format on
+
+  aom_image_t img;
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I42016, 16, 1, 1,
+                               reinterpret_cast<unsigned char *>(
+                                   const_cast<unsigned short *>(kBuffer0))));
+
+  aom_codec_iface_t *iface = aom_codec_av1_cx();
+  aom_codec_enc_cfg_t cfg;
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_enc_config_default(iface, &cfg, AOM_USAGE_REALTIME));
+  cfg.rc_end_usage = AOM_CBR;
+  cfg.g_profile = 2;
+  cfg.g_bit_depth = AOM_BITS_12;
+  cfg.g_input_bit_depth = 12;
+  cfg.g_w = 16;
+  cfg.g_h = 1;
+  cfg.g_forced_max_frame_width = 18;
+  cfg.g_forced_max_frame_height = 28;
+  cfg.g_limit = 4;
+  cfg.g_lag_in_frames = 0;
+  cfg.g_threads = 40;
+  cfg.rc_min_quantizer = 57;
+  cfg.rc_max_quantizer = 63;
+  aom_codec_ctx_t enc;
+  ASSERT_EQ(AOM_CODEC_OK,
+            aom_codec_enc_init(&enc, iface, &cfg, AOM_CODEC_USE_HIGHBITDEPTH));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_control(&enc, AV1E_SET_TILE_ROWS, 5));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_control(&enc, AV1E_SET_TILE_COLUMNS, 2));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AOME_SET_NUMBER_SPATIAL_LAYERS, 4));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_control(&enc, AOME_SET_CPUUSED, 9));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AV1E_SET_COLOR_RANGE, AOM_CR_FULL_RANGE));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AOME_SET_TUNING, AOM_TUNE_IQ));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AV1E_SET_ENABLE_RESTORATION, 0));
+
+  // Encode frame
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AOME_SET_SPATIAL_LAYER_ID, 0));
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, 0));
+  aom_codec_iter_t iter = nullptr;
+  const aom_codec_cx_pkt_t *pkt = aom_codec_get_cx_data(&enc, &iter);
+  ASSERT_NE(pkt, nullptr);
+  EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  ASSERT_EQ(pkt, nullptr);
+
+  // Encode frame
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I42016, 2, 1, 1,
+                               reinterpret_cast<unsigned char *>(
+                                   const_cast<unsigned short *>(kBuffer1))));
+  cfg.g_w = 2;
+  cfg.g_h = 1;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AOME_SET_SPATIAL_LAYER_ID, 1));
+  aom_enc_frame_flags_t encode_flags =
+      AOM_EFLAG_NO_REF_GF | AOM_EFLAG_NO_REF_ARF | AOM_EFLAG_NO_REF_BWD |
+      AOM_EFLAG_NO_REF_ARF2 | AOM_EFLAG_NO_UPD_GF | AOM_EFLAG_NO_UPD_ARF;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, encode_flags));
+  iter = nullptr;
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  ASSERT_NE(pkt, nullptr);
+  EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  EXPECT_EQ(pkt, nullptr);
+
+  // Encode frame
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I42016, 2, 2, 1,
+                               reinterpret_cast<unsigned char *>(
+                                   const_cast<unsigned short *>(kBuffer2))));
+  cfg.g_w = 2;
+  cfg.g_h = 2;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AOME_SET_SPATIAL_LAYER_ID, 2));
+  encode_flags = AOM_EFLAG_NO_REF_GF | AOM_EFLAG_NO_REF_ARF |
+                 AOM_EFLAG_NO_REF_BWD | AOM_EFLAG_NO_REF_ARF2 |
+                 AOM_EFLAG_NO_UPD_GF | AOM_EFLAG_NO_UPD_ARF;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, encode_flags));
+  iter = nullptr;
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  ASSERT_NE(pkt, nullptr);
+  EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  EXPECT_EQ(pkt, nullptr);
+
+  // Encode frame
+  EXPECT_EQ(&img, aom_img_wrap(&img, AOM_IMG_FMT_I42016, 18, 28, 1,
+                               reinterpret_cast<unsigned char *>(
+                                   const_cast<unsigned short *>(kBuffer3))));
+  cfg.g_w = 18;
+  cfg.g_h = 28;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_enc_config_set(&enc, &cfg));
+  EXPECT_EQ(AOM_CODEC_OK,
+            aom_codec_control(&enc, AOME_SET_SPATIAL_LAYER_ID, 3));
+  encode_flags = AOM_EFLAG_NO_REF_GF | AOM_EFLAG_NO_REF_ARF |
+                 AOM_EFLAG_NO_REF_BWD | AOM_EFLAG_NO_REF_ARF2 |
+                 AOM_EFLAG_NO_UPD_GF | AOM_EFLAG_NO_UPD_ARF;
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, &img, 0, 1, encode_flags));
+  iter = nullptr;
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  ASSERT_NE(pkt, nullptr);
+  EXPECT_EQ(pkt->kind, AOM_CODEC_CX_FRAME_PKT);
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  EXPECT_EQ(pkt, nullptr);
+
+  // Flush encoder
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_encode(&enc, nullptr, 0, 1, 0));
+  iter = nullptr;
+  pkt = aom_codec_get_cx_data(&enc, &iter);
+  EXPECT_EQ(pkt, nullptr);
+
+  EXPECT_EQ(AOM_CODEC_OK, aom_codec_destroy(&enc));
+}
+#endif  // CONFIG_AV1_HIGHBITDEPTH
+
 }  // namespace

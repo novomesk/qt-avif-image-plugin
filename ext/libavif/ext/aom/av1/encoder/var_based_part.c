@@ -107,11 +107,11 @@ static inline void fill_variance(uint32_t s2, int32_t s, int c, VPartVar *v) {
 }
 
 static inline void get_variance(VPartVar *v) {
-  v->variance =
-      (int)(256 * (v->sum_square_error -
-                   (uint32_t)(((int64_t)v->sum_error * v->sum_error) >>
-                              v->log2_count)) >>
-            v->log2_count);
+  const uint32_t square_sum_error =
+      (uint32_t)(((int64_t)v->sum_error * v->sum_error) >> v->log2_count);
+  const int64_t variance =
+      (int64_t)256 * (v->sum_square_error - square_sum_error) >> v->log2_count;
+  v->variance = (int)variance;
 }
 
 static inline void sum_2_variances(const VPartVar *a, const VPartVar *b,
@@ -1104,7 +1104,7 @@ static inline void chroma_check(AV1_COMP *cpi, MACROBLOCK *x, BLOCK_SIZE bsize,
 
 static void fill_variance_tree_leaves(
     AV1_COMP *cpi, MACROBLOCK *x, VP128x128 *vt, PART_EVAL_STATUS *force_split,
-    int avg_16x16[][4], int maxvar_16x16[][4], int minvar_16x16[][4],
+    int64_t avg_16x16[][4], int maxvar_16x16[][4], int minvar_16x16[][4],
     int64_t *thresholds, const uint8_t *src_buf, int src_stride,
     const uint8_t *dst_buf, int dst_stride, bool is_key_frame,
     const bool is_small_sb) {
@@ -1615,7 +1615,7 @@ int av1_choose_var_based_partitioning(AV1_COMP *cpi, const TileInfo *const tile,
   int var_64x64;
   int min_var_64x64 = INT_MAX;
   int max_var_64x64 = 0;
-  int avg_16x16[4][4];
+  int64_t avg_16x16[4][4];
   int maxvar_16x16[4][4];
   int minvar_16x16[4][4];
   const uint8_t *src_buf;
